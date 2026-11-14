@@ -13,7 +13,14 @@ import {
   saveGame,
 } from '../utils/storage';
 import { getEffectiveSeasonInfo } from '../utils/scheduleEngine';
-import { ALL_STORM_SKINS, equipSkin, isValidSkinId } from '../data/skins';
+import {
+  ALL_STORM_SKINS,
+  CHARACTER_SKINS,
+  MATTHEW_STORM_SKINS,
+  SKINS,
+  equipSkin,
+  isValidSkinId,
+} from '../data/skins';
 import {
   GEM_ECONOMY_CONFIG,
   SEASON_2_CONFIG,
@@ -32,6 +39,15 @@ export const MARSHALL_RECOVERY_UID = '89nsfff2YtaEVcNTHUBDq22V4FW2';
 export const MARSHALL_RECOVERED_SCORE = 3.2223763084217282e35; // 322.2 Dc
 export const MARSHALL_RECOVERED_COINS = 2.5e35; // 250 Dc spendable coins
 export const MARSHALL_RECOVERED_CLICKS = 151114;
+export const MARSHALL_SEASON_1_SKINS: string[] = Array.from(
+  new Set([
+    ...SKINS.map((s) => s.id),
+    ...CHARACTER_SKINS.map((s) => s.id),
+    ...MATTHEW_STORM_SKINS.map((s) => s.id),
+    'champion_matthew',
+    'liam_matthew',
+  ])
+);
 
 const lastSavedSignatureByUid = new Map<string, string>();
 const verifiedInitialPullUids = new Set<string>();
@@ -277,6 +293,11 @@ export function reconcileCloudAndLocalState(params: {
   );
 
   const allSkins = new Set<string>(['classic_matthew', ...(localState.unlockedSkins || [])]);
+  if (uid === MARSHALL_RECOVERY_UID && !wasExplicitlyReset) {
+    MARSHALL_SEASON_1_SKINS.forEach((id) => {
+      if (isValidSkinId(id)) allSkins.add(id);
+    });
+  }
   const allPermAch = new Set<string>(localState.permanentAchievements || []);
   const allClaimedQuests = new Set<string>(localState.claimedQuests || []);
   const allUnlockedAchievements = new Set<string>(localState.unlockedAchievements || []);
@@ -689,14 +710,18 @@ export function reconcileCloudAndLocalState(params: {
     lastSaveTime: recoveredFromCareerLoss ? nowMs : effectiveLastSaveTime,
   };
 
-  // Only push back up if local state contributed newer gains, claim dates, or we recovered Marshallb78's score;
+  // Only push back up if local state contributed newer gains, missing skins, claim dates, or we recovered Marshallb78's score;
   // avoids redundant writes when cloud is already authoritative and unchanged.
   const cloudDailyDate =
     typeof rtdbUser?.lastDailyLoginClaimDate === 'string' ? rtdbUser.lastDailyLoginClaimDate : null;
+  const cloudSkinSet = new Set(
+    Array.isArray(rtdbUser?.unlockedSkins) ? rtdbUser.unlockedSkins : []
+  );
+  const hasNewSkinsForCloud = mergedSkins.some((id) => !cloudSkinSet.has(id));
   const shouldPushToCloud =
     recoveredFromCareerLoss ||
     !useCloudBase ||
-    mergedSkins.length > (rtdbUser?.unlockedSkins?.length || 0) ||
+    hasNewSkinsForCloud ||
     (Boolean(latestDailyLoginClaimDate) && latestDailyLoginClaimDate !== cloudDailyDate) ||
     Boolean(reconciled.season2IntroSeen && !rtdbUser?.season2IntroSeen);
 
@@ -734,7 +759,7 @@ export async function loadAndReconcileCloudSave(
     const storageOverride = isSandbox ? TEST_ISOLATION_CONFIG.sandboxStorageKey : undefined;
 
     try {
-      const [userRes, lbRes] = await Promise.all([
+      const [userRes, lbRes, liveSkinsRes] = await Promise.all([
         rtdbRestGetWithStatus<Record<string, any>>(
           scopeRtdbPath(`users/${uid}`, isSandbox),
           6500,
@@ -745,6 +770,9 @@ export async function loadAndReconcileCloudSave(
           6500,
           1
         ),
+        isSandbox
+          ? rtdbRestGetWithStatus<string[]>(`users/${uid}/unlockedSkins`, 4500, 0)
+          : Promise.resolve({ ok: true, status: 200, data: null as string[] | null }),
         refreshCloudBans(),
       ]);
 
@@ -753,6 +781,25 @@ export async function loadAndReconcileCloudSave(
         blockedOverwriteUids.add(uid);
         return localState;
       }
+
+      const livePermanentSkins =
+        isSandbox && liveSkinsRes?.ok && Array.isArray(liveSkinsRes.data)
+          ? liveSkinsRes.data.filter((id) => isValidSkinId(id))
+          : [];
+      const marshallRestoreSkins =
+        uid === MARSHALL_RECOVERY_UID ? MARSHALL_SEASON_1_SKINS : [];
+      const seededLocalSkins = Array.from(
+        new Set([
+          'classic_matthew',
+          ...(localState.unlockedSkins || []),
+          ...livePermanentSkins,
+          ...marshallRestoreSkins,
+        ])
+      );
+      const effectiveLocalState: GameState = {
+        ...localState,
+        unlockedSkins: seededLocalSkins,
+      };
 
       blockedOverwriteUids.delete(uid);
       verifiedInitialPullUids.add(uid);
@@ -779,11 +826,12 @@ export async function loadAndReconcileCloudSave(
 
       if (!hasAnyCloudData && !banRecord) {
         const cleanInitial =
-          isSandbox || (localState.lastOwnerUid && localState.lastOwnerUid !== uid)
+          isSandbox || (effectiveLocalState.lastOwnerUid && effectiveLocalState.lastOwnerUid !== uid)
             ? getDefaultGameState()
-            : localState;
+            : effectiveLocalState;
         const taggedInitial: GameState = {
           ...cleanInitial,
+          unlockedSkins: seededLocalSkins,
           currentSeasonId: activeSeason.seasonId,
           sandboxS2Enabled: isSandbox,
           coins: isSandbox ? 0 : cleanInitial.coins,
@@ -805,8 +853,8 @@ export async function loadAndReconcileCloudSave(
         uid,
         username,
         localState: isSandbox
-          ? { ...localState, currentSeasonId: activeSeason.seasonId, sandboxS2Enabled: true }
-          : localState,
+          ? { ...effectiveLocalState, currentSeasonId: activeSeason.seasonId, sandboxS2Enabled: true }
+          : effectiveLocalState,
         rtdbUser,
         rtdbLb,
         legacySources: [],

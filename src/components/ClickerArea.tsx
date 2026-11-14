@@ -21,7 +21,6 @@ import {
 } from '../utils/calculations';
 import { MatthewStormState } from '../utils/scheduleEngine';
 import { MATTHEW_STORM_CONFIG } from '../config/gameConfig';
-import { BALANCE } from '../data/balance';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { EnvironmentBackground } from './EnvironmentBackground';
@@ -413,12 +412,6 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       ? Math.max(0, MATTHEW_STORM_CONFIG.giantMatthewMaxClicksPerWave - giantWaveClicks.clicks)
       : 0;
 
-  const comboPercent = Math.min(
-    100,
-    Math.floor(((state.combo || 0) / BALANCE.click.comboMax) * 100)
-  );
-  const comboBonusPct = Math.round((state.combo || 0) * BALANCE.click.comboBonusPerStack * 100);
-
   const isSeason2 = isSeasonTwoOrLater(state.currentSeasonId);
   const skinBgTheme = getSkinBackgroundTheme(equippedSkin);
 
@@ -775,29 +768,9 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           )}
         </div>
 
-        {/* LIVE COMBO & CRIT METER BAR */}
-        <div className="mt-2 flex flex-col items-center gap-1 bg-black/45 backdrop-blur-md px-3.5 py-1.5 rounded-xl shadow-lg w-full max-w-xs">
-          <div className="flex items-center justify-between w-full text-[11px] font-black">
-            <span className="flex items-center gap-1 text-cyan-300">
-              <Flame
-                className={`w-3.5 h-3.5 ${
-                  state.combo > 0 ? 'text-amber-400 animate-pulse' : 'text-slate-500'
-                }`}
-              />
-              <span>
-                Combo {state.combo}× (+{comboBonusPct}% Click)
-              </span>
-            </span>
-            <span className="text-amber-300 font-mono">
-              {Math.round(critChance * 100)}% Crit ({critMultiplier}×)
-            </span>
-          </div>
-          <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-amber-400 to-rose-500 transition-all duration-150"
-              style={{ width: `${comboPercent}%` }}
-            />
-          </div>
+        {/* CRIT STAT BADGE */}
+        <div className="mt-2 flex items-center justify-center bg-black/45 backdrop-blur-md px-3.5 py-1 rounded-xl shadow-lg text-[11px] font-black text-amber-300 font-mono">
+          {Math.round(critChance * 100)}% Crit ({critMultiplier}×)
         </div>
 
         {/* NEXT SKIN GOAL MILESTONE PROGRESS BAR (CLICK TO VIEW MYSTERY SKIN NAMES LADDER) */}

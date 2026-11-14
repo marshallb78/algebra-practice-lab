@@ -98,9 +98,9 @@ export const MATTHEW_STORM_CONFIG = {
 export const CLICK_SAFETY_CONFIG = {
   /** Maximum human/assisted clicks accepted per second to prevent script abuse */
   maxClicksPerSecond: 30,
-  comboMax: 30,
-  comboStepBonus: 0.02, // Up to +60% at 30x combo
-  comboDecaySeconds: 1.8,
+  comboMax: 0,
+  comboStepBonus: 0,
+  comboDecaySeconds: 0,
   baseCritChance: 0.06,
   baseCritMultiplier: 3.0,
 };

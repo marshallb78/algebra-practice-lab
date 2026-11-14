@@ -9,9 +9,9 @@ export const BALANCE = {
     basePower: 1,
     baseCritChance: 0.06, // 6% base crit chance
     baseCritMultiplier: 3.0, // 3x damage on critical hit!
-    comboMax: 30, // Up to 30x combo meter
-    comboBonusPerStack: 0.02, // +2% click power per combo stack (up to +60% at 30 combo!)
-    comboTimerResetSec: 1.8, // Generous window to sustain combo
+    comboMax: 0, // Fast-click combo bonus removed
+    comboBonusPerStack: 0, // No speed-based click multiplier
+    comboTimerResetSec: 0,
   },
 
   // --- PASSIVE INCOME & TIMERS ---
@@ -44,7 +44,7 @@ export const BALANCE = {
 
   // --- PRESTIGE (COSMIC ASCENSION) ---
   prestige: {
-    baseShardRequirement: 1000000, // 1 Million lifetime coins for 1st Rebirth
-    unspentShardBonus: 0.05, // +0.05x per Rebirth step
+    baseShardRequirement: 250000, // 250K lifetime coins for 1st Rebirth
+    unspentShardBonus: 0.055, // +0.055x per Rebirth step
   },
 } as const;

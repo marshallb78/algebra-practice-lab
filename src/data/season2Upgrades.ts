@@ -116,10 +116,10 @@ const S2_UPGRADE_SPECS: UpgradeSpecSeed[] = [
   { id: 's2_vg_omega_apocalypse', iconNum: '96', name: 'Vigintillion Frost Chronosphere', description: 'Ultimate Vg (10^63) cosmic clock mastering frozen time.', focus: 'hybrid' },
 ];
 
-const START_COST = 15;
+const START_COST = 25;
 const END_COST = 2.5e63;
 const TOTAL_STEPS = S2_UPGRADE_SPECS.length - 1;
-const STEP_RATIO = Math.pow(END_COST / START_COST, 1 / TOTAL_STEPS); // Smooth ~4.45x spacing per tier!
+const STEP_RATIO = Math.pow(END_COST / START_COST, 1 / TOTAL_STEPS); // Smooth spacing per tier!
 
 function formatNiceCost(raw: number): number {
   if (raw < 100) return Math.round(raw);
@@ -134,8 +134,8 @@ function formatNiceCost(raw: number): number {
  */
 export const SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => {
   const baseCost = idx === TOTAL_STEPS ? END_COST : formatNiceCost(START_COST * Math.pow(STEP_RATIO, idx));
-  // Smooth ~55s-420s base ROI curve so upgrades don't exponentially auto-unlock the whole tree in minutes
-  const powerAnchor = Math.max(1, Math.round(baseCost / (55 + idx * 3.8)));
+  // Balanced ROI curve (~80s-560s base payback) so Season 2 progression feels earned
+  const powerAnchor = Math.max(1, Math.round(baseCost / (80 + idx * 4.8)));
   const iconFallback =
     spec.focus === 'click' ? 'Sword' : spec.focus === 'cps' ? 'Zap' : 'Snowflake';
 
@@ -146,7 +146,7 @@ export const SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => 
     icon: iconFallback,
     iconImage: `./images/s2/upgrades/up_${spec.iconNum}.png`,
     baseCost,
-    costMultiplier: Number((1.14 + Math.min(0.14, idx * 0.0014)).toFixed(3)),
+    costMultiplier: Number((1.17 + Math.min(0.15, idx * 0.0015)).toFixed(3)),
     baseCps:
       spec.focus === 'click'
         ? 0

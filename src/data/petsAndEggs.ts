@@ -468,8 +468,8 @@ export function rollChestLoot(
   hasMatthewShopToken: boolean,
   rng: () => number = Math.random
 ): ChestLootResult {
-  // Chests drop Gems (always), Bonus Coins, Eggs (~22% chance — not every chest!), and 1-in-1000 Matthew Shop Token!
-  const foundEgg = rng() < 0.22;
+  // Chests drop Gems (always), Bonus Coins, Eggs (~1 in 3 chests / ~33.3%), and 1-in-1000 Matthew Shop Token!
+  const foundEgg = rng() < 1 / 3;
   const eggRarity = foundEgg ? pickWeightedEgg(rng, rng() < 0.35 ? 1 : 0) : null;
   const gems = foundEgg ? 8 + Math.floor(rng() * 14) : 14 + Math.floor(rng() * 20);
   const coins = foundEgg

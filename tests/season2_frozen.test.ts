@@ -665,7 +665,7 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(tokenValidated.unlockedCursors?.length).toBe(11);
   });
 
-  it('carries gems across seasonal rollover, drops chest eggs much less often (~22%), and uses custom crate artwork', () => {
+  it('carries gems across seasonal rollover, drops chest eggs ~1 in 3 chests (~33%), and uses custom crate artwork', () => {
     const prevState = {
       ...getDefaultGameState(),
       currentSeasonId: 'season_1',
@@ -687,7 +687,7 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(top10OnlyState.unlockedSkins).toContain('liam_matthew');
     expect(top10OnlyState.unlockedSkins).not.toContain('champion_matthew');
 
-    // Chest loot drops eggs only ~22% of the time instead of every chest
+    // Chest loot drops eggs ~1 every 3 chests (~33.3%)
     let eggDrops = 0;
     for (let i = 0; i < 1000; i++) {
       const r1 = (i + 0.5) / 1000;
@@ -699,8 +699,8 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
         expect(loot.gems).toBeGreaterThanOrEqual(14);
       }
     }
-    expect(eggDrops).toBeGreaterThan(150);
-    expect(eggDrops).toBeLessThan(320);
+    expect(eggDrops).toBeGreaterThan(290);
+    expect(eggDrops).toBeLessThan(380);
 
     // Custom crate transparent artwork paths
     expect(CRATE_DEFINITIONS.normal.image).toBe('./images/s2/crates/normal_crate.png');

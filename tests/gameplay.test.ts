@@ -49,6 +49,7 @@ import {
   MARSHALL_RECOVERY_UID,
   MARSHALL_RECOVERED_SCORE,
   MARSHALL_RECOVERED_COINS,
+  MARSHALL_SEASON_1_SKINS,
   isProgressSnapshotBetter,
   reconcileCloudAndLocalState,
 } from '../src/firebase/cloudSave';
@@ -102,43 +103,47 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(maxInfo.totalCost).toBeLessThanOrEqual(coins);
     });
 
-    it('scales click power and CPS with faster Ascension Multiplier (+0.6 per step) and Friday 4x Live Event', () => {
+    it('scales click power and CPS with balanced Ascension Multiplier (+0.055 per step), disables fast-click combo bonus, and applies Friday 4x Live Event', () => {
       state.upgrades['finger_exercise'] = 10; // base click = 1 + 10*0.5 = 6, base CPS = 10*0.2 = 2
       state.upgrades['energy_coffee'] = 10; // base CPS = 2 + 10*0.5 = 7, +10*1.5 = 15 click power -> total base click = 21
-      state.prestigeShards = 12; // Ascension Multiplier = 1 + 12 * 0.6 = 8.2x
+      state.prestigeShards = 12; // Ascension Multiplier = 1 + 12 * 0.055 = 1.66x
+      state.combo = 30; // Fast-clicking combo bonus is disabled -> must stay 1.0x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
-      expect(normalClick.ascensionMultiplier).toBeCloseTo(8.2);
-      expect(normalClick.totalPower).toBeCloseTo(172.2); // 21 * 8.2x
-      expect(normalCps).toBeCloseTo(57.4); // 7 * 8.2x
+      expect(normalClick.comboMultiplier).toBe(1.0);
+      expect(normalClick.ascensionMultiplier).toBeCloseTo(1.66);
+      expect(normalClick.totalPower).toBeCloseTo(34.86); // 21 * 1.66x
+      expect(normalCps).toBeCloseTo(11.62); // 7 * 1.66x
 
       // Friday All-Day Live Event = 4x multiplier
       const liveOpts = { fridayBonusActive: false, stormWaveMultiplier: 4 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBeCloseTo(688.8); // 172.2 * 4
-      expect(boostedCps).toBeCloseTo(229.6); // 57.4 * 4
+      expect(boostedClick.totalPower).toBeCloseTo(139.44); // 34.86 * 4
+      expect(boostedCps).toBeCloseTo(46.48); // 11.62 * 4
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
     });
   });
 
-  describe('Rebirth (Faster Ascension Multiplier: +0.6 per step)', () => {
-    it('returns 0 bonus if lifetime coins are below requirement (100K)', () => {
+  describe('Rebirth (Balanced Ascension Multiplier: +0.055 per step, ~3x at 37 shards)', () => {
+    it('returns 0 bonus if lifetime coins are below requirement (250K)', () => {
       expect(calculatePrestigeShards(50000)).toBe(0);
       expect(getAscensionMultiplier(0)).toBe(1);
     });
 
-    it('calculates Ascension Multiplier bonus in +0.6 steps starting at 100K and scales fast', () => {
-      expect(calculatePrestigeShards(100000)).toBe(1);
-      expect(calculatePrestigeShards(1000000)).toBe(6);
-      expect(getAscensionMultiplier(1)).toBe(1.6);
-      expect(getAscensionMultiplier(2)).toBe(2.2);
+    it('calculates Ascension Multiplier bonus in +0.055 steps starting at 250K (~3.04x where 0.6 was ~23x)', () => {
+      expect(calculatePrestigeShards(250000)).toBe(1);
+      expect(calculatePrestigeShards(2500000)).toBe(6);
+      expect(getAscensionMultiplier(1)).toBe(1.05);
+      expect(getAscensionMultiplier(2)).toBe(1.11);
+      expect(getAscensionMultiplier(37)).toBeCloseTo(3.04, 2);
       const qaShards = calculatePrestigeShards(1e15);
-      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(20.0);
+      expect(getAscensionMultiplier(qaShards)).toBeLessThan(4.5);
+      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(3.0);
     });
   });
 
@@ -464,6 +469,24 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(recovered.state.seasonalScore).toBe(Math.floor(MARSHALL_RECOVERED_SCORE));
       expect(recovered.state.coins).toBeGreaterThanOrEqual(MARSHALL_RECOVERED_COINS);
       expect(recovered.state.clicks).toBe(151114);
+      MARSHALL_SEASON_1_SKINS.forEach((skinId) => {
+        expect(recovered.state.unlockedSkins).toContain(skinId);
+      });
+
+      // Even in Season 2 sandbox, Marshallb78 keeps all Season 1 skins
+      const s2Marshall = reconcileCloudAndLocalState({
+        uid: MARSHALL_RECOVERY_UID,
+        username: 'Marshallb78',
+        localState: getDefaultGameState(),
+        rtdbUser: null,
+        rtdbLb: null,
+        wasExplicitlyReset: false,
+        resetAtMs: 0,
+        activeSeasonId: 'season_2',
+      });
+      MARSHALL_SEASON_1_SKINS.forEach((skinId) => {
+        expect(s2Marshall.state.unlockedSkins).toContain(skinId);
+      });
 
       // Once recovered (>= MARSHALL_RECOVERED_SCORE), Rebirthing to 0 coins must stay 0 coins!
       const afterRebirth = reconcileCloudAndLocalState({

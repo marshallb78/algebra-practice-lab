@@ -103,9 +103,8 @@ export function calculateClickPower(
   // Capybara Clicker style Ascension Multiplier: multiplies EVERYTHING
   const ascensionMultiplier = getAscensionMultiplier(state.prestigeShards) + cursorAscensionBonus;
 
-  // Combo multiplier
-  const effectiveCombo = Math.min(state.combo, BALANCE.click.comboMax);
-  const comboMultiplier = 1 + effectiveCombo * BALANCE.click.comboBonusPerStack;
+  // Fast-click combo bonus disabled (1.0x constant)
+  const comboMultiplier = 1.0;
 
   // Frenzy Multiplier
   const frenzyMult = state.frenzyTimer > 0 ? state.frenzyMultiplier : 1.0;

@@ -1167,7 +1167,7 @@ export function App() {
     let autoClaimedQuestsNow: { title: string; rewardGems: number; rewardCoins: number }[] = [];
 
     setState((prev) => {
-      const nextCombo = isClick ? Math.min(prev.combo + 1, BALANCE.click.comboMax) : prev.combo;
+      const nextCombo = 0;
       const baseNext: GameState = {
         ...prev,
         coins: prev.coins + amount,
@@ -1179,8 +1179,8 @@ export function App() {
           : prev.lifetimeAllSeasonsClicks,
         criticalClicks: isCrit ? prev.criticalClicks + 1 : prev.criticalClicks,
         combo: nextCombo,
-        maxComboReached: Math.max(prev.maxComboReached || 0, nextCombo),
-        comboTimer: isClick ? BALANCE.click.comboTimerResetSec : prev.comboTimer,
+        maxComboReached: prev.maxComboReached || 0,
+        comboTimer: 0,
         lastActiveInputTimestamp: Date.now(),
       };
 
@@ -1318,8 +1318,22 @@ export function App() {
         setShowIntroCutscene(true);
       }
       setState((prev) => {
+        const mergedSkins = Array.from(
+          new Set([
+            ...(s2Local.unlockedSkins || ['classic_matthew']),
+            ...(prev.unlockedSkins || ['classic_matthew']),
+          ])
+        );
         const next: GameState = {
           ...s2Local,
+          unlockedSkins: mergedSkins,
+          equippedSkin: mergedSkins.includes(s2Local.equippedSkin)
+            ? s2Local.equippedSkin
+            : prev.equippedSkin,
+          winnerBadges:
+            Array.isArray(prev.winnerBadges) && prev.winnerBadges.length > 0
+              ? prev.winnerBadges
+              : s2Local.winnerBadges,
           currentSeasonId: 'season_2',
           sandboxS2Enabled: true,
           lastSaveTime: Date.now(),
@@ -1331,12 +1345,23 @@ export function App() {
       handleNotify('SEASON 2 PREVIEW ON', 'Entered isolated Season 2 preview.');
     } else {
       const s1Local = loadGame();
-      setState((prev) => ({
-        ...s1Local,
-        sandboxS2Enabled: false,
-        lastSaveTime: Date.now(),
-        cloudAccount: prev.cloudAccount,
-      }));
+      setState((prev) => {
+        const mergedS1Skins = Array.from(
+          new Set([
+            ...(s1Local.unlockedSkins || ['classic_matthew']),
+            ...(prev.unlockedSkins || []),
+          ])
+        );
+        const next: GameState = {
+          ...s1Local,
+          unlockedSkins: mergedS1Skins,
+          sandboxS2Enabled: false,
+          lastSaveTime: Date.now(),
+          cloudAccount: prev.cloudAccount,
+        };
+        saveGame(next);
+        return next;
+      });
       handleNotify('SEASON 2 PREVIEW OFF', 'Returned to Season Downtime.');
     }
   };
