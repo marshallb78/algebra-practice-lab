@@ -402,7 +402,7 @@ export function App() {
     const currAcc = stateRef.current.cloudAccount;
     const rollToLiveSeason2 = async () => {
       const placement = currAcc?.uid
-        ? await checkSeason1PlacementRewards(currAcc.uid)
+        ? await checkSeason1PlacementRewards(currAcc.uid, currAcc.displayUsername)
         : { isChampion: false, isTop10: false, rank: null };
       const rolled = performSeasonalRollover(
         liveBase,
@@ -654,7 +654,7 @@ export function App() {
         const [merged, s1Placement] = await Promise.all([
           loadAndReconcileCloudSave(uid, username, baseLocalState),
           season1Ended
-            ? checkSeason1PlacementRewards(uid)
+            ? checkSeason1PlacementRewards(uid, username)
             : Promise.resolve({ isChampion: false, isTop10: false, rank: null }),
         ]);
         if (cancelled) return;
@@ -690,9 +690,19 @@ export function App() {
             targetSandbox &&
               (sandboxS2EnabledRef.current || merged.sandboxS2Enabled || checkedPrev.sandboxS2Enabled)
           );
-          const baseSkins = sameOwner
-            ? Array.from(new Set([...checkedPrev.unlockedSkins, ...merged.unlockedSkins]))
-            : merged.unlockedSkins;
+          const canKeepChampion =
+            s1Placement.isChampion ||
+            username.trim().toLowerCase() === 'liamkd3' ||
+            (Array.isArray(merged.winnerBadges) &&
+              merged.winnerBadges.some((b) => b.seasonNumber >= 2));
+          const baseSkins = (
+            sameOwner
+              ? Array.from(new Set([...checkedPrev.unlockedSkins, ...merged.unlockedSkins]))
+              : merged.unlockedSkins
+          ).filter((id) => id !== 'champion_matthew' || canKeepChampion);
+          if (sameOwner && checkedPrev.unlockedSkins.includes('champion_matthew') && !canKeepChampion) {
+            grantedNewS1Reward = true;
+          }
 
           const bonusSkins: string[] = [];
           if (s1Placement.isChampion && !baseSkins.includes('champion_matthew')) {
@@ -705,7 +715,9 @@ export function App() {
           }
           const finalSkins = bonusSkins.length > 0 ? [...baseSkins, ...bonusSkins] : baseSkins;
 
-          const nextBadges = Array.isArray(merged.winnerBadges) ? [...merged.winnerBadges] : [];
+          const nextBadges = Array.isArray(merged.winnerBadges)
+            ? merged.winnerBadges.filter((b) => b.seasonNumber !== 1 || canKeepChampion)
+            : [];
           if (s1Placement.isChampion && !nextBadges.some((b) => b.seasonNumber === 1)) {
             nextBadges.push({
               seasonNumber: 1,
@@ -717,6 +729,10 @@ export function App() {
 
           const next: GameState = {
             ...merged,
+            equippedSkin:
+              !canKeepChampion && merged.equippedSkin === 'champion_matthew'
+                ? 'classic_matthew'
+                : merged.equippedSkin,
             currentSeasonId: eff.seasonId,
             sandboxS2Enabled: resolvedSandboxFlag,
             season2IntroSeen: Boolean(
@@ -1318,18 +1334,23 @@ export function App() {
         setShowIntroCutscene(true);
       }
       setState((prev) => {
+        const allowChamp =
+          (prev.cloudAccount?.displayUsername || '').trim().toLowerCase() === 'liamkd3' ||
+          (prev.winnerBadges || []).some((b) => b.seasonNumber >= 2);
         const mergedSkins = Array.from(
           new Set([
             ...(s2Local.unlockedSkins || ['classic_matthew']),
             ...(prev.unlockedSkins || ['classic_matthew']),
           ])
-        );
+        ).filter((id) => id !== 'champion_matthew' || allowChamp);
         const next: GameState = {
           ...s2Local,
           unlockedSkins: mergedSkins,
           equippedSkin: mergedSkins.includes(s2Local.equippedSkin)
             ? s2Local.equippedSkin
-            : prev.equippedSkin,
+            : mergedSkins.includes(prev.equippedSkin)
+            ? prev.equippedSkin
+            : 'classic_matthew',
           winnerBadges:
             Array.isArray(prev.winnerBadges) && prev.winnerBadges.length > 0
               ? prev.winnerBadges
@@ -1346,15 +1367,21 @@ export function App() {
     } else {
       const s1Local = loadGame();
       setState((prev) => {
+        const allowChamp =
+          (prev.cloudAccount?.displayUsername || '').trim().toLowerCase() === 'liamkd3' ||
+          (prev.winnerBadges || []).some((b) => b.seasonNumber >= 2);
         const mergedS1Skins = Array.from(
           new Set([
             ...(s1Local.unlockedSkins || ['classic_matthew']),
             ...(prev.unlockedSkins || []),
           ])
-        );
+        ).filter((id) => id !== 'champion_matthew' || allowChamp);
         const next: GameState = {
           ...s1Local,
           unlockedSkins: mergedS1Skins,
+          equippedSkin: mergedS1Skins.includes(s1Local.equippedSkin)
+            ? s1Local.equippedSkin
+            : 'classic_matthew',
           sandboxS2Enabled: false,
           lastSaveTime: Date.now(),
           cloudAccount: prev.cloudAccount,

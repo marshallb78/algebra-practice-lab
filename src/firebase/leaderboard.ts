@@ -400,25 +400,34 @@ export interface SeasonPlacementRewards {
   rank: number | null;
 }
 
+export const SEASON_1_CHAMPION_USERNAME = 'liamkd3';
+
 /**
- * Evaluates a player's official Season 1 final placement (filtering banned/excluded accounts)
- * so #1 automatically earns Champion + Liam and Top 10 (#1-#10) automatically earn Liam.
+ * Evaluates a player's official Season 1 final placement:
+ * - World Champion (`champion_matthew` + Season 1 Winner badge) is strictly reserved for `liamkd3`.
+ * - Top 10 (#1-#10) earn `liam_matthew`.
  */
 export async function checkSeason1PlacementRewards(
-  uid?: string | null
+  uid?: string | null,
+  username?: string | null
 ): Promise<SeasonPlacementRewards> {
   if (!uid) return { isChampion: false, isTop10: false, rank: null };
+  const passedUsername = (username || '').trim().toLowerCase();
   try {
     const standings = await fetchWorldwideLeaderboard('season_1', 25, false);
     const idx = standings.findIndex((entry) => entry.uid === uid);
-    if (idx < 0) return { isChampion: false, isTop10: false, rank: null };
-    const rank = idx + 1;
+    const matchedEntry = idx >= 0 ? standings[idx] : null;
+    const resolvedUsername = (passedUsername || matchedEntry?.username || '').trim().toLowerCase();
+    const isChampion = resolvedUsername === SEASON_1_CHAMPION_USERNAME;
+    const rank = idx >= 0 ? idx + 1 : null;
+    const isTop10 = isChampion || (rank !== null && rank <= 10);
     return {
-      isChampion: rank === 1,
-      isTop10: rank <= 10,
+      isChampion,
+      isTop10,
       rank,
     };
   } catch {
-    return { isChampion: false, isTop10: false, rank: null };
+    const isChampion = passedUsername === SEASON_1_CHAMPION_USERNAME;
+    return { isChampion, isTop10: isChampion, rank: null };
   }
 }

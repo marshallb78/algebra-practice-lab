@@ -28,6 +28,7 @@ import {
   isSandboxSeason2Context,
 } from '../config/gameConfig';
 import {
+  SEASON_1_CHAMPION_USERNAME,
   updateLeaderboardEntry,
   updateLeaderboardEntryKeepalive,
 } from './leaderboard';
@@ -44,7 +45,6 @@ export const MARSHALL_SEASON_1_SKINS: string[] = Array.from(
     ...SKINS.map((s) => s.id),
     ...CHARACTER_SKINS.map((s) => s.id),
     ...MATTHEW_STORM_SKINS.map((s) => s.id),
-    'champion_matthew',
     'liam_matthew',
   ])
 );
@@ -442,6 +442,17 @@ export function reconcileCloudAndLocalState(params: {
     }
   }
 
+  const normalizedUsername = (params.username || rtdbUser?.username || '').trim().toLowerCase();
+  const hasFutureSeasonWin = [
+    ...(Array.isArray(localState.winnerBadges) ? localState.winnerBadges : []),
+    ...(Array.isArray(rtdbUser?.winnerBadges) ? rtdbUser.winnerBadges : []),
+  ].some((b) => typeof b?.seasonNumber === 'number' && b.seasonNumber >= 2);
+  const canHoldChampionSkin =
+    normalizedUsername === SEASON_1_CHAMPION_USERNAME || hasFutureSeasonWin;
+  if (!canHoldChampionSkin) {
+    allSkins.delete('champion_matthew');
+  }
+
   const mergedSkins = Array.from(allSkins);
   const localInActiveSeason = localState.currentSeasonId === activeSeasonId;
   const localSnap: ProgressSnapshot = localInActiveSeason
@@ -710,7 +721,7 @@ export function reconcileCloudAndLocalState(params: {
     lastSaveTime: recoveredFromCareerLoss ? nowMs : effectiveLastSaveTime,
   };
 
-  // Only push back up if local state contributed newer gains, missing skins, claim dates, or we recovered Marshallb78's score;
+  // Only push back up if local state contributed newer gains, missing skins, claim dates, removed unauthorized champion skin, or recovered Marshallb78's score;
   // avoids redundant writes when cloud is already authoritative and unchanged.
   const cloudDailyDate =
     typeof rtdbUser?.lastDailyLoginClaimDate === 'string' ? rtdbUser.lastDailyLoginClaimDate : null;
@@ -718,8 +729,12 @@ export function reconcileCloudAndLocalState(params: {
     Array.isArray(rtdbUser?.unlockedSkins) ? rtdbUser.unlockedSkins : []
   );
   const hasNewSkinsForCloud = mergedSkins.some((id) => !cloudSkinSet.has(id));
+  const hadUnauthorizedChampionInCloud =
+    !canHoldChampionSkin &&
+    (cloudSkinSet.has('champion_matthew') || rtdbUser?.equippedSkin === 'champion_matthew');
   const shouldPushToCloud =
     recoveredFromCareerLoss ||
+    hadUnauthorizedChampionInCloud ||
     !useCloudBase ||
     hasNewSkinsForCloud ||
     (Boolean(latestDailyLoginClaimDate) && latestDailyLoginClaimDate !== cloudDailyDate) ||
@@ -788,6 +803,9 @@ export async function loadAndReconcileCloudSave(
           : [];
       const marshallRestoreSkins =
         uid === MARSHALL_RECOVERY_UID ? MARSHALL_SEASON_1_SKINS : [];
+      const allowChampionHere =
+        username.trim().toLowerCase() === SEASON_1_CHAMPION_USERNAME ||
+        (localState.winnerBadges || []).some((b) => b.seasonNumber >= 2);
       const seededLocalSkins = Array.from(
         new Set([
           'classic_matthew',
@@ -795,7 +813,7 @@ export async function loadAndReconcileCloudSave(
           ...livePermanentSkins,
           ...marshallRestoreSkins,
         ])
-      );
+      ).filter((id) => id !== 'champion_matthew' || allowChampionHere);
       const effectiveLocalState: GameState = {
         ...localState,
         unlockedSkins: seededLocalSkins,
@@ -921,8 +939,28 @@ export async function loadAndReconcileCloudSave(
           ? localTokens
           : Math.max(localTokens, cloudTokens ?? 0);
 
+      const rawBadges = Array.isArray(rtdbUser?.winnerBadges)
+        ? rtdbUser.winnerBadges
+        : reconciled.winnerBadges || [];
+      const canHoldS1WinnerBadge =
+        username.trim().toLowerCase() === SEASON_1_CHAMPION_USERNAME;
+      const sanitizedBadges = rawBadges.filter(
+        (b: any) => b && (b.seasonNumber !== 1 || canHoldS1WinnerBadge)
+      );
+      const canHoldChampionFinal =
+        canHoldS1WinnerBadge ||
+        sanitizedBadges.some((b: any) => typeof b?.seasonNumber === 'number' && b.seasonNumber >= 2);
+      const filteredUnlockedSkins = canHoldChampionFinal
+        ? reconciled.unlockedSkins
+        : reconciled.unlockedSkins.filter((id) => id !== 'champion_matthew');
+
       const mergedUserFields: GameState = sanitizeAndValidateGameState({
         ...reconciled,
+        unlockedSkins: filteredUnlockedSkins,
+        equippedSkin:
+          !canHoldChampionFinal && reconciled.equippedSkin === 'champion_matthew'
+            ? 'classic_matthew'
+            : reconciled.equippedSkin,
         pets: mergedPets,
         equippedPetIds: mergedEquippedPetIds,
         sealedEggs: mergedEggs,
@@ -943,7 +981,7 @@ export async function loadAndReconcileCloudSave(
           : reconciled.unlockedCursors || [],
         equippedCursorId: rtdbUser?.equippedCursorId ?? reconciled.equippedCursorId ?? null,
         cratesOpened: Math.max(reconciled.cratesOpened || 0, Number(rtdbUser?.cratesOpened) || 0),
-        winnerBadges: Array.isArray(rtdbUser?.winnerBadges) ? rtdbUser.winnerBadges : reconciled.winnerBadges,
+        winnerBadges: sanitizedBadges,
         clanId: rtdbUser?.clanId !== undefined ? rtdbUser.clanId : reconciled.clanId,
         clanName: rtdbUser?.clanName !== undefined ? rtdbUser.clanName : reconciled.clanName,
         chestsOpened: Math.max(reconciled.chestsOpened || 0, Number(rtdbUser?.chestsOpened) || 0),

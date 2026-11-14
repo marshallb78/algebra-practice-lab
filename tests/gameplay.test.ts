@@ -43,7 +43,7 @@ import {
 } from '../src/utils/scheduleEngine';
 import { formatTime } from '../src/utils/formatters';
 import { validateUsernameFormat } from '../src/firebase/auth';
-import { isExcludedFromLeaderboard } from '../src/firebase/leaderboard';
+import { isExcludedFromLeaderboard, SEASON_1_CHAMPION_USERNAME } from '../src/firebase/leaderboard';
 import { DEFAULT_BANNED_ACCOUNTS, getCachedBanRecord, isDevAdminAccount } from '../src/firebase/moderation';
 import {
   MARSHALL_RECOVERY_UID,
@@ -469,16 +469,29 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(recovered.state.seasonalScore).toBe(Math.floor(MARSHALL_RECOVERED_SCORE));
       expect(recovered.state.coins).toBeGreaterThanOrEqual(MARSHALL_RECOVERED_COINS);
       expect(recovered.state.clicks).toBe(151114);
+      expect(MARSHALL_SEASON_1_SKINS).not.toContain('champion_matthew');
+      expect(SEASON_1_CHAMPION_USERNAME).toBe('liamkd3');
       MARSHALL_SEASON_1_SKINS.forEach((skinId) => {
         expect(recovered.state.unlockedSkins).toContain(skinId);
       });
+      expect(recovered.state.unlockedSkins).not.toContain('champion_matthew');
 
-      // Even in Season 2 sandbox, Marshallb78 keeps all Season 1 skins
+      // Even in Season 2 sandbox or if cloud previously stored champion_matthew for Marshallb78,
+      // it is stripped for non-liamkd3 accounts while preserving all other Season 1 skins
       const s2Marshall = reconcileCloudAndLocalState({
         uid: MARSHALL_RECOVERY_UID,
         username: 'Marshallb78',
-        localState: getDefaultGameState(),
-        rtdbUser: null,
+        localState: {
+          ...getDefaultGameState(),
+          unlockedSkins: ['classic_matthew', 'champion_matthew'],
+          equippedSkin: 'champion_matthew',
+        },
+        rtdbUser: {
+          uid: MARSHALL_RECOVERY_UID,
+          username: 'Marshallb78',
+          unlockedSkins: [...MARSHALL_SEASON_1_SKINS, 'champion_matthew'],
+          equippedSkin: 'champion_matthew',
+        },
         rtdbLb: null,
         wasExplicitlyReset: false,
         resetAtMs: 0,
@@ -487,6 +500,28 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       MARSHALL_SEASON_1_SKINS.forEach((skinId) => {
         expect(s2Marshall.state.unlockedSkins).toContain(skinId);
       });
+      expect(s2Marshall.state.unlockedSkins).not.toContain('champion_matthew');
+      expect(s2Marshall.state.equippedSkin).toBe('classic_matthew');
+      expect(s2Marshall.shouldPushToCloud).toBe(true);
+
+      // liamkd3 retains champion_matthew across reconciliation
+      const liamChamp = reconcileCloudAndLocalState({
+        uid: 'liamkd3_uid',
+        username: 'liamkd3',
+        localState: getDefaultGameState(),
+        rtdbUser: {
+          uid: 'liamkd3_uid',
+          username: 'liamkd3',
+          unlockedSkins: ['classic_matthew', 'champion_matthew'],
+          equippedSkin: 'champion_matthew',
+        },
+        rtdbLb: null,
+        wasExplicitlyReset: false,
+        resetAtMs: 0,
+        activeSeasonId: 'season_2',
+      });
+      expect(liamChamp.state.unlockedSkins).toContain('champion_matthew');
+      expect(liamChamp.state.equippedSkin).toBe('champion_matthew');
 
       // Once recovered (>= MARSHALL_RECOVERED_SCORE), Rebirthing to 0 coins must stay 0 coins!
       const afterRebirth = reconcileCloudAndLocalState({
