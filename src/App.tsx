@@ -7,7 +7,12 @@ import {
   performBetaWipeIfDue,
   performSeasonalRollover,
 } from './utils/storage';
-import { equipSkin, getSkinById, checkAndApplyMilestoneUnlocks } from './data/skins';
+import {
+  equipSkin,
+  getSkinById,
+  checkAndApplyMilestoneUnlocks,
+  isSeason2OnlySkinId,
+} from './data/skins';
 import { ALL_CURSORS, getCursorById } from './data/cursors';
 import { CRATE_DEFINITIONS, CrateOpenResult, CrateType, rollCrateReward } from './data/crates';
 import { MATTHEW_VAULT_SKINS } from './data/season2Skins';
@@ -118,19 +123,13 @@ interface Toast {
 }
 
 function getBootInitialState(): GameState {
+  // Pre-Monday Season 2 dev preview must completely reset on every reload; never boot into sandbox storage.
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      const s2Raw = window.localStorage.getItem(TEST_ISOLATION_CONFIG.sandboxStorageKey);
-      if (s2Raw) {
-        const parsedS2 = JSON.parse(s2Raw);
-        const s2Uid = parsedS2?.cloudAccount?.uid;
-        if (isSandboxSeason2Context(s2Uid, Boolean(parsedS2?.sandboxS2Enabled), Date.now())) {
-          return loadSandboxGame();
-        }
-      }
+      window.localStorage.removeItem(TEST_ISOLATION_CONFIG.sandboxStorageKey);
     }
   } catch {
-    // ignore boot storage inspection error
+    // ignore boot storage cleanup error
   }
   return loadGame();
 }
@@ -695,12 +694,20 @@ export function App() {
             username.trim().toLowerCase() === 'liamkd3' ||
             (Array.isArray(merged.winnerBadges) &&
               merged.winnerBadges.some((b) => b.seasonNumber >= 2));
-          const baseSkins = (
-            sameOwner
-              ? Array.from(new Set([...checkedPrev.unlockedSkins, ...merged.unlockedSkins]))
-              : merged.unlockedSkins
-          ).filter((id) => id !== 'champion_matthew' || canKeepChampion);
-          if (sameOwner && checkedPrev.unlockedSkins.includes('champion_matthew') && !canKeepChampion) {
+          const stripPreLaunchS2 =
+            !targetSandbox && Date.now() < SEASON_2_CONFIG.launchTimeMs;
+          const rawCombinedSkins = sameOwner
+            ? Array.from(new Set([...checkedPrev.unlockedSkins, ...merged.unlockedSkins]))
+            : merged.unlockedSkins;
+          const baseSkins = rawCombinedSkins.filter(
+            (id) =>
+              (id !== 'champion_matthew' || canKeepChampion) &&
+              (!stripPreLaunchS2 || !isSeason2OnlySkinId(id))
+          );
+          if (
+            (sameOwner && checkedPrev.unlockedSkins.includes('champion_matthew') && !canKeepChampion) ||
+            (stripPreLaunchS2 && rawCombinedSkins.some((id) => isSeason2OnlySkinId(id)))
+          ) {
             grantedNewS1Reward = true;
           }
 
@@ -727,12 +734,16 @@ export function App() {
             grantedNewS1Reward = true;
           }
 
+          const nextEquippedSkin =
+            (!canKeepChampion && merged.equippedSkin === 'champion_matthew') ||
+            (stripPreLaunchS2 && isSeason2OnlySkinId(merged.equippedSkin)) ||
+            !finalSkins.includes(merged.equippedSkin)
+              ? 'classic_matthew'
+              : merged.equippedSkin;
+
           const next: GameState = {
             ...merged,
-            equippedSkin:
-              !canKeepChampion && merged.equippedSkin === 'champion_matthew'
-                ? 'classic_matthew'
-                : merged.equippedSkin,
+            equippedSkin: nextEquippedSkin,
             currentSeasonId: eff.seasonId,
             sandboxS2Enabled: resolvedSandboxFlag,
             season2IntroSeen: Boolean(
@@ -1325,68 +1336,77 @@ export function App() {
       if (sandboxS2Enabled) return;
     }
     const turningOn = !sandboxS2Enabled;
-    saveGame(stateRef.current);
+    // Save live Season 1 / Downtime progress before switching into ephemeral Season 2 preview
+    if (turningOn) {
+      saveGame({ ...stateRef.current, sandboxS2Enabled: false }, true);
+    }
     sandboxS2EnabledRef.current = turningOn;
     setSandboxS2Enabled(turningOn);
     if (turningOn) {
-      const s2Local = loadSandboxGame();
-      if (!s2Local.introCutsceneSeen && !s2Local.season2IntroSeen) {
+      const s2Fresh = loadSandboxGame();
+      if (!s2Fresh.introCutsceneSeen && !s2Fresh.season2IntroSeen) {
         setShowIntroCutscene(true);
       }
       setState((prev) => {
         const allowChamp =
           (prev.cloudAccount?.displayUsername || '').trim().toLowerCase() === 'liamkd3' ||
           (prev.winnerBadges || []).some((b) => b.seasonNumber >= 2);
-        const mergedSkins = Array.from(
-          new Set([
-            ...(s2Local.unlockedSkins || ['classic_matthew']),
-            ...(prev.unlockedSkins || ['classic_matthew']),
-          ])
-        ).filter((id) => id !== 'champion_matthew' || allowChamp);
+        // Only carry over legitimate pre-Season-2 live items (never leaked Season 2 skins/coins/pets)
+        const carrySkins = Array.from(
+          new Set(['classic_matthew', ...(prev.unlockedSkins || [])])
+        ).filter(
+          (id) => !isSeason2OnlySkinId(id) && (id !== 'champion_matthew' || allowChamp)
+        );
+        const carryEquipped = carrySkins.includes(prev.equippedSkin)
+          ? prev.equippedSkin
+          : 'classic_matthew';
         const next: GameState = {
-          ...s2Local,
-          unlockedSkins: mergedSkins,
-          equippedSkin: mergedSkins.includes(s2Local.equippedSkin)
-            ? s2Local.equippedSkin
-            : mergedSkins.includes(prev.equippedSkin)
-            ? prev.equippedSkin
-            : 'classic_matthew',
-          winnerBadges:
-            Array.isArray(prev.winnerBadges) && prev.winnerBadges.length > 0
-              ? prev.winnerBadges
-              : s2Local.winnerBadges,
+          ...s2Fresh,
+          gems: prev.gems || 0,
+          lifetimeGems: prev.lifetimeGems || 0,
+          unlockedSkins: carrySkins,
+          equippedSkin: carryEquipped,
+          winnerBadges: Array.isArray(prev.winnerBadges) ? prev.winnerBadges : [],
+          permanentAchievements: Array.isArray(prev.permanentAchievements)
+            ? prev.permanentAchievements
+            : [],
+          seasonHistory: Array.isArray(prev.seasonHistory) ? prev.seasonHistory : [],
+          settings: prev.settings || s2Fresh.settings,
           currentSeasonId: 'season_2',
           sandboxS2Enabled: true,
+          lastOwnerUid: prev.lastOwnerUid,
           lastSaveTime: Date.now(),
           cloudAccount: prev.cloudAccount,
         };
-        saveGame(next);
         return next;
       });
-      handleNotify('SEASON 2 PREVIEW ON', 'Entered isolated Season 2 preview.');
+      handleNotify('SEASON 2 PREVIEW ON', 'Entered ephemeral Season 2 preview (resets on reload).');
     } else {
       const s1Local = loadGame();
       setState((prev) => {
         const allowChamp =
           (prev.cloudAccount?.displayUsername || '').trim().toLowerCase() === 'liamkd3' ||
           (prev.winnerBadges || []).some((b) => b.seasonNumber >= 2);
-        const mergedS1Skins = Array.from(
-          new Set([
-            ...(s1Local.unlockedSkins || ['classic_matthew']),
-            ...(prev.unlockedSkins || []),
-          ])
-        ).filter((id) => id !== 'champion_matthew' || allowChamp);
+        const stripS2 = Date.now() < SEASON_2_CONFIG.launchTimeMs;
+        // Never copy Season 2 preview skins or scores back into live Season 1 / Downtime state
+        const cleanS1Skins = Array.from(
+          new Set(['classic_matthew', ...(s1Local.unlockedSkins || [])])
+        ).filter(
+          (id) =>
+            (id !== 'champion_matthew' || allowChamp) &&
+            (!stripS2 || !isSeason2OnlySkinId(id))
+        );
         const next: GameState = {
           ...s1Local,
-          unlockedSkins: mergedS1Skins,
-          equippedSkin: mergedS1Skins.includes(s1Local.equippedSkin)
+          unlockedSkins: cleanS1Skins,
+          equippedSkin: cleanS1Skins.includes(s1Local.equippedSkin)
             ? s1Local.equippedSkin
             : 'classic_matthew',
           sandboxS2Enabled: false,
           lastSaveTime: Date.now(),
           cloudAccount: prev.cloudAccount,
         };
-        saveGame(next);
+        saveGame(next, true);
         return next;
       });
       handleNotify('SEASON 2 PREVIEW OFF', 'Returned to Season Downtime.');

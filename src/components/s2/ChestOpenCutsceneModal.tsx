@@ -27,15 +27,16 @@ export const ChestOpenCutsceneModal: React.FC<ChestOpenCutsceneModalProps> = ({
     !eggDef && !loot.foundMatthewShopToken && !loot.foundSkinId;
 
   const scenes = useMemo<SceneSegment3D[]>(() => {
+    // Back/flanking timber amphitheater so trees never cross between the camera and the chest/reward
     const perimeter: WorldEntity3D[] = [];
     for (let i = 0; i < 8; i++) {
-      const ang = (i / 8) * Math.PI * 2;
+      const ang = (i / 7) * Math.PI;
       perimeter.push({
         id: `vp_${i}`,
         kind: 'pine',
-        x: Math.cos(ang) * 5.6,
+        x: Math.cos(ang) * 6.0,
         y: 0,
-        z: 14 + Math.sin(ang) * 5.6,
+        z: 15.2 + Math.sin(ang) * 5.2,
         scale: 1.25,
       });
     }
@@ -125,16 +126,17 @@ export const ChestOpenCutsceneModal: React.FC<ChestOpenCutsceneModalProps> = ({
               },
             ]
           : []),
-        ...Array.from({ length: eggDef ? 10 : 28 }, (_, i) => {
-          const total = eggDef ? 10 : 28;
-          const ring = i < 14 ? 1.55 : 2.55;
+        ...Array.from({ length: eggDef ? 10 : 24 }, (_, i) => {
+          const total = eggDef ? 10 : 24;
+          const ang = (i / (total - 1)) * Math.PI;
+          const ring = i < 12 ? 1.85 : 2.95;
           return {
             id: `burst_gem_${i}`,
             kind: (i % 2 === 0 ? 'gem' : 'coin') as 'gem' | 'coin',
-            x: Math.cos((i / total) * Math.PI * 2) * (eggDef ? 2.2 : ring),
+            x: Math.cos(ang) * (eggDef ? 2.4 : ring),
             y: 0.65 + (i % 4) * 0.42,
-            z: 14.0 + Math.sin((i / total) * Math.PI * 2) * (eggDef ? 1.1 : 1.55),
-            scale: eggDef ? 1.25 : 1.65,
+            z: 14.55 + Math.sin(ang) * (eggDef ? 1.3 : 1.65),
+            scale: eggDef ? 1.25 : 1.6,
             bobSpeed: 3.5 + (i % 4) * 0.6,
             bobAmp: isTreasureCacheOnly ? 0.22 : 0.14,
           };

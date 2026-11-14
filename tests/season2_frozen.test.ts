@@ -126,7 +126,8 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       expect(s2.currentSeasonId).toBe('season_2');
       expect(TEST_ISOLATION_CONFIG.sandboxStorageKey).toBe('matthew_clicker_s2_sandbox_v1');
 
-      // Saving sandbox as authorized dev does not pollute Season 1 localStorage
+      // Saving sandbox as authorized dev is strictly ephemeral before Monday launch:
+      // it never writes to Season 1 OR Season 2 storage and resets on reload.
       saveGame({
         ...s2,
         coins: 9999,
@@ -139,9 +140,10 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
           lastCloudSync: Date.now(),
         },
       });
-      const reloaded = loadSandboxGame();
-      expect(reloaded.coins).toBe(9999);
+      expect(store[TEST_ISOLATION_CONFIG.sandboxStorageKey]).toBeUndefined();
       expect(store['matthew_clicker_save_v1']).toBeUndefined();
+      const reloaded = loadSandboxGame();
+      expect(reloaded.coins).toBe(0);
     } finally {
       (globalThis as any).window = prevWin;
     }
@@ -705,5 +707,93 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     // Custom crate transparent artwork paths
     expect(CRATE_DEFINITIONS.normal.image).toBe('./images/s2/crates/normal_crate.png');
     expect(CRATE_DEFINITIONS.frost.image).toBe('./images/s2/crates/frost_crate.png');
+  });
+
+  it('strips leaked Season 2 skins from pre-Monday live saves and cloud sync while keeping them after Monday launch', () => {
+    const s2SkinId = FROZEN_PROGRESSION_SKINS[0].id;
+    const preLaunchNow = SEASON_2_CONFIG.launchTimeMs - 60_000;
+    const postLaunchNow = SEASON_2_CONFIG.launchTimeMs + 60_000;
+
+    // 1. Live Season 1 sanitize strips any leaked Season 2 skin if before Monday launch
+    if (Date.now() < SEASON_2_CONFIG.launchTimeMs) {
+      const sanitized = sanitizeAndValidateGameState({
+        ...getDefaultGameState(),
+        currentSeasonId: 'season_1',
+        sandboxS2Enabled: false,
+        unlockedSkins: ['classic_matthew', 'broke_matthew', s2SkinId],
+        equippedSkin: s2SkinId,
+      });
+      expect(sanitized.unlockedSkins).toContain('broke_matthew');
+      expect(sanitized.unlockedSkins).not.toContain(s2SkinId);
+      expect(sanitized.equippedSkin).toBe('classic_matthew');
+    }
+
+    // 2. Pre-Monday reconciliation scrubs leaked Season 2 skin from cloud/local and marks push
+    const preLaunchReconciled = reconcileCloudAndLocalState({
+      uid: 'cKFezHsISfbZGH4tKjQyME0wvrt1',
+      username: 'Marshallb78',
+      localState: {
+        ...getDefaultGameState(),
+        currentSeasonId: 'season_1',
+        lastOwnerUid: 'cKFezHsISfbZGH4tKjQyME0wvrt1',
+        unlockedSkins: ['classic_matthew', 'broke_matthew', s2SkinId],
+        equippedSkin: s2SkinId,
+      },
+      rtdbUser: {
+        username: 'Marshallb78',
+        unlockedSkins: ['classic_matthew', 'broke_matthew', s2SkinId],
+        equippedSkin: s2SkinId,
+        currentSeason: 'season_1',
+        seasons: {
+          season_1: {
+            lifetimeCoins: 1000,
+            coins: 500,
+            lastSaveTime: preLaunchNow - 1000,
+          },
+        },
+      },
+      rtdbLb: null,
+      wasExplicitlyReset: false,
+      resetAtMs: 0,
+      activeSeasonId: 'season_1',
+      nowMs: preLaunchNow,
+    });
+    expect(preLaunchReconciled.state.unlockedSkins).toContain('broke_matthew');
+    expect(preLaunchReconciled.state.unlockedSkins).not.toContain(s2SkinId);
+    expect(preLaunchReconciled.state.equippedSkin).toBe('classic_matthew');
+    expect(preLaunchReconciled.shouldPushToCloud).toBe(true);
+
+    // 3. Once Monday launch arrives and Season 2 is active, Season 2 skins persist normally
+    const postLaunchReconciled = reconcileCloudAndLocalState({
+      uid: 'cKFezHsISfbZGH4tKjQyME0wvrt1',
+      username: 'Marshallb78',
+      localState: {
+        ...getDefaultGameState(),
+        currentSeasonId: 'season_2',
+        lastOwnerUid: 'cKFezHsISfbZGH4tKjQyME0wvrt1',
+        unlockedSkins: ['classic_matthew', s2SkinId],
+        equippedSkin: s2SkinId,
+      },
+      rtdbUser: {
+        username: 'Marshallb78',
+        unlockedSkins: ['classic_matthew', s2SkinId],
+        equippedSkin: s2SkinId,
+        currentSeason: 'season_2',
+        seasons: {
+          season_2: {
+            lifetimeCoins: 5000,
+            coins: 2500,
+            lastSaveTime: postLaunchNow - 1000,
+          },
+        },
+      },
+      rtdbLb: null,
+      wasExplicitlyReset: false,
+      resetAtMs: 0,
+      activeSeasonId: 'season_2',
+      nowMs: postLaunchNow,
+    });
+    expect(postLaunchReconciled.state.unlockedSkins).toContain(s2SkinId);
+    expect(postLaunchReconciled.state.equippedSkin).toBe(s2SkinId);
   });
 });

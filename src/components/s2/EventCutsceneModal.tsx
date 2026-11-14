@@ -213,9 +213,9 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
             centerX: 0,
             centerZ: 15.5,
             radius: 5.2,
-            startAngle: -1.4,
-            endAngle: 0.4,
-            startY: 2.2,
+            startAngle: -0.58,
+            endAngle: 0.42,
+            startY: 2.1,
             endY: 1.3,
             lookAtY: 0.8,
           }

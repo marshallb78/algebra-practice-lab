@@ -1,6 +1,6 @@
 import { GameState, RealmId, PetInstance, EggRarity, FoodId } from '../types/game';
 import { calculateCPS } from './calculations';
-import { isValidSkinId, checkAndApplyMilestoneUnlocks } from '../data/skins';
+import { isValidSkinId, isSeason2OnlySkinId, checkAndApplyMilestoneUnlocks } from '../data/skins';
 import {
   createEmptySealedEggs,
   createDefaultFoodInventory,
@@ -259,8 +259,12 @@ export function saveGame(
       state.cloudAccount?.uid,
       state.sandboxS2Enabled
     );
-    const targetKey =
-      storageKeyOverride || (isSandbox ? TEST_ISOLATION_CONFIG.sandboxStorageKey : SAVE_KEY);
+    if (isSandbox) {
+      // Dev Season 2 preview before Monday launch is strictly ephemeral (never persists across reloads)
+      window.localStorage.removeItem(TEST_ISOLATION_CONFIG.sandboxStorageKey);
+      return true;
+    }
+    const targetKey = storageKeyOverride || SAVE_KEY;
     const toSave: GameState = {
       ...state,
       lastOwnerUid: state.cloudAccount?.uid || state.lastOwnerUid || null,
@@ -276,30 +280,20 @@ export function saveGame(
 
 export function loadSandboxGame(): GameState {
   try {
-    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
-      return { ...getDefaultGameState(), currentSeasonId: 'season_2', sandboxS2Enabled: true };
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      window.localStorage.removeItem(TEST_ISOLATION_CONFIG.sandboxStorageKey);
     }
-    const raw = window.localStorage.getItem(TEST_ISOLATION_CONFIG.sandboxStorageKey);
-    if (!raw) {
-      return {
-        ...getDefaultGameState(),
-        currentSeasonId: 'season_2',
-        coins: 0,
-        lifetimeCoins: 0,
-        seasonalScore: 0,
-        sandboxS2Enabled: true,
-      };
-    }
-    const parsed = JSON.parse(raw);
-    const sanitized = sanitizeAndValidateGameState(parsed);
-    return {
-      ...sanitized,
-      currentSeasonId: 'season_2',
-      sandboxS2Enabled: true,
-    };
   } catch {
-    return { ...getDefaultGameState(), currentSeasonId: 'season_2', sandboxS2Enabled: true };
+    // ignore storage cleanup error
   }
+  return {
+    ...getDefaultGameState(),
+    currentSeasonId: 'season_2',
+    coins: 0,
+    lifetimeCoins: 0,
+    seasonalScore: 0,
+    sandboxS2Enabled: true,
+  };
 }
 
 /**
@@ -435,10 +429,14 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
 
   let validUnlockedSkins: string[] = ['classic_matthew'];
   if (Array.isArray(parsed.unlockedSkins)) {
+    const preLaunchLive =
+      Date.now() < SEASON_2_CONFIG.launchTimeMs &&
+      !parsed.sandboxS2Enabled &&
+      (!parsed.currentSeasonId || parsed.currentSeasonId === 'season_1');
     const legitimate = parsed.unlockedSkins
       .filter((id: unknown): id is string => typeof id === 'string')
       .map(normalizeSkinId)
-      .filter((id: string) => isValidSkinId(id));
+      .filter((id: string) => isValidSkinId(id) && (!preLaunchLive || !isSeason2OnlySkinId(id)));
     validUnlockedSkins = Array.from(new Set(['classic_matthew', ...legitimate]));
   }
 

@@ -19,6 +19,7 @@ import {
   MATTHEW_STORM_SKINS,
   SKINS,
   equipSkin,
+  isSeason2OnlySkinId,
   isValidSkinId,
 } from '../data/skins';
 import {
@@ -453,6 +454,18 @@ export function reconcileCloudAndLocalState(params: {
     allSkins.delete('champion_matthew');
   }
 
+  // Before Season 2 officially launches on Monday, live Season 1 / Downtime saves must never
+  // retain Season 2 dev-preview skins leaked from earlier sandbox toggles.
+  const stripPreLaunchSeason2Skins =
+    nowMs < SEASON_2_CONFIG.launchTimeMs && activeSeasonId === 'season_1';
+  if (stripPreLaunchSeason2Skins) {
+    for (const skinId of Array.from(allSkins)) {
+      if (isSeason2OnlySkinId(skinId)) {
+        allSkins.delete(skinId);
+      }
+    }
+  }
+
   const mergedSkins = Array.from(allSkins);
   const localInActiveSeason = localState.currentSeasonId === activeSeasonId;
   const localSnap: ProgressSnapshot = localInActiveSeason
@@ -732,9 +745,14 @@ export function reconcileCloudAndLocalState(params: {
   const hadUnauthorizedChampionInCloud =
     !canHoldChampionSkin &&
     (cloudSkinSet.has('champion_matthew') || rtdbUser?.equippedSkin === 'champion_matthew');
+  const hadLeakedSeason2InCloud =
+    stripPreLaunchSeason2Skins &&
+    (Array.from(cloudSkinSet).some((id) => isSeason2OnlySkinId(id)) ||
+      (typeof rtdbUser?.equippedSkin === 'string' && isSeason2OnlySkinId(rtdbUser.equippedSkin)));
   const shouldPushToCloud =
     recoveredFromCareerLoss ||
     hadUnauthorizedChampionInCloud ||
+    hadLeakedSeason2InCloud ||
     !useCloudBase ||
     hasNewSkinsForCloud ||
     (Boolean(latestDailyLoginClaimDate) && latestDailyLoginClaimDate !== cloudDailyDate) ||
@@ -771,7 +789,44 @@ export async function loadAndReconcileCloudSave(
 
   const work = (async (): Promise<GameState> => {
     const activeSeason = effectiveSeason;
-    const storageOverride = isSandbox ? TEST_ISOLATION_CONFIG.sandboxStorageKey : undefined;
+
+    // Pre-Monday Season 2 dev preview is completely ephemeral: never read or persist sandbox_s2/.
+    if (isSandbox) {
+      try {
+        await refreshCloudBans();
+      } catch {
+        // ignore ban refresh errors in ephemeral preview
+      }
+      blockedOverwriteUids.delete(uid);
+      verifiedInitialPullUids.add(uid);
+      const allowChamp =
+        username.trim().toLowerCase() === SEASON_1_CHAMPION_USERNAME ||
+        (localState.winnerBadges || []).some((b) => b.seasonNumber >= 2);
+      const cleanLiveSkins = Array.from(
+        new Set(['classic_matthew', ...(localState.unlockedSkins || [])])
+      ).filter(
+        (id) => isValidSkinId(id) && !isSeason2OnlySkinId(id) && (id !== 'champion_matthew' || allowChamp)
+      );
+      const cleanEquipped = cleanLiveSkins.includes(localState.equippedSkin)
+        ? localState.equippedSkin
+        : 'classic_matthew';
+      const ephemeralS2 = loadSandboxGame();
+      return {
+        ...ephemeralS2,
+        gems: localState.gems || 0,
+        lifetimeGems: localState.lifetimeGems || 0,
+        winnerBadges: localState.winnerBadges || [],
+        permanentAchievements: localState.permanentAchievements || [],
+        seasonHistory: localState.seasonHistory || [],
+        unlockedSkins: cleanLiveSkins,
+        equippedSkin: cleanEquipped,
+        currentSeasonId: activeSeason.seasonId,
+        sandboxS2Enabled: true,
+        lastOwnerUid: uid,
+      };
+    }
+
+    const storageOverride = undefined;
 
     try {
       const [userRes, lbRes, liveSkinsRes] = await Promise.all([
@@ -1026,7 +1081,9 @@ export function saveStateToCloudKeepalive(
   if (getCachedBanRecord(uid, username)) return;
 
   const activeSeason = getEffectiveSeasonInfo(uid, state.sandboxS2Enabled);
-  const scopeKey = `${activeSeason.isSandbox ? 'sbx_' : ''}${uid}`;
+  // Pre-Monday Season 2 dev preview is strictly ephemeral and must not write to Firebase RTDB.
+  if (activeSeason.isSandbox) return;
+  const scopeKey = uid;
   const nowMs = Date.now();
   const userPayload = buildUserCloudPayload(uid, username, state, nowMs, activeSeason.seasonId);
   rtdbRestWriteKeepalive(scopeRtdbPath(`users/${uid}`, activeSeason.isSandbox), userPayload, 'PUT');
@@ -1058,7 +1115,9 @@ export async function saveStateToCloud(
   }
 
   const activeSeason = getEffectiveSeasonInfo(uid, state.sandboxS2Enabled);
-  const isSandbox = activeSeason.isSandbox;
+  // Pre-Monday Season 2 dev preview is strictly ephemeral and must not write to Firebase RTDB.
+  if (activeSeason.isSandbox) return true;
+  const isSandbox = false;
   const scopeKey = `${isSandbox ? 'sbx_' : ''}${uid}`;
   const playtimeBucket = Math.floor((state.totalPlaytimeSeconds || 0) / 20);
   const petSig = (state.pets || []).map((p) => `${p.instanceId}:${p.level}`).join(',');

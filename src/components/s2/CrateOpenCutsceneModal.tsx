@@ -23,18 +23,19 @@ export const CrateOpenCutsceneModal: React.FC<CrateOpenCutsceneModalProps> = ({
   const crateImage = CRATE_DEFINITIONS[result.crateType].image;
 
   const scenes = useMemo<SceneSegment3D[]>(() => {
+    // Semi-circular amphitheater STRICTLY behind/flanking the crate (z >= 15.3) so pillars/crystals never block the camera
     const ring: WorldEntity3D[] = [];
-    const count = 12;
+    const count = 10;
     for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2;
-      const rad = isFrost ? 4.4 : 4.8;
+      const a = 0.08 * Math.PI + (i / (count - 1)) * Math.PI * 0.84;
+      const rad = isFrost ? 4.9 : 5.2;
       ring.push({
         id: `cring_${i}`,
         kind: isFrost ? 'crystal' : i % 2 === 0 ? 'pillar' : 'crystal',
         x: Math.cos(a) * rad,
         y: 0,
-        z: 14 + Math.sin(a) * rad,
-        scale: isFrost ? 1.85 : 1.5,
+        z: 14.8 + Math.sin(a) * rad,
+        scale: isFrost ? 1.8 : 1.45,
         tintColor: isFrost
           ? i % 2 === 0
             ? '#67e8f9'
@@ -62,12 +63,12 @@ export const CrateOpenCutsceneModal: React.FC<CrateOpenCutsceneModalProps> = ({
           cameraEnd: { x: 0, y: 1.5, z: 14, pitch: -0.06, shake: 0.06 },
           cameraOrbit: {
             centerZ: 14,
-            radius: 7.5,
-            startAngle: -Math.PI * 0.45,
-            endAngle: Math.PI * 0.65,
-            startY: 4.5,
+            radius: 6.4,
+            startAngle: -0.78,
+            endAngle: 0.35,
+            startY: 3.8,
             endY: 1.55,
-            lookAtY: 0.25,
+            lookAtY: 0.45,
           },
           fadeInMs: 220,
           fadeOutMs: 150,
@@ -80,7 +81,7 @@ export const CrateOpenCutsceneModal: React.FC<CrateOpenCutsceneModalProps> = ({
           x: 0,
           y: 0.15,
           z: 14,
-          scale: 1.6,
+          scale: 1.65,
           frames: [crateImage],
           bobSpeed: 16,
           bobAmp: 0.08,
@@ -105,12 +106,12 @@ export const CrateOpenCutsceneModal: React.FC<CrateOpenCutsceneModalProps> = ({
           cameraEnd: { x: 0, y: 1.5, z: 14, pitch: -0.02, shake: 0.08 },
           cameraOrbit: {
             centerZ: 14,
-            radius: 6.2,
-            startAngle: -Math.PI * 0.42,
-            endAngle: 0,
-            startY: 0.85,
-            endY: 1.35,
-            lookAtY: 0.25,
+            radius: 6.0,
+            startAngle: -0.72,
+            endAngle: 0.12,
+            startY: 0.95,
+            endY: 1.4,
+            lookAtY: 0.45,
           },
           fadeInMs: 220,
           fadeOutMs: 150,
@@ -123,7 +124,7 @@ export const CrateOpenCutsceneModal: React.FC<CrateOpenCutsceneModalProps> = ({
           x: 0,
           y: 0.15,
           z: 14,
-          scale: 1.6,
+          scale: 1.65,
           frames: [crateImage],
           bobSpeed: 16,
           bobAmp: 0.08,
@@ -145,11 +146,11 @@ export const CrateOpenCutsceneModal: React.FC<CrateOpenCutsceneModalProps> = ({
         id: 'crate_open',
         kind: 'sprite',
         x: 0,
-        y: -0.15,
+        y: -0.35,
         z: 14.3,
-        scale: 1.25,
+        scale: 1.15,
         frames: [crateImage],
-        alpha: 0.55,
+        alpha: 0.48,
         glowColor: isFrost ? 'rgba(103,232,249,0.9)' : 'rgba(251,191,36,0.9)',
       },
       ...(rewardSprite
@@ -159,8 +160,8 @@ export const CrateOpenCutsceneModal: React.FC<CrateOpenCutsceneModalProps> = ({
               kind: 'sprite' as const,
               x: 0,
               y: 0.95,
-              z: 13.6,
-              scale: result.rewardKind === 'skin' ? 1.6 : 1.2,
+              z: 13.4,
+              scale: result.rewardKind === 'skin' ? 1.75 : 1.35,
               frames: [rewardSprite],
               bobSpeed: 3.8,
               bobAmp: 0.14,
@@ -168,16 +169,19 @@ export const CrateOpenCutsceneModal: React.FC<CrateOpenCutsceneModalProps> = ({
             },
           ]
         : []),
-      ...Array.from({ length: 14 }, (_, i) => ({
-        id: `cr_part_${i}`,
-        kind: (isFrost ? 'gem' : i % 2 === 0 ? 'coin' : 'gem') as 'gem' | 'coin',
-        x: Math.cos((i / 14) * Math.PI * 2) * 2.5,
-        y: 0.75 + (i % 3) * 0.42,
-        z: 13.9 + Math.sin((i / 14) * Math.PI * 2) * 1.3,
-        scale: 1.35,
-        bobSpeed: 4.2 + (i % 3),
-        bobAmp: 0.14,
-      })),
+      ...Array.from({ length: 12 }, (_, i) => {
+        const ang = (i / 11) * Math.PI;
+        return {
+          id: `cr_part_${i}`,
+          kind: (isFrost ? 'gem' : i % 2 === 0 ? 'coin' : 'gem') as 'gem' | 'coin',
+          x: Math.cos(ang) * 2.75,
+          y: 0.75 + (i % 3) * 0.42,
+          z: 14.25 + Math.sin(ang) * 1.45,
+          scale: 1.3,
+          bobSpeed: 4.2 + (i % 3),
+          bobAmp: 0.14,
+        };
+      }),
     ];
 
     const revealHold: SceneSegment3D = {
@@ -196,17 +200,17 @@ export const CrateOpenCutsceneModal: React.FC<CrateOpenCutsceneModalProps> = ({
       snowVz: -4.8,
       radialBurstAtMs: 60,
       radialBurstColor: isFrost ? '#67e8f9' : '#fb923c',
-      cameraStart: { x: 0, y: 1.25, z: 9.6, shake: 0.1 },
-      cameraEnd: { x: 0, y: 1.35, z: 9.2, shake: 0 },
+      cameraStart: { x: 0, y: 1.35, z: 9.0, shake: 0.1 },
+      cameraEnd: { x: 0, y: 1.4, z: 8.8, shake: 0 },
       cameraOrbit: {
         centerX: 0,
-        centerZ: 13.8,
-        radius: 4.3,
-        startAngle: isFrost ? 0.15 : -0.08,
-        endAngle: isFrost ? 0.55 : -0.45,
-        startY: 1.25,
+        centerZ: 13.6,
+        radius: 4.8,
+        startAngle: isFrost ? -0.22 : 0.22,
+        endAngle: isFrost ? 0.22 : -0.22,
+        startY: 1.35,
         endY: 1.45,
-        lookAtY: 0.85,
+        lookAtY: 0.9,
       },
       fadeInMs: 140,
       fadeOutMs: 0,

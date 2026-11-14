@@ -650,6 +650,19 @@ export const ALL_SKINS: Skin[] = [
   ...SEASON_2_STORM_SKINS,
 ];
 
+export const SEASON_2_ONLY_SKIN_ID_SET = new Set<string>([
+  ...SEASON_2_SKINS.map((s) => s.id),
+  ...FROZEN_PROGRESSION_SKINS.map((s) => s.id),
+  ...ITEM_SHOP_SKINS.map((s) => s.id),
+  ...SEASON_2_LIVE_EVENT_SKINS.map((s) => s.id),
+  ...MATTHEW_VAULT_SKINS.map((s) => s.id),
+  ...SEASON_2_STORM_SKINS.map((s) => s.id),
+]);
+
+export function isSeason2OnlySkinId(skinId: string): boolean {
+  return SEASON_2_ONLY_SKIN_ID_SET.has(skinId);
+}
+
 export function isSeasonTwoOrLater(seasonId?: string): boolean {
   if (!seasonId) return false;
   const num = parseInt(seasonId.replace('season_', ''), 10);

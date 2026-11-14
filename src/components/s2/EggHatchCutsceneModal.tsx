@@ -30,15 +30,16 @@ export const EggHatchCutsceneModal: React.FC<EggHatchCutsceneModalProps> = ({
   const scenes = useMemo<SceneSegment3D[]>(() => {
     const petFrames = getPetAnimationFrames(speciesId);
 
+    // Semi-circular crystal shrine strictly behind/flanking the egg & hatched pet
     const crystals: WorldEntity3D[] = [];
     for (let i = 0; i < 10; i++) {
-      const ang = (i / 10) * Math.PI * 2;
+      const ang = 0.06 * Math.PI + (i / 9) * Math.PI * 0.88;
       crystals.push({
         id: `ec_${i}`,
         kind: 'crystal',
-        x: Math.cos(ang) * 3.8,
+        x: Math.cos(ang) * 4.5,
         y: 0,
-        z: 14 + Math.sin(ang) * 3.8,
+        z: 14.8 + Math.sin(ang) * 3.8,
         scale: 1.4,
         tintColor: def.color,
       });
@@ -61,12 +62,12 @@ export const EggHatchCutsceneModal: React.FC<EggHatchCutsceneModalProps> = ({
       cameraOrbit: {
         centerX: 0,
         centerZ: 14,
-        radius: 3.9,
-        startAngle: 0.1,
-        endAngle: Math.PI * 1.15,
-        startY: 2.1,
-        endY: 0.95,
-        lookAtY: 0.65,
+        radius: 4.6,
+        startAngle: -0.68,
+        endAngle: 0.42,
+        startY: 2.0,
+        endY: 1.15,
+        lookAtY: 0.7,
       },
       fadeInMs: 260,
       fadeOutMs: 160,
@@ -101,17 +102,17 @@ export const EggHatchCutsceneModal: React.FC<EggHatchCutsceneModalProps> = ({
       snowVz: -3.0,
       radialBurstAtMs: 70,
       radialBurstColor: speciesSpec.color,
-      cameraStart: { x: 0, y: 0.85, z: 10.5, shake: 0.11 },
-      cameraEnd: { x: 0, y: 1.0, z: 10.2, shake: 0 },
+      cameraStart: { x: 0, y: 1.15, z: 10.0, shake: 0.11 },
+      cameraEnd: { x: 0, y: 1.2, z: 9.8, shake: 0 },
       cameraOrbit: {
         centerX: 0,
         centerZ: 14,
-        radius: 3.3,
-        startAngle: Math.PI * 1.15,
-        endAngle: Math.PI * 2.0,
-        startY: 0.85,
-        endY: 1.1,
-        lookAtY: 0.75,
+        radius: 4.3,
+        startAngle: 0.42,
+        endAngle: -0.18,
+        startY: 1.1,
+        endY: 1.2,
+        lookAtY: 0.8,
       },
       fadeInMs: 120,
       fadeOutMs: 0,
@@ -123,24 +124,27 @@ export const EggHatchCutsceneModal: React.FC<EggHatchCutsceneModalProps> = ({
           kind: 'sprite',
           x: 0,
           y: 0.15,
-          z: 14,
-          scale: 1.75,
+          z: 13.7,
+          scale: 1.8,
           frames: petFrames,
           fps: 9,
           bobSpeed: 5,
           bobAmp: 0.12,
           glowColor: speciesSpec.glowColor,
         },
-        ...Array.from({ length: 8 }, (_, i) => ({
-          id: `hatch_gem_${i}`,
-          kind: 'gem' as const,
-          x: Math.cos((i / 8) * Math.PI * 2) * 2.1,
-          y: 0.7 + (i % 3) * 0.35,
-          z: 14 + Math.sin((i / 8) * Math.PI * 2) * 1.8,
-          scale: 1.15,
-          bobSpeed: 4,
-          bobAmp: 0.12,
-        })),
+        ...Array.from({ length: 8 }, (_, i) => {
+          const ang = (i / 7) * Math.PI;
+          return {
+            id: `hatch_gem_${i}`,
+            kind: 'gem' as const,
+            x: Math.cos(ang) * 2.35,
+            y: 0.7 + (i % 3) * 0.35,
+            z: 14.35 + Math.sin(ang) * 1.45,
+            scale: 1.15,
+            bobSpeed: 4,
+            bobAmp: 0.12,
+          };
+        }),
       ],
     };
 
