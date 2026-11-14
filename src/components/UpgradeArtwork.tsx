@@ -2,6 +2,7 @@ import React from 'react';
 
 interface UpgradeArtworkProps {
   iconKey: string;
+  iconImage?: string;
   tier?: number;
   className?: string;
 }
@@ -19,11 +20,30 @@ const TIER_PALETTES: Record<number, { bg1: string; bg2: string; accent: string; 
 
 export const UpgradeArtwork: React.FC<UpgradeArtworkProps> = ({
   iconKey,
+  iconImage,
   tier = 1,
   className = 'w-14 h-14',
 }) => {
-  const pal = TIER_PALETTES[tier] || TIER_PALETTES[1];
+  const pal = TIER_PALETTES[((tier - 1) % 8) + 1] || TIER_PALETTES[1];
   const gradId = `upg_bg_${iconKey}`;
+
+  if (iconImage) {
+    return (
+      <div
+        className={`${className} select-none shrink-0 rounded-xl overflow-hidden relative flex items-center justify-center border border-white/15 shadow-lg`}
+        style={{
+          background: `radial-gradient(circle at 30% 25%, ${pal.glow}45 0%, ${pal.bg1} 58%, ${pal.bg2} 100%)`,
+        }}
+      >
+        <img
+          src={iconImage}
+          alt={iconKey}
+          className="w-[82%] h-[82%] object-contain drop-shadow-[0_3px_8px_rgba(0,0,0,0.7)]"
+          draggable={false}
+        />
+      </div>
+    );
+  }
 
   return (
     <svg

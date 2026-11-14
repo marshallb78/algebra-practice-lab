@@ -43,8 +43,8 @@ import {
 } from '../src/utils/scheduleEngine';
 import { formatTime } from '../src/utils/formatters';
 import { validateUsernameFormat } from '../src/firebase/auth';
-import { getCachedBanRecord, isDevAdminAccount } from '../src/firebase/moderation';
 import { isExcludedFromLeaderboard } from '../src/firebase/leaderboard';
+import { DEFAULT_BANNED_ACCOUNTS, getCachedBanRecord, isDevAdminAccount } from '../src/firebase/moderation';
 import {
   MARSHALL_RECOVERY_UID,
   MARSHALL_RECOVERED_SCORE,
@@ -102,54 +102,59 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(maxInfo.totalCost).toBeLessThanOrEqual(coins);
     });
 
-    it('scales click power and CPS with faster Ascension Multiplier (+0.15 per step) and Friday 4x Live Event', () => {
+    it('scales click power and CPS with faster Ascension Multiplier (+0.6 per step) and Friday 4x Live Event', () => {
       state.upgrades['finger_exercise'] = 10; // base click = 1 + 10*0.5 = 6, base CPS = 10*0.2 = 2
       state.upgrades['energy_coffee'] = 10; // base CPS = 2 + 10*0.5 = 7, +10*1.5 = 15 click power -> total base click = 21
-      state.prestigeShards = 20; // Ascension Multiplier = 1 + 20 * 0.15 = 4.0x
+      state.prestigeShards = 12; // Ascension Multiplier = 1 + 12 * 0.6 = 8.2x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
-      expect(normalClick.ascensionMultiplier).toBe(4);
-      expect(normalClick.totalPower).toBe(84); // 21 * 4x
-      expect(normalCps).toBeCloseTo(28); // 7 * 4x
+      expect(normalClick.ascensionMultiplier).toBeCloseTo(8.2);
+      expect(normalClick.totalPower).toBeCloseTo(172.2); // 21 * 8.2x
+      expect(normalCps).toBeCloseTo(57.4); // 7 * 8.2x
 
       // Friday All-Day Live Event = 4x multiplier
       const liveOpts = { fridayBonusActive: false, stormWaveMultiplier: 4 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBe(336); // 84 * 4
-      expect(boostedCps).toBeCloseTo(112.0); // 28 * 4
+      expect(boostedClick.totalPower).toBeCloseTo(688.8); // 172.2 * 4
+      expect(boostedCps).toBeCloseTo(229.6); // 57.4 * 4
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
     });
   });
 
-  describe('Rebirth (Faster Ascension Multiplier: +0.15 per step)', () => {
-    it('returns 0 bonus if lifetime coins are below requirement (1M)', () => {
-      expect(calculatePrestigeShards(500000)).toBe(0);
+  describe('Rebirth (Faster Ascension Multiplier: +0.6 per step)', () => {
+    it('returns 0 bonus if lifetime coins are below requirement (100K)', () => {
+      expect(calculatePrestigeShards(50000)).toBe(0);
       expect(getAscensionMultiplier(0)).toBe(1);
     });
 
-    it('calculates Ascension Multiplier bonus in +0.15 steps at 1M and scales faster', () => {
-      expect(calculatePrestigeShards(1000000)).toBe(1);
-      expect(calculatePrestigeShards(4000000)).toBe(3);
-      expect(getAscensionMultiplier(1)).toBe(1.15);
-      expect(getAscensionMultiplier(2)).toBe(1.3);
+    it('calculates Ascension Multiplier bonus in +0.6 steps starting at 100K and scales fast', () => {
+      expect(calculatePrestigeShards(100000)).toBe(1);
+      expect(calculatePrestigeShards(1000000)).toBe(6);
+      expect(getAscensionMultiplier(1)).toBe(1.6);
+      expect(getAscensionMultiplier(2)).toBe(2.2);
       const qaShards = calculatePrestigeShards(1e15);
-      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(5.0);
+      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(20.0);
     });
   });
 
   describe('Moderation Bans & Dev Admin Identity', () => {
-    it('enforces bans on liamkd, wessy, and dryce while protecting Marshallb78 admin account', () => {
-      // Default banned accounts
-      expect(getCachedBanRecord(null, 'liamkd')?.status).toBe('banned');
-      expect(getCachedBanRecord(null, 'wessy')?.status).toBe('banned');
-      expect(getCachedBanRecord(null, 'dryce')?.status).toBe('banned');
+    it('removes Season 1 default bans while supporting dynamic bans & protecting Marshallb78 admin account', () => {
+      // Season 1 banned accounts were permanently cleared from hardcoded defaults
+      expect(Object.keys(DEFAULT_BANNED_ACCOUNTS).length).toBe(0);
+      expect(getCachedBanRecord(null, 'liamkd')).toBeNull();
+      expect(getCachedBanRecord(null, 'wessy')).toBeNull();
+      expect(getCachedBanRecord(null, 'dryce')).toBeNull();
       expect(getCachedBanRecord('89nsfff2YtaEVcNTHUBDq22V4FW2', 'Marshallb78')).toBeNull();
       expect(isDevAdminAccount('89nsfff2YtaEVcNTHUBDq22V4FW2', 'Marshallb78')).toBe(true);
+      expect(isDevAdminAccount('cKFezHsISfbZGH4tKjQyME0wvrt1', 'testmarshall')).toBe(true);
+      // Username spoofing or Inspect Element UID tampering cannot gain dev privileges
+      expect(isDevAdminAccount(null, 'testmarshall')).toBe(false);
+      expect(isDevAdminAccount('fake_uid', 'Marshallb78')).toBe(false);
     });
   });
 
@@ -160,7 +165,7 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(newlyClaimed.some((q) => q.id === 'daily_clicks_7500')).toBe(true);
       expect(afterAuto.claimedQuests).toContain('daily_clicks_7500');
       expect(afterAuto.gems).toBeGreaterThanOrEqual(5);
-      expect(afterAuto.coins).toBeGreaterThanOrEqual(25000);
+      expect(afterAuto.coins).toBeGreaterThanOrEqual(1500);
     });
   });
 
@@ -235,7 +240,7 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
   });
 
   describe('Weekly Seasonal Rollover & Permanent Ownership', () => {
-    it('resets seasonal coins, upgrades, rebirths, and gems while preserving all skins, playtime, and lifetime clicks', () => {
+    it('resets seasonal coins, upgrades, and rebirths while preserving gems, all skins, playtime, and lifetime clicks', () => {
       state.coins = 999999;
       state.lifetimeCoins = 5000000;
       state.seasonalScore = 5000000;
@@ -253,7 +258,7 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(rolled.coins).toBe(0);
       expect(rolled.seasonalScore).toBe(0);
       expect(rolled.prestigeCount).toBe(0);
-      expect(rolled.gems).toBe(0);
+      expect(rolled.gems).toBe(135);
 
       expect(rolled.unlockedSkins).toEqual([
         'classic_matthew',
@@ -277,19 +282,20 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
   });
 
   describe('Season 1 & Season 2 Skin Lineups + 5 Season 2 Super-Rare Live Event Skins', () => {
-    it('includes Season 1 skins, Season 2 progression skins (Anime, Matthgoon, Minecraft, Moaning, Balenciaga), and 5 Season 2 Storm skins', () => {
+    it('includes Season 1 skins, Season 2 progression skins (Anime, Minecraft, without Matthgoon), and 5 Season 2 Storm skins', () => {
       expect(SKINS.length).toBe(11);
-      expect(PUBLIC_VIEWABLE_SKINS.length).toBe(13);
+      expect(PUBLIC_VIEWABLE_SKINS.length).toBe(14);
+      expect(PUBLIC_VIEWABLE_SKINS.some((s) => s.id === 'liam_matthew')).toBe(true);
       expect(MATTHEW_STORM_SKINS.length).toBe(5);
-      expect(SEASON_2_SKINS.length).toBe(11);
+      expect(SEASON_2_SKINS.length).toBe(6);
       expect(SEASON_2_STORM_SKINS.length).toBe(5);
 
       const s2Ids = SEASON_2_SKINS.map((s) => s.id);
       expect(s2Ids).toContain('anime_matthew');
-      expect(s2Ids).toContain('matthgoon');
+      expect(s2Ids).not.toContain('matthgoon');
       expect(s2Ids).toContain('minecraft_matthew');
-      expect(s2Ids).toContain('moaning_matthew');
-      expect(s2Ids).toContain('balenciaga_matthew');
+      expect(s2Ids).not.toContain('moaning_matthew');
+      expect(s2Ids).not.toContain('balenciaga_matthew');
 
       ALL_SKINS.forEach((skin) => {
         expect(skin.clickBonusMultiplier).toBe(1.0);
@@ -300,6 +306,7 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
 
       const mathjew = CHARACTER_SKINS.find((s) => s.id === 'mathjew');
       expect(mathjew).toBeDefined();
+      expect(mathjew?.image).toBe('./images/skins/season2/updated_mathjew.png');
     });
   });
 
@@ -485,14 +492,13 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(afterRebirth.recoveredFromCareerLoss).toBe(false);
       expect(afterRebirth.state.coins).toBe(0);
     });
-  });
 
-  describe('Leaderboard Exclusions (Unbanned High-Score Play)', () => {
-    it('excludes GABBYDADDY69 by UID and username without banning the account', () => {
-      expect(isExcludedFromLeaderboard('0eFt9SNVpPSxm9SGPcD6n9W5u3E3', 'GABBYDADDY69')).toBe(true);
-      expect(isExcludedFromLeaderboard('0eFt9SNVpPSxm9SGPcD6n9W5u3E3', null)).toBe(true);
-      expect(isExcludedFromLeaderboard('some-other-uid', 'gabbydaddy69')).toBe(true);
-      expect(isExcludedFromLeaderboard('some-other-uid', 'RegularPlayer')).toBe(false);
+    it('excludes GABBYDADDY69 from leaderboards without banning the account', () => {
+      expect(
+        isExcludedFromLeaderboard('0eFt9SNVpPSxm9SGPcD6n9W5u3E3', 'GABBYDADDY69')
+      ).toBe(true);
+      expect(isExcludedFromLeaderboard(undefined, ' gabbydaddy69 ')).toBe(true);
+      expect(isExcludedFromLeaderboard('89nsfff2YtaEVcNTHUBDq22V4FW2', 'Marshallb78')).toBe(false);
       expect(getCachedBanRecord('0eFt9SNVpPSxm9SGPcD6n9W5u3E3', 'GABBYDADDY69')).toBeNull();
     });
   });

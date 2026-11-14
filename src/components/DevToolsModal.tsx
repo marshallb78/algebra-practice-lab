@@ -3,13 +3,24 @@ import { GameState } from '../types/game';
 import { verifyAccountPassword } from '../firebase/auth';
 import {
   BanRecord,
+  FirebaseHealthSummary,
   OFFICIAL_BAN_MESSAGE,
+  PlayerSuspicionReport,
+  ProbationReport,
   ServerBroadcast,
   adminBanPlayer,
   adminResetPlayerScore,
+  adminResolveProbation,
   adminSetServerBroadcast,
   adminUnbanPlayer,
+  cleanupLegacySeason1FirebaseClutter,
+  dismissPlayerSuspicionReport,
+  fetchPlayerSuspicionReports,
+  fetchProbationAlerts,
+  inspectFirebaseStructureSummary,
   isDevAdminAccount,
+  isVerifiedLiveDevSession,
+  purgeAllBannedAccountsFromRtdb,
   refreshCloudBans,
 } from '../firebase/moderation';
 import {
@@ -18,6 +29,7 @@ import {
   fetchWorldwideLeaderboard,
 } from '../firebase/leaderboard';
 import { getSkinById } from '../data/skins';
+import { PLAYER_TRIGGERABLE_EVENTS, PlayerEventCostSpec } from '../firebase/liveEvents';
 import { formatCoins, formatNumber, formatTime } from '../utils/formatters';
 import {
   Wrench,
@@ -36,6 +48,11 @@ import {
   Clock,
 } from 'lucide-react';
 
+export type SandboxTestAction =
+  | 'replay_s2_intro'
+  | 'toggle_sandbox_friday_storm'
+  | 'toggle_preview_midnight_downtime';
+
 interface DevToolsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -43,6 +60,17 @@ interface DevToolsModalProps {
   onTriggerRain: () => void;
   onNotify: (title: string, subtitle: string) => void;
   onRefreshMiniLeaderboard: () => void;
+  onToggleSandboxS2?: () => void;
+  onTriggerZombieRaid?: () => void;
+  onPreviewGlobalEvent?: (spec: PlayerEventCostSpec) => void;
+  onClearPreviewEvent?: () => void;
+  onSandboxTestAction?: (action: SandboxTestAction) => void;
+  isSandboxActive?: boolean;
+  isSandboxStormActive?: boolean;
+  probationAlerts?: ProbationReport[];
+  onProbationAlertsChanged?: (alerts: ProbationReport[]) => void;
+  playerReports?: PlayerSuspicionReport[];
+  onPlayerReportsChanged?: (reports: PlayerSuspicionReport[]) => void;
 }
 
 type DevTab = 'moderation' | 'players' | 'broadcast' | 'server';
@@ -55,7 +83,30 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
   onTriggerRain,
   onNotify,
   onRefreshMiniLeaderboard,
+  onToggleSandboxS2,
+  onTriggerZombieRaid,
+  onPreviewGlobalEvent,
+  onClearPreviewEvent,
+  onSandboxTestAction,
+  isSandboxActive = false,
+  isSandboxStormActive = false,
+  probationAlerts = [],
+  onProbationAlertsChanged,
+  playerReports = [],
+  onPlayerReportsChanged,
 }) => {
+  const [localProbationAlerts, setLocalProbationAlerts] = useState<ProbationReport[]>(probationAlerts);
+  const [localPlayerReports, setLocalPlayerReports] = useState<PlayerSuspicionReport[]>(playerReports);
+  const [fbSummary, setFbSummary] = useState<FirebaseHealthSummary | null>(null);
+  const [fbBusy, setFbBusy] = useState(false);
+
+  useEffect(() => {
+    setLocalProbationAlerts(probationAlerts);
+  }, [probationAlerts]);
+
+  useEffect(() => {
+    setLocalPlayerReports(playerReports);
+  }, [playerReports]);
   const [unlocked, setUnlocked] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -83,10 +134,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
   const [broadcastTheme, setBroadcastTheme] = useState<'gold' | 'red' | 'cyan' | 'purple'>('gold');
   const [activeBroadcast, setActiveBroadcast] = useState<ServerBroadcast | null>(null);
 
-  const isMarshall = isDevAdminAccount(
-    state.cloudAccount?.uid,
-    state.cloudAccount?.displayUsername
-  );
+  const isMarshall = isVerifiedLiveDevSession(state.cloudAccount?.uid);
 
   // Require re-entering password every time the Dev Tools modal is opened
   useEffect(() => {
@@ -102,10 +150,16 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
   const loadModerationAndLeaderboard = async () => {
     setLoadingData(true);
     try {
-      const [cloudMod, lbEntries] = await Promise.all([
+      const [cloudMod, lbEntries, alerts, peerReports] = await Promise.all([
         refreshCloudBans(true),
-        fetchWorldwideLeaderboard(state.currentSeasonId, 50),
+        fetchWorldwideLeaderboard(state.currentSeasonId, 500, isSandboxActive),
+        fetchProbationAlerts(state.currentSeasonId, isSandboxActive).catch(() => []),
+        fetchPlayerSuspicionReports().catch(() => []),
       ]);
+      setLocalProbationAlerts(alerts);
+      onProbationAlertsChanged?.(alerts);
+      setLocalPlayerReports(peerReports);
+      onPlayerReportsChanged?.(peerReports);
 
       // Deduplicate bans by normalizedUsername so each banned/temp-banned account appears once
       const byNorm = new Map<string, BanRecord>();
@@ -146,7 +200,10 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
 
   const handlePasswordUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!state.cloudAccount) return;
+    if (!state.cloudAccount || !isVerifiedLiveDevSession(state.cloudAccount.uid)) {
+      setAuthError('Unauthorized account.');
+      return;
+    }
     setAuthError(null);
     setVerifying(true);
     try {
@@ -154,14 +211,14 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
         state.cloudAccount.displayUsername,
         passwordInput
       );
-      if (!ok) {
-        setAuthError('Incorrect password for Marshallb78. Access denied.');
+      if (!ok || !isVerifiedLiveDevSession(state.cloudAccount.uid)) {
+        setAuthError('Incorrect password. Access denied.');
         return;
       }
       setUnlocked(true);
       setPasswordInput('');
     } catch {
-      setAuthError('Could not verify password. Please try again.');
+      setAuthError('Could not verify password.');
     } finally {
       setVerifying(false);
     }
@@ -317,16 +374,11 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
             <Wrench className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl sm:text-2xl font-black text-amber-300 uppercase tracking-wide">
-                Marshallb78 Admin &amp; Moderation Center
-              </h2>
-              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-[10px] font-black text-emerald-300 uppercase">
-                Fair Play Admin
-              </span>
-            </div>
+            <h2 className="text-xl sm:text-2xl font-black text-amber-300 uppercase tracking-wide">
+              Dev Controls
+            </h2>
             <p className="text-xs font-bold text-slate-400">
-              Moderation Queue • Ban &amp; Unban Manager • Player Inspector • Live Server Broadcasts
+              Moderation • Players • Broadcast • Server
             </p>
           </div>
         </div>
@@ -352,10 +404,10 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
             </div>
             <div>
               <h3 className="text-2xl font-black text-white uppercase">
-                Verify Marshallb78 Password
+                Dev Verification
               </h3>
-              <p className="text-xs font-bold text-slate-300 mt-1">
-                Re-enter your account password to unlock Admin Moderation &amp; Server Controls.
+              <p className="text-xs font-bold text-slate-400 mt-1">
+                Re-enter your password to continue.
               </p>
             </div>
 
@@ -365,7 +417,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
               autoFocus
               value={passwordInput}
               onChange={(e) => setPasswordInput(e.target.value)}
-              placeholder="Enter Marshallb78 password..."
+              placeholder="Password..."
               className="w-full bg-slate-950 border-2 border-slate-700 focus:border-amber-400 rounded-2xl px-4 py-3.5 text-sm font-bold text-white focus:outline-none text-center"
             />
 
@@ -401,8 +453,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                 >
                   <ShieldAlert className="w-4 h-4" />
                   <span>
-                    Bans &amp; Queue ({tempBannedQueue.length} Temp / {officialBannedList.length}{' '}
-                    Banned)
+                    Moderation ({localProbationAlerts.length + localPlayerReports.length + tempBannedQueue.length})
                   </span>
                 </button>
 
@@ -415,7 +466,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                   }`}
                 >
                   <Users className="w-4 h-4" />
-                  <span>All Players &amp; Inspector ({leaderboard.length})</span>
+                  <span>Players ({leaderboard.length})</span>
                 </button>
 
                 <button
@@ -427,7 +478,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                   }`}
                 >
                   <Megaphone className="w-4 h-4" />
-                  <span>Global Broadcast</span>
+                  <span>Broadcast</span>
                 </button>
 
                 <button
@@ -439,7 +490,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                   }`}
                 >
                   <Sliders className="w-4 h-4" />
-                  <span>Server Controls</span>
+                  <span>Server</span>
                 </button>
               </div>
 
@@ -468,6 +519,167 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
             {/* ================= TAB 1: MODERATION QUEUE ================= */}
             {activeTab === 'moderation' && (
               <div className="space-y-6">
+                {/* PLAYER SUSPICION REPORTS (LEADERBOARD PEER REPORTS) */}
+                <div className="p-5 rounded-3xl bg-slate-900/95 border-2 border-rose-400/50 space-y-3">
+                  <div>
+                    <h3 className="text-sm font-black uppercase text-rose-300">
+                      Player Suspicion Reports ({localPlayerReports.length})
+                    </h3>
+                    <p className="text-[11px] font-bold text-slate-400">
+                      Sent by players on the leaderboard. Nobody is auto-banned; review and choose whether to act or dismiss.
+                    </p>
+                  </div>
+
+                  {localPlayerReports.length === 0 ? (
+                    <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 text-xs font-bold text-slate-400">
+                      No player suspicion reports right now.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {localPlayerReports.map((rep) => (
+                        <div
+                          key={rep.id}
+                          className="p-3.5 rounded-2xl bg-rose-950/30 border border-rose-400/50 flex flex-col justify-between gap-2.5"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-black text-white">
+                                {rep.reporterUsername} reported {rep.targetUsername}
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full bg-cyan-400/20 text-cyan-200 text-[10px] font-black">
+                                Peak {rep.targetHighestCps} CPS
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-bold text-rose-100/80 mt-1">
+                              {rep.reason || 'Suspicious activity reported'} • Score:{' '}
+                              {formatCoins(rep.targetScore)}
+                            </p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              {new Date(rep.reportedAtMs).toLocaleString()} • Target UID:{' '}
+                              {rep.targetUid.slice(0, 12)}...
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await adminBanPlayer(
+                                  rep.targetUid,
+                                  rep.targetUsername,
+                                  OFFICIAL_BAN_MESSAGE,
+                                  'banned'
+                                );
+                                await dismissPlayerSuspicionReport(rep.id);
+                                onNotify('Player Banned', `${rep.targetUsername} was officially banned.`);
+                                setStatusBanner(`Banned ${rep.targetUsername} following player report.`);
+                                await loadModerationAndLeaderboard();
+                                onRefreshMiniLeaderboard();
+                              }}
+                              className="flex-1 py-2 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black text-[11px] uppercase cursor-pointer"
+                            >
+                              Ban Target
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await dismissPlayerSuspicionReport(rep.id);
+                                setStatusBanner(`Dismissed report against ${rep.targetUsername}.`);
+                                await loadModerationAndLeaderboard();
+                              }}
+                              className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-black text-[11px] uppercase cursor-pointer"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ANTI-CHEAT PROBATION ALERTS QUEUE */}
+                <div className="p-5 rounded-3xl bg-slate-900/95 border-2 border-amber-400/50 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <h3 className="text-sm font-black uppercase text-amber-300">
+                        Anti-Cheat Probation Alerts ({localProbationAlerts.length})
+                      </h3>
+                      <p className="text-[11px] font-bold text-slate-400">
+                        Flagged players are placed under probation instead of being auto-banned. Review and choose whether to Ban or Clear them.
+                      </p>
+                    </div>
+                  </div>
+
+                  {localProbationAlerts.length === 0 ? (
+                    <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 text-xs font-bold text-slate-400">
+                      No pending probation alerts right now.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {localProbationAlerts.map((alert) => (
+                        <div
+                          key={alert.uid}
+                          className="p-3.5 rounded-2xl bg-amber-950/35 border border-amber-400/50 flex flex-col justify-between gap-2.5"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-black text-white">{alert.username}</span>
+                              <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-200 text-[10px] font-black">
+                                {alert.detectedCps} CPS
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-bold text-amber-100/80 mt-1">{alert.reason}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              Flagged {new Date(alert.reportedAtMs).toLocaleString()} • UID: {alert.uid.slice(0, 12)}...
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await adminResolveProbation(
+                                  alert.uid,
+                                  alert.username,
+                                  'ban',
+                                  state.currentSeasonId,
+                                  isSandboxActive
+                                );
+                                onNotify('Player Banned', `${alert.username} was officially banned.`);
+                                setStatusBanner(`Officially banned ${alert.username} from probation alert.`);
+                                await loadModerationAndLeaderboard();
+                                onRefreshMiniLeaderboard();
+                              }}
+                              className="flex-1 py-2 rounded-xl bg-red-500 hover:bg-red-400 text-white font-black text-[11px] uppercase cursor-pointer"
+                            >
+                              Ban Account
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await adminResolveProbation(
+                                  alert.uid,
+                                  alert.username,
+                                  'clear',
+                                  state.currentSeasonId,
+                                  isSandboxActive
+                                );
+                                onNotify('Probation Cleared', `${alert.username} was cleared.`);
+                                setStatusBanner(`Cleared probation for ${alert.username}.`);
+                                await loadModerationAndLeaderboard();
+                              }}
+                              className="flex-1 py-2 rounded-xl bg-emerald-500/25 hover:bg-emerald-400 text-emerald-200 hover:text-slate-950 border border-emerald-400/50 font-black text-[11px] uppercase cursor-pointer"
+                            >
+                              Clear Probation
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* MANUAL BAN / TEMP-BAN FORM */}
                 <form
                   onSubmit={handleManualBanSubmit}
@@ -521,7 +733,40 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                         Temp-Banned Players (Pending Admin Review)
                       </span>
                     </h3>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {(tempBannedQueue.length > 0 || officialBannedList.length > 0) && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (
+                              !window.confirm(
+                                'Permanently delete ALL banned & temp-banned accounts and clear ban lists in Firebase RTDB?'
+                              )
+                            ) {
+                              return;
+                            }
+                            setLoadingData(true);
+                            try {
+                              const res = await purgeAllBannedAccountsFromRtdb();
+                              setStatusBanner(
+                                `Purged ${res.purgedUids} banned accounts & ${res.purgedUsernames} username locks from Firebase.`
+                              );
+                              onNotify(
+                                'Banned Accounts Deleted',
+                                `Purged ${res.purgedUids} accounts and cleared ban logs.`
+                              );
+                              await loadModerationAndLeaderboard();
+                              onRefreshMiniLeaderboard();
+                            } finally {
+                              setLoadingData(false);
+                            }
+                          }}
+                          disabled={loadingData}
+                          className="px-3 py-1 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-[11px] uppercase cursor-pointer transition"
+                        >
+                          Purge All Banned ({tempBannedQueue.length + officialBannedList.length})
+                        </button>
+                      )}
                       {tempBannedQueue.length > 0 && (
                         <button
                           onClick={handleUnbanAllTemp}
@@ -995,10 +1240,10 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                 <div className="p-6 rounded-3xl bg-slate-900/95 border-2 border-amber-400/40 space-y-4">
                   <h3 className="text-base font-black text-amber-300 uppercase flex items-center gap-2">
                     <Sliders className="w-5 h-5" />
-                    <span>Fair Server Utilities &amp; Visual Effects</span>
+                    <span>Server Controls</span>
                   </h3>
                   <p className="text-xs font-bold text-slate-400">
-                    Fair administrative utilities that never add unfair coins, gems, or rebirths.
+                    Visual effects, Season 2 preview, event previews, and Firebase cleanup.
                   </p>
 
                   <div className="space-y-2.5">
@@ -1009,19 +1254,174 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                       }}
                       className="w-full py-3 px-4 rounded-2xl bg-cyan-500/20 hover:bg-cyan-400 text-cyan-200 hover:text-slate-950 border border-cyan-400/50 font-black text-xs uppercase cursor-pointer transition"
                     >
-                      Trigger Visual Matthew Rain (0 Coins)
+                      Trigger Visual Rain
                     </button>
 
                     <button
                       onClick={async () => {
                         await loadModerationAndLeaderboard();
                         onRefreshMiniLeaderboard();
-                        setStatusBanner('Synchronized live leaderboard & purged banned ghosts!');
+                        setStatusBanner('Leaderboard synced.');
                       }}
                       className="w-full py-3 px-4 rounded-2xl bg-amber-400/20 hover:bg-amber-400 text-amber-200 hover:text-slate-950 border border-amber-400/50 font-black text-xs uppercase cursor-pointer transition"
                     >
-                      Force Scrub &amp; Resync Leaderboard
+                      Resync Leaderboard
                     </button>
+
+                    {onToggleSandboxS2 && (
+                      <button
+                        onClick={onToggleSandboxS2}
+                        className={`w-full py-3 px-4 rounded-2xl border font-black text-xs uppercase cursor-pointer transition ${
+                          isSandboxActive
+                            ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                            : 'bg-cyan-500/20 hover:bg-cyan-400 text-cyan-200 hover:text-slate-950 border-cyan-400/50'
+                        }`}
+                      >
+                        {isSandboxActive
+                          ? 'Exit Season 2 Preview'
+                          : 'Enter Season 2 Preview'}
+                      </button>
+                    )}
+
+                    {onTriggerZombieRaid && isSandboxActive && (
+                      <button
+                        onClick={onTriggerZombieRaid}
+                        className="w-full py-3 px-4 rounded-2xl bg-rose-500/20 hover:bg-rose-500 text-rose-200 hover:text-white border border-rose-400/50 font-black text-xs uppercase cursor-pointer transition"
+                      >
+                        Trigger Zombie Raid
+                      </button>
+                    )}
+
+                    {onPreviewGlobalEvent && (
+                      <div className="mt-3 p-3.5 rounded-2xl bg-slate-900/90 border border-sky-400/35 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-xs font-black uppercase text-sky-300">
+                            Preview Events (Local Only)
+                          </h4>
+                          {onClearPreviewEvent && (
+                            <button
+                              onClick={onClearPreviewEvent}
+                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/30 text-slate-300 hover:text-rose-200 border border-slate-700 font-black text-[10px] uppercase cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {PLAYER_TRIGGERABLE_EVENTS.map((spec) => (
+                            <button
+                              key={`preview-${spec.id}`}
+                              onClick={() => onPreviewGlobalEvent(spec)}
+                              className="py-2 px-3 rounded-xl bg-sky-500/20 hover:bg-sky-400 text-sky-200 hover:text-slate-950 border border-sky-400/40 font-black text-[11px] uppercase cursor-pointer text-left transition"
+                            >
+                              {spec.label}
+                            </button>
+                          ))}
+                          {onSandboxTestAction && (
+                            <>
+                              <button
+                                onClick={() => onSandboxTestAction('toggle_sandbox_friday_storm')}
+                                className="py-2 px-3 rounded-xl bg-fuchsia-500/20 hover:bg-fuchsia-400 text-fuchsia-200 hover:text-slate-950 border border-fuchsia-400/40 font-black text-[11px] uppercase cursor-pointer text-left transition"
+                              >
+                                {isSandboxStormActive ? 'Stop Friday Storm' : 'Friday Storm'}
+                              </button>
+                              <button
+                                onClick={() => onSandboxTestAction('toggle_preview_midnight_downtime')}
+                                className="py-2 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-400 text-amber-200 hover:text-slate-950 border border-amber-400/40 font-black text-[11px] uppercase cursor-pointer text-left transition"
+                              >
+                                Midnight Downtime
+                              </button>
+                              <button
+                                onClick={() => onSandboxTestAction('replay_s2_intro')}
+                                className="py-2 px-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-400 text-cyan-200 hover:text-slate-950 border border-cyan-400/40 font-black text-[11px] uppercase cursor-pointer text-left transition"
+                              >
+                                S2 Intro Cutscene
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* FIREBASE CLEANUP */}
+                  <div className="mt-5 pt-4 border-t border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <h4 className="text-xs font-black uppercase text-emerald-300">
+                          Database Cleanup
+                        </h4>
+                        <p className="text-[11px] font-bold text-slate-400 mt-0.5">
+                          Removes obsolete legacy keys while keeping accounts, skins &amp; Season 1 standings.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={fbBusy}
+                          onClick={async () => {
+                            setFbBusy(true);
+                            try {
+                              const summary = await inspectFirebaseStructureSummary();
+                              setFbSummary(summary);
+                            } finally {
+                              setFbBusy(false);
+                            }
+                          }}
+                          className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-200 font-black text-[11px] uppercase cursor-pointer"
+                        >
+                          {fbBusy ? 'Scanning...' : 'Scan DB'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={fbBusy}
+                          onClick={async () => {
+                            setFbBusy(true);
+                            try {
+                              const res = await cleanupLegacySeason1FirebaseClutter({
+                                deleteSeason1Leaderboard: false,
+                                deleteSandbox: false,
+                              });
+                              const refreshed = await inspectFirebaseStructureSummary();
+                              setFbSummary(refreshed);
+                              setStatusBanner(
+                                `Removed ${res.deletedKeys.length} legacy keys (${res.failedKeys.length} skipped).`
+                              );
+                              onNotify(
+                                'Database Cleaned',
+                                `Removed ${res.deletedKeys.length} legacy keys.`
+                              );
+                            } finally {
+                              setFbBusy(false);
+                            }
+                          }}
+                          className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] uppercase cursor-pointer"
+                        >
+                          Clean Legacy Clutter
+                        </button>
+                      </div>
+                    </div>
+
+                    {fbSummary && (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                        <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                          <div className="text-slate-400 font-bold uppercase text-[9px]">Accounts</div>
+                          <div className="text-white font-black text-sm">{fbSummary.realUsernamesCount}</div>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                          <div className="text-slate-400 font-bold uppercase text-[9px]">Profiles</div>
+                          <div className="text-cyan-300 font-black text-sm">{fbSummary.usersCount}</div>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                          <div className="text-slate-400 font-bold uppercase text-[9px]">S1 Ranked</div>
+                          <div className="text-amber-300 font-black text-sm">{fbSummary.season1LeaderboardCount}</div>
+                        </div>
+                        <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                          <div className="text-slate-400 font-bold uppercase text-[9px]">Legacy Keys</div>
+                          <div className="text-rose-300 font-black text-sm">{fbSummary.legacyClutterKeys.length}</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

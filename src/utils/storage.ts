@@ -1,12 +1,29 @@
-import { GameState, RealmId } from '../types/game';
+import { GameState, RealmId, PetInstance, EggRarity, FoodId } from '../types/game';
 import { calculateCPS } from './calculations';
 import { isValidSkinId, checkAndApplyMilestoneUnlocks } from '../data/skins';
+import {
+  createEmptySealedEggs,
+  createDefaultFoodInventory,
+  getPetSpeciesDefinition,
+  normalizeEggRarity,
+  normalizePetSpeciesId,
+} from '../data/petsAndEggs';
+import { COSMETIC_ITEMS } from '../data/cosmetics';
+import { MATTHEW_VAULT_SKINS } from '../data/season2Skins';
+import { ALL_CURSORS, STARTER_CURSOR_ID, isValidCursorId, resolveCursorId } from '../data/cursors';
 import { getActiveSeason, getAuthoritativeDateString } from './scheduleEngine';
-import { MATTHEW_STORM_CONFIG, BETA_RESET_CONFIG } from '../config/gameConfig';
+import {
+  MATTHEW_STORM_CONFIG,
+  BETA_RESET_CONFIG,
+  SEASON_2_CONFIG,
+  TEST_ISOLATION_CONFIG,
+  isSandboxSeason2Context,
+} from '../config/gameConfig';
 
 const SAVE_KEY = 'matthew_clicker_save_v1';
 
 const VALID_REALMS: RealmId[] = ['earth', 'under', 'ocean', 'space', 'uper'];
+const VALID_COSMETIC_IDS = new Set(COSMETIC_ITEMS.map((c) => c.id));
 
 export function getDefaultGameState(): GameState {
   const activeSeason = getActiveSeason();
@@ -59,10 +76,32 @@ export function getDefaultGameState(): GameState {
       stormSkinsPurchased: [],
     },
 
+    pets: [],
+    equippedPetIds: [],
+    sealedEggs: createEmptySealedEggs(),
+    foodInventory: createDefaultFoodInventory(),
+    ownedCosmetics: [],
+    equippedCosmetics: { hat: null, glasses: null },
+    hasMatthewShopToken: false,
+    matthewShopTokens: 0,
+    unlockedCursors: [STARTER_CURSOR_ID],
+    equippedCursorId: STARTER_CURSOR_ID,
+    cratesOpened: 0,
+    chestsOpened: 0,
+    zombiesDefeated: 0,
+    zombiesStolenCoins: 0,
+    zombieHitsTaken: 0,
+    season2IntroSeen: false,
+    winnerBadges: [],
+    clanId: null,
+    clanName: null,
+    sandboxS2Enabled: false,
+
     lastSaveTime: Date.now(),
     totalPlaytimeSeconds: 0,
     lifetimeAllSeasonsCoins: 0,
     lifetimeAllSeasonsClicks: 0,
+    highestCps: 0,
     goldenMatthewsClicked: 0,
     giantMatthewsClicked: 0,
     introCutsceneSeen: false,
@@ -92,19 +131,34 @@ export function getDefaultGameState(): GameState {
 export function performSeasonalRollover(
   state: GameState,
   newSeasonId: string,
-  wasChampion = false
+  wasChampion = false,
+  wasTop10 = false
 ): GameState {
   const unlockedRealms = state.unlockedRealms || ['earth'];
   const realmPriority: RealmId[] = ['uper', 'space', 'ocean', 'under', 'earth'];
   const highestRealm = realmPriority.find((r) => unlockedRealms.includes(r)) || 'earth';
   const prevSeasonNum = parseInt((state.currentSeasonId || 'season_1').replace('season_', ''), 10) || 1;
 
-  const nextUnlockedSkins = wasChampion && !state.unlockedSkins.includes('champion_matthew')
-    ? [...state.unlockedSkins, 'champion_matthew']
-    : state.unlockedSkins;
+  const rewardSkinIds: string[] = [];
+  if (wasChampion) rewardSkinIds.push('champion_matthew', 'liam_matthew');
+  else if (wasTop10) rewardSkinIds.push('liam_matthew');
+
+  const nextUnlockedSkins = Array.from(
+    new Set([...(state.unlockedSkins || ['classic_matthew']), ...rewardSkinIds])
+  );
+
+  const nextWinnerBadges = Array.isArray(state.winnerBadges) ? [...state.winnerBadges] : [];
+  if (wasChampion && !nextWinnerBadges.some((b) => b.seasonNumber === prevSeasonNum)) {
+    nextWinnerBadges.push({
+      seasonNumber: prevSeasonNum,
+      label: `Season ${prevSeasonNum} Winner`,
+      awardedAt: Date.now(),
+    });
+  }
 
   return {
     ...state,
+    sandboxS2Enabled: false,
     coins: 0,
     lifetimeCoins: 0,
     seasonalScore: 0,
@@ -133,9 +187,36 @@ export function performSeasonalRollover(
     lifetimePrestigeShards: 0,
     prestigeUpgrades: {},
 
-    gems: 0,
+    gems: Math.max(0, state.gems || 0),
     activePlaySecondsAccumulated: 0,
     stormActiveSecondsAccumulated: 0,
+
+    // Season 2: Skins & Cosmetics persist across seasons; seasonal pets/eggs/tokens reset cleanly
+    ownedCosmetics: (state.ownedCosmetics || []).filter((id) => VALID_COSMETIC_IDS.has(id)),
+    equippedCosmetics: {
+      hat: null,
+      glasses:
+        state.equippedCosmetics?.glasses &&
+        VALID_COSMETIC_IDS.has(state.equippedCosmetics.glasses)
+          ? state.equippedCosmetics.glasses
+          : null,
+    },
+    pets: [],
+    equippedPetIds: [],
+    sealedEggs: createEmptySealedEggs(),
+    foodInventory: createDefaultFoodInventory(),
+    hasMatthewShopToken: false,
+    matthewShopTokens: 0,
+    unlockedCursors: (state.unlockedCursors || []).filter((id) => isValidCursorId(id)),
+    equippedCursorId: isValidCursorId(state.equippedCursorId) ? state.equippedCursorId : null,
+    cratesOpened: state.cratesOpened || 0,
+    chestsOpened: 0,
+    zombiesDefeated: 0,
+    zombiesStolenCoins: 0,
+    zombieHitsTaken: 0,
+
+    winnerBadges: nextWinnerBadges,
+    season2IntroSeen: newSeasonId === 'season_2' ? false : state.season2IntroSeen,
 
     lifetimeAllSeasonsCoins: Math.max(
       state.lifetimeAllSeasonsCoins || 0,
@@ -145,6 +226,7 @@ export function performSeasonalRollover(
       state.lifetimeAllSeasonsClicks || 0,
       (state.lifetimeAllSeasonsClicks || 0) + (state.clicks || 0)
     ),
+    highestCps: state.highestCps || 0,
 
     currentSeasonId: newSeasonId,
     seasonHistory: [
@@ -164,21 +246,59 @@ export function performSeasonalRollover(
   };
 }
 
-export function saveGame(state: GameState, preserveTimestamp = false): boolean {
+export function saveGame(
+  state: GameState,
+  preserveTimestamp = false,
+  storageKeyOverride?: string
+): boolean {
   try {
     if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
       return false;
     }
+    const isSandbox = isSandboxSeason2Context(
+      state.cloudAccount?.uid,
+      state.sandboxS2Enabled
+    );
+    const targetKey =
+      storageKeyOverride || (isSandbox ? TEST_ISOLATION_CONFIG.sandboxStorageKey : SAVE_KEY);
     const toSave: GameState = {
       ...state,
       lastOwnerUid: state.cloudAccount?.uid || state.lastOwnerUid || null,
       lastSaveTime: preserveTimestamp && state.lastSaveTime ? state.lastSaveTime : Date.now(),
     };
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(toSave));
+    window.localStorage.setItem(targetKey, JSON.stringify(toSave));
     return true;
   } catch (err) {
     console.error('Failed to save game state to localStorage:', err);
     return false;
+  }
+}
+
+export function loadSandboxGame(): GameState {
+  try {
+    if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+      return { ...getDefaultGameState(), currentSeasonId: 'season_2', sandboxS2Enabled: true };
+    }
+    const raw = window.localStorage.getItem(TEST_ISOLATION_CONFIG.sandboxStorageKey);
+    if (!raw) {
+      return {
+        ...getDefaultGameState(),
+        currentSeasonId: 'season_2',
+        coins: 0,
+        lifetimeCoins: 0,
+        seasonalScore: 0,
+        sandboxS2Enabled: true,
+      };
+    }
+    const parsed = JSON.parse(raw);
+    const sanitized = sanitizeAndValidateGameState(parsed);
+    return {
+      ...sanitized,
+      currentSeasonId: 'season_2',
+      sandboxS2Enabled: true,
+    };
+  } catch {
+    return { ...getDefaultGameState(), currentSeasonId: 'season_2', sandboxS2Enabled: true };
   }
 }
 
@@ -309,23 +429,29 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
   };
 
   // 2. Preserve legitimate unlocked skins, strictly discarding non-existent IDs.
-  // Classic Matthew is always unlocked.
+  // Classic Matthew is always unlocked. Migrate any legacy mathjew ID to updated mathjew.
+  const normalizeSkinId = (id: string) =>
+    id === 'og_mathjew' || id === 'updated_mathjew' ? 'mathjew' : id;
+
   let validUnlockedSkins: string[] = ['classic_matthew'];
   if (Array.isArray(parsed.unlockedSkins)) {
-    const legitimate = parsed.unlockedSkins.filter(
-      (id: unknown): id is string => typeof id === 'string' && isValidSkinId(id)
-    );
+    const legitimate = parsed.unlockedSkins
+      .filter((id: unknown): id is string => typeof id === 'string')
+      .map(normalizeSkinId)
+      .filter((id: string) => isValidSkinId(id));
     validUnlockedSkins = Array.from(new Set(['classic_matthew', ...legitimate]));
   }
 
   // 3. Validate equipped skin against legitimate unlocked collection.
   // NEVER grant a skin solely because an old save claims it was equipped.
+  const normalizedEquippedSkin =
+    typeof parsed.equippedSkin === 'string' ? normalizeSkinId(parsed.equippedSkin) : '';
   const hasValidEquippedSkin =
-    typeof parsed.equippedSkin === 'string' &&
-    isValidSkinId(parsed.equippedSkin) &&
-    validUnlockedSkins.includes(parsed.equippedSkin);
+    Boolean(normalizedEquippedSkin) &&
+    isValidSkinId(normalizedEquippedSkin) &&
+    validUnlockedSkins.includes(normalizedEquippedSkin);
 
-  const initialEquippedSkin = hasValidEquippedSkin ? parsed.equippedSkin : 'classic_matthew';
+  const initialEquippedSkin = hasValidEquippedSkin ? normalizedEquippedSkin : 'classic_matthew';
 
   const baseState: GameState = {
     coins,
@@ -377,6 +503,124 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
         ? { ...def.eventStats, ...parsed.eventStats }
         : def.eventStats,
 
+    pets: Array.isArray(parsed.pets)
+      ? parsed.pets
+          .filter((p: unknown): p is PetInstance => Boolean(p && typeof p === 'object' && (p as PetInstance).instanceId))
+          .map((p: PetInstance) => {
+            const normRarity = normalizeEggRarity(p.rarity);
+            const normSpecies = normalizePetSpeciesId(p.speciesId);
+            const spec = getPetSpeciesDefinition(normSpecies, normRarity);
+            return {
+              ...p,
+              rarity: normRarity,
+              speciesId: spec.speciesId,
+              name: spec.name,
+              level: Math.max(1, Math.floor(p.level || 1)),
+              hunger: 100,
+            };
+          })
+      : [],
+    equippedPetIds: Array.isArray(parsed.equippedPetIds)
+      ? parsed.equippedPetIds
+          .filter((id: unknown): id is string => typeof id === 'string')
+          .slice(0, SEASON_2_CONFIG.maxEquippedPets)
+      : [],
+    sealedEggs: (() => {
+      const base = createEmptySealedEggs();
+      if (parsed.sealedEggs && typeof parsed.sealedEggs === 'object') {
+        for (const [rawKey, rawVal] of Object.entries(parsed.sealedEggs as Record<string, unknown>)) {
+          const val = Math.max(0, typeof rawVal === 'number' && !isNaN(rawVal) ? Math.floor(rawVal) : 0);
+          if (val > 0) {
+            const normKey = normalizeEggRarity(rawKey);
+            base[normKey] = (base[normKey] || 0) + val;
+          }
+        }
+      }
+      return base;
+    })(),
+    foodInventory: (() => {
+      const base = createDefaultFoodInventory();
+      if (parsed.foodInventory && typeof parsed.foodInventory === 'object') {
+        for (const k of Object.keys(base) as FoodId[]) {
+          const val = (parsed.foodInventory as Record<string, unknown>)[k];
+          base[k] = Math.max(0, typeof val === 'number' && !isNaN(val) ? Math.floor(val) : base[k]);
+        }
+      }
+      return base;
+    })(),
+    ownedCosmetics: Array.isArray(parsed.ownedCosmetics)
+      ? parsed.ownedCosmetics.filter((id: unknown): id is string => typeof id === 'string' && VALID_COSMETIC_IDS.has(id))
+      : [],
+    equippedCosmetics: {
+      hat: null,
+      glasses:
+        parsed.equippedCosmetics?.glasses &&
+        VALID_COSMETIC_IDS.has(parsed.equippedCosmetics.glasses) &&
+        Array.isArray(parsed.ownedCosmetics) &&
+        parsed.ownedCosmetics.includes(parsed.equippedCosmetics.glasses)
+          ? parsed.equippedCosmetics.glasses
+          : null,
+    },
+    ...(() => {
+      const tokens =
+        typeof parsed.matthewShopTokens === 'number' && !isNaN(parsed.matthewShopTokens)
+          ? Math.max(0, Math.floor(parsed.matthewShopTokens))
+          : parsed.hasMatthewShopToken
+          ? 1
+          : 0;
+      const active = Boolean(parsed.hasMatthewShopToken) || tokens > 0;
+      return {
+        matthewShopTokens: active ? Math.max(1, tokens) : 0,
+        hasMatthewShopToken: active,
+      };
+    })(),
+    ...(() => {
+      const hasToken =
+        Boolean(parsed.hasMatthewShopToken) ||
+        (typeof parsed.matthewShopTokens === 'number' && parsed.matthewShopTokens > 0);
+      const migratedList = Array.isArray(parsed.unlockedCursors)
+        ? parsed.unlockedCursors
+            .map((id: unknown) => (typeof id === 'string' ? resolveCursorId(id) : null))
+            .filter((id: string | null): id is string => Boolean(id && isValidCursorId(id)))
+        : [];
+      const sanitizedUnlocked = Array.from(
+        new Set([
+          STARTER_CURSOR_ID,
+          ...migratedList,
+          ...(hasToken ? ALL_CURSORS.map((c) => c.id) : []),
+        ])
+      );
+      const resolvedEquipped =
+        parsed.equippedCursorId === null
+          ? null
+          : typeof parsed.equippedCursorId === 'string'
+          ? resolveCursorId(parsed.equippedCursorId)
+          : STARTER_CURSOR_ID;
+      const sanitizedEquipped =
+        resolvedEquipped === null
+          ? null
+          : resolvedEquipped &&
+            isValidCursorId(resolvedEquipped) &&
+            sanitizedUnlocked.includes(resolvedEquipped)
+          ? resolvedEquipped
+          : STARTER_CURSOR_ID;
+      return {
+        unlockedCursors: sanitizedUnlocked,
+        equippedCursorId: sanitizedEquipped,
+      };
+    })(),
+    cratesOpened: Math.max(0, Number(parsed.cratesOpened) || 0),
+    chestsOpened: Math.max(0, Number(parsed.chestsOpened) || 0),
+    zombiesDefeated: Math.max(0, Number(parsed.zombiesDefeated) || 0),
+    zombiesStolenCoins: Math.max(0, Number(parsed.zombiesStolenCoins) || 0),
+    zombieHitsTaken: Math.max(0, Number(parsed.zombieHitsTaken) || 0),
+    season2IntroSeen: Boolean(parsed.season2IntroSeen),
+    winnerBadges: Array.isArray(parsed.winnerBadges) ? parsed.winnerBadges : [],
+    clanId: typeof parsed.clanId === 'string' ? parsed.clanId : null,
+    clanName: typeof parsed.clanName === 'string' ? parsed.clanName : null,
+    sandboxS2Enabled: Boolean(parsed.sandboxS2Enabled),
+    activeSessionToken: typeof parsed.activeSessionToken === 'string' ? parsed.activeSessionToken : undefined,
+
     lastSaveTime,
     totalPlaytimeSeconds,
     lifetimeAllSeasonsCoins: Math.max(
@@ -387,6 +631,7 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
       clicks,
       typeof parsed.lifetimeAllSeasonsClicks === 'number' ? parsed.lifetimeAllSeasonsClicks : 0
     ),
+    highestCps: Math.max(0, Number(parsed.highestCps) || 0),
     goldenMatthewsClicked,
     giantMatthewsClicked,
     selectedEnvironment: parsed.selectedEnvironment,

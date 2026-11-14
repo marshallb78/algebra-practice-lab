@@ -1,16 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameState } from '../types/game';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { formatCoins } from '../utils/formatters';
 import { BALANCE } from '../data/balance';
 import { calculateCPS, calculateClickPower } from '../utils/calculations';
+import { isSeasonTwoOrLater } from '../data/skins';
+import { MATTHEW_VAULT_SKINS } from '../data/season2Skins';
+import { rollChestLoot } from '../data/petsAndEggs';
 
 interface GoldenMatthewEventProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
   onSpawnBonus: (text: string) => void;
   forceSpawnCounter?: number;
+  isPaused?: boolean;
 }
 
 export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
@@ -18,72 +22,101 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
   setState,
   onSpawnBonus,
   forceSpawnCounter = 0,
+  isPaused = false,
 }) => {
   const [isActive, setIsActive] = useState(false);
   const [position, setPosition] = useState({ x: 10, y: 30 });
   const [direction, setDirection] = useState<'left' | 'right'>('right');
 
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
+  const directionRef = useRef(direction);
+  directionRef.current = direction;
+  const posRef = useRef(position);
+  posRef.current = position;
+  const isPausedRef = useRef(isPaused);
+  isPausedRef.current = isPaused;
+  const isSeason2Ref = useRef(isSeasonTwoOrLater(state.currentSeasonId));
+  isSeason2Ref.current = isSeasonTwoOrLater(state.currentSeasonId);
+
   useEffect(() => {
-    if (forceSpawnCounter <= 0) return;
+    if (forceSpawnCounter <= 0 || isPausedRef.current) return;
     const startLeft = Math.random() > 0.5;
-    setDirection(startLeft ? 'right' : 'left');
-    setPosition({
-      x: startLeft ? 120 : Math.max(240, window.innerWidth - 360),
-      y: 160 + Math.random() * Math.max(120, window.innerHeight - 400),
-    });
+    const dir = startLeft ? 'right' : 'left';
+    const startPos = {
+      x: startLeft ? 120 : Math.max(220, window.innerWidth - 280),
+      y: 140 + Math.random() * Math.max(120, window.innerHeight - 360),
+    };
+    directionRef.current = dir;
+    posRef.current = startPos;
+    setDirection(dir);
+    setPosition(startPos);
     setIsActive(true);
     soundManager.playGoldenSpawn();
   }, [forceSpawnCounter]);
 
-  // Interval timer for spawning Golden Matthew
+  // Interval timer for spawning Golden/Flying Matthew cleanly without mid-flight kill timers
   useEffect(() => {
-    const spawnDelay = Math.max(
-      45000,
-      BALANCE.goldenEvent.baseDelayMs + (Math.random() - 0.5) * BALANCE.goldenEvent.delayVarianceMs
-    );
+    if (isActive || isPaused) return;
+    const spawnDelay = isSeason2Ref.current
+      ? 15000 + Math.random() * 9000
+      : Math.max(
+          16000,
+          BALANCE.goldenEvent.baseDelayMs + (Math.random() - 0.5) * BALANCE.goldenEvent.delayVarianceMs
+        );
 
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
+      if (isPausedRef.current) return;
       const startLeft = Math.random() > 0.5;
-      setDirection(startLeft ? 'right' : 'left');
-      setPosition({
-        x: startLeft ? -80 : window.innerWidth + 80,
-        y: 100 + Math.random() * (window.innerHeight - 300),
-      });
+      const dir = startLeft ? 'right' : 'left';
+      const startPos = {
+        x: startLeft ? -70 : window.innerWidth + 70,
+        y: Math.max(95, Math.min(window.innerHeight - 190, 100 + Math.random() * Math.max(120, window.innerHeight - 310))),
+      };
+      directionRef.current = dir;
+      posRef.current = startPos;
+      setDirection(dir);
+      setPosition(startPos);
       setIsActive(true);
       soundManager.playGoldenSpawn();
-
-      const duration = BALANCE.goldenEvent.flightDurationMs;
-      setTimeout(() => {
-        setIsActive(false);
-      }, duration);
     }, spawnDelay);
 
-    return () => clearTimeout(timer);
-  }, [isActive]);
+    return () => window.clearTimeout(timer);
+  }, [isActive, isPaused]);
 
-  // Movement animation loop when active
+  // Smooth edge-to-edge flight animation (despawns ONLY when exiting opposite screen edge or caught)
   useEffect(() => {
-    if (!isActive) return;
+    if (!isActive || isPaused) return;
 
-    const interval = setInterval(() => {
-      setPosition((prev) => {
-        const speed = direction === 'right' ? 3.5 : -3.5;
-        const newX = prev.x + speed;
-        const newY = prev.y + Math.sin(newX * 0.04) * 2.5;
+    let lastTickMs = performance.now();
+    const interval = window.setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min(0.08, (now - lastTickMs) / 1000);
+      lastTickMs = now;
 
-        if (
-          (direction === 'right' && newX > window.innerWidth + 90) ||
-          (direction === 'left' && newX < -90)
-        ) {
-          setIsActive(false);
-        }
+      const cur = posRef.current;
+      const speedPxPerSec = 165;
+      const newX = cur.x + (directionRef.current === 'right' ? speedPxPerSec : -speedPxPerSec) * dt;
+      const minY = 85;
+      const maxY = Math.max(180, window.innerHeight - 150);
+      const waveY = cur.y + Math.sin(newX * 0.03) * 1.8;
+      const newY = Math.max(minY, Math.min(maxY, waveY));
 
-        return { x: newX, y: newY };
-      });
-    }, 25);
+      if (
+        (directionRef.current === 'right' && newX > window.innerWidth + 95) ||
+        (directionRef.current === 'left' && newX < -95)
+      ) {
+        setIsActive(false);
+        return;
+      }
 
-    return () => clearInterval(interval);
-  }, [isActive, direction]);
+      const nextPos = { x: newX, y: newY };
+      posRef.current = nextPos;
+      setPosition(nextPos);
+    }, 22);
+
+    return () => window.clearInterval(interval);
+  }, [isActive, isPaused]);
 
   const handleCatch = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -92,16 +125,23 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     soundManager.playCrit();
     particleEngine.emitClick(e.clientX, e.clientY, true, 25);
 
-    // Huge buffed Golden Matthew reward scaling with Click Power, CPS, and current bank
+    // Balanced Golden Matthew reward scaling cleanly with Click Power & CPS (no runaway lifetime feedback loop)
     const cps = calculateCPS(state);
     const { totalPower } = calculateClickPower(state);
-    const productionBounty = Math.floor(
-      cps * BALANCE.goldenEvent.bountyCpsSeconds + totalPower * BALANCE.goldenEvent.bountyClickCount
-    );
-    const scoreScaledBounty = Math.floor(
-      Math.min(Math.max(state.coins * 0.25, state.lifetimeCoins * 0.1), productionBounty * 6)
-    );
-    const bounty = Math.max(BALANCE.goldenEvent.minBountyFloor, productionBounty, scoreScaledBounty);
+    const productionBounty = Math.floor(cps * 35 + totalPower * 80);
+    const bounty = Math.max(BALANCE.goldenEvent.minBountyFloor, productionBounty);
+
+    if (isSeasonTwoOrLater(state.currentSeasonId)) {
+      setState((prev) => ({
+        ...prev,
+        coins: prev.coins + bounty,
+        lifetimeCoins: prev.lifetimeCoins + bounty,
+        seasonalScore: prev.seasonalScore + bounty,
+        goldenMatthewsClicked: prev.goldenMatthewsClicked + 1,
+      }));
+      onSpawnBonus(`GOLDEN MATTHEW! +${formatCoins(bounty)} Coins!`);
+      return;
+    }
 
     setState((prev) => ({
       ...prev,
@@ -113,7 +153,7 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     onSpawnBonus(`🌟 GOLDEN MATTHEW! +${formatCoins(bounty)} COINS! 🌟`);
   };
 
-  if (!isActive) return null;
+  if (!isActive || isPaused) return null;
 
   return (
     <div

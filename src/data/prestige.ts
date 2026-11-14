@@ -1,26 +1,25 @@
 import { PrestigeUpgrade } from '../types/game';
 
-export const PRESTIGE_REQUIREMENT = 1000000; // 1M Coins to Ascend / Rebirth
-export const ASCENSION_STEP = 0.15; // +0.15x per Rebirth tier (buffed so Ascension Multiplier adds much faster!)
+export const PRESTIGE_REQUIREMENT = 100000; // 100K Coins to Ascend / Rebirth early
+export const ASCENSION_STEP = 0.6; // +0.60x per Rebirth tier for high-impact Ascension scaling
 
 /**
- * Calculates how many +0.15x Ascension steps the player has earned from lifetime coins.
- * Fast-scaling logarithmic curve across all 35 upgrade tiers so every Rebirth
- * adds significant multiplier speed!
+ * Calculates how many +0.60x Ascension steps the player has earned from lifetime coins.
+ * High-momentum logarithmic curve through Vg (10^63) so Ascension reaches massive multipliers!
  */
 export function calculatePrestigeShards(lifetimeCoins: number): number {
   if (lifetimeCoins < PRESTIGE_REQUIREMENT) return 0;
   const logRatio = Math.log10(lifetimeCoins / PRESTIGE_REQUIREMENT);
-  return Math.max(1, 1 + Math.floor(logRatio * 3.5));
+  return Math.max(1, 1 + Math.floor(logRatio * 5));
 }
 
 /**
- * Returns the lifetime coins required to unlock the next +0.15x Ascension step.
+ * Returns the lifetime coins required to unlock the next +0.60x Ascension step.
  */
 export function getNextPrestigeRequirement(currentLifetimeSteps: number): number {
   const nextStep = Math.max(1, Math.floor(currentLifetimeSteps || 0) + 1);
   if (nextStep <= 1) return PRESTIGE_REQUIREMENT;
-  return Math.ceil(PRESTIGE_REQUIREMENT * Math.pow(10, (nextStep - 1) / 3.5));
+  return Math.ceil(PRESTIGE_REQUIREMENT * Math.pow(10, (nextStep - 1) / 5));
 }
 
 /**

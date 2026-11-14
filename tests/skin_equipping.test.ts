@@ -134,7 +134,9 @@ describe('Automatic Skin Equipping, Locked Skin Enforcement & Fast-Click Animati
 
       expect(isValidSkinId('classic_matthew')).toBe(true);
       expect(isValidSkinId('mathjew')).toBe(true);
+      expect(isValidSkinId('apocalypse_matthew')).toBe(true);
       expect(isValidSkinId('mathgoon')).toBe(false);
+      expect(isValidSkinId('matthgoon')).toBe(false);
       expect(isValidSkinId('matthew_storm_skin_5')).toBe(true);
       expect(isValidSkinId('fake_matthew')).toBe(false);
     });

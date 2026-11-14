@@ -1,6 +1,14 @@
 import { Skin, GameState } from '../types/game';
 import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
 import { formatCoins } from '../utils/formatters';
+import {
+  FROZEN_PROGRESSION_SKINS,
+  ITEM_SHOP_SKINS,
+  SEASON_2_LIVE_EVENT_SKINS,
+  MATTHEW_VAULT_SKINS,
+} from './season2Skins';
+
+export * from './season2Skins';
 
 export type { Skin };
 
@@ -219,7 +227,7 @@ export const CHARACTER_SKINS: Skin[] = [
     category: 'characters',
     description: 'SUPER SUPER RARE endgame character unlocked only by true decillionaires.',
     perkDescription: 'Ultra-Rare Flex',
-    image: './images/skins/mathjew.png',
+    image: './images/skins/season2/updated_mathjew.png',
     fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
@@ -234,7 +242,6 @@ export const CHARACTER_SKINS: Skin[] = [
 
 /**
  * Season 2 Collectible Progression Skin Lineup!
- * Includes Anime Matthew, Minecraft Matthew, Moaning Matthew, Balenciaga Matthew, Matthgoon, and high-tier Season 2 unlocks!
  */
 export const SEASON_2_SKINS: Skin[] = [
   {
@@ -248,8 +255,8 @@ export const SEASON_2_SKINS: Skin[] = [
     fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
-      target: 2500,
-      description: '2,500 Points (Season 2)',
+      target: 5e7,
+      description: '50M Points (Season 2)',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -266,62 +273,8 @@ export const SEASON_2_SKINS: Skin[] = [
     fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
-      target: 100000,
-      description: '100K Points (Season 2)',
-    },
-    clickBonusMultiplier: 1.0,
-    cpsBonusMultiplier: 1.0,
-    critBonusChance: 0,
-  },
-  {
-    id: 'moaning_matthew',
-    name: 'Moaning Matthew',
-    rarity: 'Common',
-    category: 'existing',
-    description: 'Cursed max-volume classroom audio energy.',
-    perkDescription: 'Season 2 Collectible Swag',
-    image: './images/skins/season2/moaning_matthew.png',
-    fallbackImage: './images/skins/classic_matthew.png',
-    milestone: {
-      type: 'lifetime_coins',
-      target: 10000000,
-      description: '10M Points (Season 2)',
-    },
-    clickBonusMultiplier: 1.0,
-    cpsBonusMultiplier: 1.0,
-    critBonusChance: 0,
-  },
-  {
-    id: 'balenciaga_matthew',
-    name: 'Balenciaga Matthew',
-    rarity: 'Rare',
-    category: 'existing',
-    description: 'Oversized luxury runway puffer and untouchable high-fashion drip.',
-    perkDescription: 'Season 2 Collectible Swag',
-    image: './images/skins/season2/balenciaga_matthew.png',
-    fallbackImage: './images/skins/classic_matthew.png',
-    milestone: {
-      type: 'lifetime_coins',
-      target: 1000000000,
-      description: '1B Points (Season 2)',
-    },
-    clickBonusMultiplier: 1.0,
-    cpsBonusMultiplier: 1.0,
-    critBonusChance: 0,
-  },
-  {
-    id: 'matthgoon',
-    name: 'Matthgoon',
-    rarity: 'Rare',
-    category: 'existing',
-    description: 'The legendary Season 2 return of the midnight goon-cave commander.',
-    perkDescription: 'Season 2 Collectible Swag',
-    image: './images/skins/season2/matthgoon.png',
-    fallbackImage: './images/skins/classic_matthew.png',
-    milestone: {
-      type: 'lifetime_coins',
-      target: 25000000000,
-      description: '25B Points (Season 2)',
+      target: 1e18,
+      description: '1 Qi Points (Season 2)',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -338,26 +291,8 @@ export const SEASON_2_SKINS: Skin[] = [
     fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
-      target: 5000000000000,
-      description: '5T Points (Season 2)',
-    },
-    clickBonusMultiplier: 1.0,
-    cpsBonusMultiplier: 1.0,
-    critBonusChance: 0,
-  },
-  {
-    id: 'super_saiyan_matthew',
-    name: 'Super Saiyan Matthew',
-    rarity: 'Legendary',
-    category: 'existing',
-    description: 'Blazing golden ki aura over 9,000 Quadrillion!',
-    perkDescription: 'Season 2 Collectible Swag',
-    image: './images/skins/season2/super_saiyan_matthew.png',
-    fallbackImage: './images/skins/classic_matthew.png',
-    milestone: {
-      type: 'lifetime_coins',
-      target: 1e16,
-      description: '10Qa Points (Season 2)',
+      target: 1e21,
+      description: '1 Sx Points (Season 2)',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -374,8 +309,8 @@ export const SEASON_2_SKINS: Skin[] = [
     fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
-      target: 1e20,
-      description: '100Qi Points (Season 2)',
+      target: 1e24,
+      description: '1Sp Points (Season 2)',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -392,26 +327,8 @@ export const SEASON_2_SKINS: Skin[] = [
     fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
-      target: 1e24,
-      description: '1Sp Points (Season 2)',
-    },
-    clickBonusMultiplier: 1.0,
-    cpsBonusMultiplier: 1.0,
-    critBonusChance: 0,
-  },
-  {
-    id: 'omnipotent_matthew',
-    name: 'Omnipotent Matthew',
-    rarity: 'Divine',
-    category: 'existing',
-    description: 'Transcendent Season 2 ruler of all parallel dimensions.',
-    perkDescription: 'Season 2 Ultimate Flex',
-    image: './images/skins/season2/omnipotent_matthew.png',
-    fallbackImage: './images/skins/classic_matthew.png',
-    milestone: {
-      type: 'lifetime_coins',
-      target: 1e29,
-      description: '100Oc Points (Season 2)',
+      target: 1e30,
+      description: '1No Points (Season 2)',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -428,8 +345,8 @@ export const SEASON_2_SKINS: Skin[] = [
     fallbackImage: './images/skins/classic_matthew.png',
     milestone: {
       type: 'lifetime_coins',
-      target: 1e34,
-      description: '10Dc Points (Season 2 Super Rare)',
+      target: 1e36,
+      description: '1 UDc Points (Season 2 Super Rare)',
     },
     clickBonusMultiplier: 1.0,
     cpsBonusMultiplier: 1.0,
@@ -453,6 +370,29 @@ export const CHAMPION_SKIN: Skin = {
     type: 'season_champion',
     target: 1,
     description: 'Finish #1 Worldwide at Season End',
+  },
+  clickBonusMultiplier: 1.0,
+  cpsBonusMultiplier: 1.0,
+  critBonusChance: 0,
+};
+
+/**
+ * Exclusive Season 1 Top 10 Reward Skin (Placeholder art until final artwork is uploaded)
+ */
+export const LIAM_SKIN: Skin = {
+  id: 'liam_matthew',
+  name: 'Liam',
+  rarity: 'Mythic',
+  category: 'champion',
+  description: 'Awarded automatically to the Top 10 Worldwide finalists of Season 1.',
+  perkDescription: 'Season 1 Top 10 Exclusive',
+  image: './images/skins/season2/liam_matthew.png',
+  fallbackImage: './images/skins/classic_matthew.png',
+  isPlaceholderArt: true,
+  milestone: {
+    type: 'season_champion',
+    target: 10,
+    description: 'Finish Top 10 in Season 1',
   },
   clickBonusMultiplier: 1.0,
   cpsBonusMultiplier: 1.0,
@@ -571,10 +511,10 @@ export const MATTHEW_STORM_SKINS: Skin[] = [
 export const SEASON_2_STORM_SKINS: Skin[] = [
   {
     id: 's2_storm_skin_1',
-    name: 'Skibidi Matthew',
+    name: 'Frost Sentinel Matthew',
     rarity: 'Mythic',
     category: 'matthew_storm',
-    description: 'Season 2 Live Event Exclusive anomaly straight from Ohio.',
+    description: 'Runed glacial pauldrons swirling with eternal winter magic.',
     perkDescription: 'Season 2 Live Event Exclusive',
     image: './images/skins/season2/s2_storm_skin_1.png',
     fallbackImage: './images/skins/classic_matthew.png',
@@ -591,10 +531,10 @@ export const SEASON_2_STORM_SKINS: Skin[] = [
   },
   {
     id: 's2_storm_skin_2',
-    name: 'CaseOh Matthew',
+    name: 'Glacial Emperor Matthew',
     rarity: 'Mythic',
     category: 'matthew_storm',
-    description: '1x1 Lego piece gravity well that shakes the entire screen.',
+    description: 'Crowned sovereign of the permafrost wearing fur-trimmed frost robes.',
     perkDescription: 'Season 2 Live Event Exclusive',
     image: './images/skins/season2/s2_storm_skin_2.png',
     fallbackImage: './images/skins/classic_matthew.png',
@@ -611,10 +551,10 @@ export const SEASON_2_STORM_SKINS: Skin[] = [
   },
   {
     id: 's2_storm_skin_3',
-    name: 'Kai Cenat Matthew',
+    name: 'Aurora Phantom Matthew',
     rarity: 'Mythic',
     category: 'matthew_storm',
-    description: 'Non-stop Mafiathon subathon energy and W stream aura.',
+    description: 'Haunted by shimmering emerald and violet northern lights.',
     perkDescription: 'Season 2 Live Event Exclusive',
     image: './images/skins/season2/s2_storm_skin_3.png',
     fallbackImage: './images/skins/classic_matthew.png',
@@ -631,10 +571,10 @@ export const SEASON_2_STORM_SKINS: Skin[] = [
   },
   {
     id: 's2_storm_skin_4',
-    name: 'Rizzler Matthew',
+    name: 'Cryo Cyborg Matthew',
     rarity: 'Mythic',
     category: 'matthew_storm',
-    description: 'Chin-stroking supreme rizz that multiplies pure swagger.',
+    description: 'Sub-zero tactical visor and liquid-nitrogen cooling tubes.',
     perkDescription: 'Season 2 Live Event Exclusive',
     image: './images/skins/season2/s2_storm_skin_4.png',
     fallbackImage: './images/skins/classic_matthew.png',
@@ -651,10 +591,10 @@ export const SEASON_2_STORM_SKINS: Skin[] = [
   },
   {
     id: 's2_storm_skin_5',
-    name: 'LeBron Sunshine Matthew',
+    name: 'Stormcaller Matthew',
     rarity: 'Divine',
     category: 'matthew_storm',
-    description: 'You Are My Sunshine radiant golden basketball halo.',
+    description: 'Blizzard-eyed tempest mage orbiting jagged floating ice shards.',
     perkDescription: 'Season 2 Live Event Exclusive',
     image: './images/skins/season2/s2_storm_skin_5.png',
     fallbackImage: './images/skins/classic_matthew.png',
@@ -682,12 +622,14 @@ export const ALL_STORM_SKINS: Skin[] = [
 export const PUBLIC_VIEWABLE_SKINS: Skin[] = [
   ...SKINS,
   ...CHARACTER_SKINS,
+  LIAM_SKIN,
   CHAMPION_SKIN,
 ];
 
 export const SEASON_2_PUBLIC_VIEWABLE_SKINS: Skin[] = [
   SKINS[0], // Classic Matthew
   ...SEASON_2_SKINS,
+  LIAM_SKIN,
   CHAMPION_SKIN,
 ];
 
@@ -698,6 +640,11 @@ export const ALL_SKINS: Skin[] = [
   ...SKINS,
   ...CHARACTER_SKINS,
   ...SEASON_2_SKINS,
+  ...FROZEN_PROGRESSION_SKINS,
+  ...ITEM_SHOP_SKINS,
+  ...SEASON_2_LIVE_EVENT_SKINS,
+  ...MATTHEW_VAULT_SKINS,
+  LIAM_SKIN,
   CHAMPION_SKIN,
   ...MATTHEW_STORM_SKINS,
   ...SEASON_2_STORM_SKINS,
@@ -711,14 +658,24 @@ export function isSeasonTwoOrLater(seasonId?: string): boolean {
 
 export function getProgressionSkinsForSeason(seasonId?: string): Skin[] {
   if (isSeasonTwoOrLater(seasonId)) {
-    return [SKINS[0], ...SEASON_2_SKINS];
+    const byId = new Map<string, Skin>();
+    byId.set(SKINS[0].id, SKINS[0]);
+    for (const s of FROZEN_PROGRESSION_SKINS) {
+      byId.set(s.id, s);
+    }
+    for (const s of SEASON_2_SKINS) {
+      if (!byId.has(s.id)) {
+        byId.set(s.id, s);
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => a.milestone.target - b.milestone.target);
   }
   return [...SKINS, ...CHARACTER_SKINS];
 }
 
 export function getStormSkinsForSeason(seasonId?: string): Skin[] {
   if (isSeasonTwoOrLater(seasonId)) {
-    return SEASON_2_STORM_SKINS;
+    return [...SEASON_2_LIVE_EVENT_SKINS, ...SEASON_2_STORM_SKINS];
   }
   return MATTHEW_STORM_SKINS;
 }
@@ -751,14 +708,27 @@ export function getSkinMilestoneProgress(
     return { current: 0, target: 0, percent: 100, isMet: true, progressLabel: 'Unlocked' };
   }
 
-  if (type === 'storm_shop') {
+  if (
+    type === 'storm_shop' ||
+    type === 'item_shop' ||
+    type === 'matthew_vault' ||
+    type === 's2_live_event' ||
+    type === 'chest_drop'
+  ) {
     const owned = state.unlockedSkins?.includes(skin.id);
     return {
       current: owned ? target : 0,
       target,
       percent: owned ? 100 : 0,
       isMet: false,
-      progressLabel: `${target} Gems (Storm Shop)`,
+      progressLabel:
+        type === 'matthew_vault'
+          ? 'Matthew Shop Token (Claim FREE)'
+          : type === 'item_shop'
+          ? `${target} Gems (Item Shop)`
+          : type === 's2_live_event'
+          ? `${target} Gems (Next-Friday Event)`
+          : `${target} Gems (Storm Shop)`,
     };
   }
 

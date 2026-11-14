@@ -1,4 +1,14 @@
-export type SkinRarity = 'Common' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic' | 'Divine';
+export type SkinRarity =
+  | 'Common'
+  | 'Uncommon'
+  | 'Rare'
+  | 'Super Rare'
+  | 'Epic'
+  | 'Ultra Rare'
+  | 'Legendary'
+  | 'Mythic'
+  | 'Divine'
+  | 'Celestial';
 
 export type SkinCategory =
   | 'existing'
@@ -6,7 +16,33 @@ export type SkinCategory =
   | 'realms'
   | 'achievements'
   | 'champion'
-  | 'matthew_storm';
+  | 'matthew_storm'
+  | 'frozen_apocalypse'
+  | 'item_shop'
+  | 'food_shop'
+  | 'matthew_vault'
+  | 'live_event_s2';
+
+export type SkinBackgroundTheme =
+  | 'default'
+  | 'gold'
+  | 'snowy'
+  | 'lava'
+  | 'royal'
+  | 'minecraft'
+  | 'festive'
+  | 'pizza'
+  | 'burger'
+  | 'fries'
+  | 'strawberry'
+  | 'chocolate'
+  | 'zombie'
+  | 'ice'
+  | 'ghost'
+  | 'neon'
+  | 'space'
+  | 'ocean'
+  | 'infernal';
 
 export type RealmId = 'earth' | 'under' | 'ocean' | 'space' | 'uper';
 
@@ -23,6 +59,10 @@ export type MilestoneType =
   | 'combo'
   | 'giant_matthew'
   | 'storm_shop'
+  | 'item_shop'
+  | 'matthew_vault'
+  | 's2_live_event'
+  | 'chest_drop'
   | 'season_champion';
 
 export interface SkinMilestone {
@@ -47,9 +87,76 @@ export interface Skin {
   milestone: SkinMilestone;
   gemCost?: number;
   isEventLimited?: boolean;
+  isPlaceholderArt?: boolean;
+  backgroundTheme?: SkinBackgroundTheme;
   clickBonusMultiplier: number;
   cpsBonusMultiplier: number;
   critBonusChance: number;
+}
+
+export type EggRarity =
+  | 'Common Egg'
+  | 'Uncommon Egg'
+  | 'Rare Egg'
+  | 'Super Rare Egg'
+  | 'Epic Egg'
+  | 'Ultra Rare Egg'
+  | 'Legendary Egg'
+  | 'Mythic Egg'
+  | 'Divine Egg'
+  | 'Celestial Egg';
+
+export type FoodId =
+  | 'apple'
+  | 'potato'
+  | 'cookie'
+  | 'fries'
+  | 'strawberry'
+  | 'chocolate'
+  | 'ice_treat'
+  | 'fish'
+  | 'burger'
+  | 'pizza'
+  | 'turkey'
+  | 'steak';
+
+export interface PetInstance {
+  instanceId: string;
+  speciesId: string;
+  name: string;
+  rarity: EggRarity;
+  /** Upgrade level 1..5 */
+  level: number;
+  /** 0..100 hunger bar; below 25 = too tired to fight effectively */
+  hunger: number;
+  hatchedAt: number;
+}
+
+export type CosmeticSlot = 'hat' | 'glasses';
+
+export interface CosmeticItem {
+  id: string;
+  name: string;
+  slot: CosmeticSlot;
+  rarity: SkinRarity;
+  description: string;
+  gemCost: number;
+  previewColor: string;
+  isPlaceholder?: boolean;
+}
+
+export interface SeasonWinnerBadge {
+  seasonNumber: number;
+  label: string;
+  awardedAt: number;
+}
+
+export interface ActiveZombieRaidState {
+  active: boolean;
+  startedAtMs: number;
+  endsAtMs: number;
+  nextRaidAtMs: number;
+  zombiesDefeatedInRaid: number;
 }
 
 export interface RealmRequirement {
@@ -77,6 +184,7 @@ export interface Upgrade {
   name: string;
   description: string;
   icon: string;
+  iconImage?: string;
   baseCost: number;
   costMultiplier: number;
   baseCps: number;
@@ -120,7 +228,7 @@ export interface Quest {
   title: string;
   description: string;
   scope: 'daily' | 'seasonal';
-  type: 'clicks' | 'coins' | 'upgrades' | 'crit_clicks' | 'rebirth' | 'realm_order';
+  type: 'clicks' | 'coins' | 'upgrades' | 'crit_clicks' | 'rebirth' | 'realm_order' | 'chests_opened' | 'zombies_defeated' | 'all_monthly';
   target: number;
   rewardGems: number;
   rewardCoins: number;
@@ -214,11 +322,38 @@ export interface GameState {
   seasonHistory: SeasonHistoryEntry[];
   eventStats: EventParticipationStats;
 
+  // Season 2: Frozen Apocalypse Pets, Eggs, Food, Cosmetics, Shop, Clans & Raid State
+  pets: PetInstance[];
+  equippedPetIds: string[];
+  sealedEggs: Record<EggRarity, number>;
+  foodInventory: Record<FoodId, number>;
+  ownedCosmetics: string[];
+  equippedCosmetics: {
+    hat: string | null;
+    glasses: string | null;
+  };
+  hasMatthewShopToken: boolean;
+  matthewShopTokens?: number;
+  unlockedCursors?: string[];
+  equippedCursorId?: string | null;
+  cratesOpened?: number;
+  chestsOpened: number;
+  zombiesDefeated: number;
+  zombiesStolenCoins: number;
+  zombieHitsTaken?: number;
+  season2IntroSeen: boolean;
+  winnerBadges: SeasonWinnerBadge[];
+  clanId: string | null;
+  clanName: string | null;
+  sandboxS2Enabled?: boolean;
+  activeSessionToken?: string;
+
   // Timestamps & Lifetime Career Stats
   lastSaveTime: number;
   totalPlaytimeSeconds: number;
   lifetimeAllSeasonsCoins: number;
   lifetimeAllSeasonsClicks: number;
+  highestCps?: number;
   goldenMatthewsClicked: number;
   giantMatthewsClicked: number;
   selectedEnvironment?: string;

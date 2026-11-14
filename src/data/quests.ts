@@ -2,118 +2,148 @@ import { Quest, GameState } from '../types/game';
 import { getTotalUpgradesPurchased } from './skins';
 
 export const QUESTS: Quest[] = [
-  // Hard Daily Quests (Tuned for Click-Power Mastery)
+  // Daily Quests (balanced rewards so early gameplay progresses steadily without sudden 100M skips!)
   {
     id: 'daily_clicks_7500',
-    title: 'Daily Carpal Tunnel Gauntlet',
-    description: 'Land 7,500 manual clicks on Matthew.',
+    title: 'Daily Click Gauntlet',
+    description: 'Land 7,500 clicks on Matthew.',
     scope: 'daily',
     type: 'clicks',
     target: 7500,
-    rewardGems: 5,
-    rewardCoins: 25000,
+    rewardGems: 12,
+    rewardCoins: 1500,
   },
   {
     id: 'daily_crits_600',
     title: 'Daily Critical Deadeye',
-    description: 'Land 600 Critical Hits on Matthew.',
+    description: 'Land 600 Critical Hits.',
     scope: 'daily',
     type: 'crit_clicks',
     target: 600,
-    rewardGems: 6,
-    rewardCoins: 75000,
+    rewardGems: 15,
+    rewardCoins: 5000,
   },
   {
-    id: 'daily_upgrades_150',
+    id: 'daily_upgrades_200',
     title: 'Daily Empire Architect',
-    description: 'Own at least 150 total upgrade levels simultaneously.',
+    description: 'Own 200 total upgrade levels.',
     scope: 'daily',
     type: 'upgrades',
-    target: 150,
-    rewardGems: 7,
-    rewardCoins: 250000,
+    target: 200,
+    rewardGems: 18,
+    rewardCoins: 18000,
   },
   {
-    id: 'daily_coins_250m',
-    title: 'Daily Centi-Millionaire',
-    description: 'Accumulate 250,000,000 (250M) lifetime Matthew Coins.',
+    id: 'daily_zombies_25',
+    title: 'Daily Undead Sweep',
+    description: 'Help pets defeat 25 zombies.',
     scope: 'daily',
-    type: 'coins',
-    target: 250000000,
-    rewardGems: 8,
-    rewardCoins: 5000000,
+    type: 'zombies_defeated',
+    target: 25,
+    rewardGems: 20,
+    rewardCoins: 12000,
   },
   {
     id: 'daily_rebirth_5',
     title: 'Daily Ascension Grinder',
-    description: 'Complete 5 Rebirths to boost your Ascension Multiplier.',
+    description: 'Complete 5 Rebirths.',
     scope: 'daily',
     type: 'rebirth',
     target: 5,
-    rewardGems: 10,
-    rewardCoins: 2500,
+    rewardGems: 25,
+    rewardCoins: 75000,
   },
 
-  // Brutal Season Quests (Long-Term Seasonal Milestones)
+  // High-Tier Monthly / Seasonal Quests (scaling cleanly without sudden multi-tier jumps!)
   {
-    id: 'season_clicks_100000',
-    title: 'Season Click Ultramarathon',
-    description: 'Reach 100,000 manual clicks during the current season.',
+    id: 'season_clicks_250k',
+    title: 'Monthly Click Overdrive',
+    description: 'Reach 250,000 manual clicks.',
     scope: 'seasonal',
     type: 'clicks',
-    target: 100000,
-    rewardGems: 25,
-    rewardCoins: 5000000,
-  },
-  {
-    id: 'season_crits_10000',
-    title: 'Season Critical Overlord',
-    description: 'Land 10,000 Critical Hits during the current season.',
-    scope: 'seasonal',
-    type: 'crit_clicks',
-    target: 10000,
-    rewardGems: 30,
+    target: 250000,
+    rewardGems: 60,
     rewardCoins: 25000000,
   },
   {
-    id: 'season_upgrades_450',
-    title: 'Season Monopoly Sovereign',
-    description: 'Own 450 total upgrade levels simultaneously.',
+    id: 'season_crits_25k',
+    title: 'Monthly Critical Legend',
+    description: 'Land 25,000 Critical Hits.',
+    scope: 'seasonal',
+    type: 'crit_clicks',
+    target: 25000,
+    rewardGems: 75,
+    rewardCoins: 5e9,
+  },
+  {
+    id: 'season_upgrades_1200',
+    title: 'Monthly Arsenal Titan',
+    description: 'Own 1,200 total upgrade levels.',
     scope: 'seasonal',
     type: 'upgrades',
-    target: 450,
-    rewardGems: 35,
-    rewardCoins: 500000000,
+    target: 1200,
+    rewardGems: 90,
+    rewardCoins: 1e14,
   },
   {
-    id: 'season_rebirth_25',
-    title: 'Season Ascension Immortal',
-    description: 'Complete 25 Rebirths during the current season.',
+    id: 'season_zombies_300',
+    title: 'Monthly Zombie Slayer',
+    description: 'Defeat 300 zombies with your pets.',
+    scope: 'seasonal',
+    type: 'zombies_defeated',
+    target: 300,
+    rewardGems: 110,
+    rewardCoins: 5e11,
+  },
+  {
+    id: 'season_chests_20',
+    title: 'Monthly Frost Raider',
+    description: 'Crack open 20 Mystery Chests.',
+    scope: 'seasonal',
+    type: 'chests_opened',
+    target: 20,
+    rewardGems: 140,
+    rewardCoins: 1e18,
+  },
+  {
+    id: 'season_rebirth_40',
+    title: 'Monthly Ascension Immortal',
+    description: 'Complete 40 Rebirths.',
     scope: 'seasonal',
     type: 'rebirth',
-    target: 25,
-    rewardGems: 45,
-    rewardCoins: 50000,
+    target: 40,
+    rewardGems: 160,
+    rewardCoins: 1e26,
   },
   {
-    id: 'season_coins_100t',
-    title: 'Season Centi-Trillionaire Titan',
-    description: 'Generate 100,000,000,000,000 (100T) lifetime Matthew Coins.',
+    id: 'season_coins_udc',
+    title: 'Undecillion Sovereign',
+    description: 'Reach 1 UDc (10^36) lifetime coins.',
     scope: 'seasonal',
     type: 'coins',
-    target: 100000000000000,
-    rewardGems: 60,
-    rewardCoins: 2500000000000,
+    target: 1e36,
+    rewardGems: 200,
+    rewardCoins: 1e35,
   },
   {
-    id: 'season_coins_50qa',
-    title: 'Season 50-Quadrillionaire Deity',
-    description: 'Generate 50,000,000,000,000,000 (50Qa) lifetime Matthew Coins.',
+    id: 'season_coins_vg',
+    title: 'Vigintillion Frost Emperor',
+    description: 'Reach 1 Vg (10^63) lifetime coins.',
     scope: 'seasonal',
     type: 'coins',
-    target: 50000000000000000,
-    rewardGems: 100,
-    rewardCoins: 1000000000000000,
+    target: 1e63,
+    rewardGems: 400,
+    rewardCoins: 1e61,
+  },
+  {
+    id: 'season_all_monthly_master',
+    title: 'Complete All Monthly Quests',
+    description: 'Complete every Monthly Quest above for the ultimate frost bounty.',
+    scope: 'seasonal',
+    type: 'all_monthly',
+    target: 8,
+    rewardGems: 1000,
+    rewardCoins: 1e63,
   },
 ];
 
@@ -138,6 +168,26 @@ export function getQuestProgress(
     case 'rebirth':
       current = state.prestigeCount;
       break;
+    case 'chests_opened':
+      current = state.chestsOpened || 0;
+      break;
+    case 'zombies_defeated':
+      current = state.zombiesDefeated || 0;
+      break;
+    case 'all_monthly': {
+      const otherSeasonal = QUESTS.filter((q) => q.scope === 'seasonal' && q.type !== 'all_monthly');
+      const claimed = new Set(state.claimedQuests || []);
+      current = otherSeasonal.filter((q) => claimed.has(q.id)).length;
+      return {
+        current,
+        target: otherSeasonal.length,
+        percent:
+          otherSeasonal.length > 0
+            ? Math.min(100, Math.floor((current / otherSeasonal.length) * 100))
+            : 100,
+        isComplete: current >= otherSeasonal.length,
+      };
+    }
     default:
       current = 0;
       break;
@@ -149,8 +199,8 @@ export function getQuestProgress(
 }
 
 /**
- * Automatically claims any completed quests immediately so players cannot save
- * completed quests across a Rebirth to skip early progression.
+ * Automatically claims completed quests immediately (running meta-quest check afterward so completing
+ * the final monthly quest triggers the master bonus cleanly in the same tick).
  */
 export function checkAndAutoClaimQuests(
   state: GameState
@@ -160,9 +210,28 @@ export function checkAndAutoClaimQuests(
   let addedGems = 0;
   let addedCoins = 0;
 
+  let workingState = state;
+  // Pass 1: all standard quests
   for (const quest of QUESTS) {
-    if (claimedSet.has(quest.id)) continue;
-    const progress = getQuestProgress(quest, state);
+    if (quest.type === 'all_monthly' || claimedSet.has(quest.id)) continue;
+    const progress = getQuestProgress(quest, workingState);
+    if (progress.isComplete) {
+      claimedSet.add(quest.id);
+      newlyClaimed.push(quest);
+      addedGems += quest.rewardGems;
+      addedCoins += quest.rewardCoins;
+    }
+  }
+
+  workingState = {
+    ...state,
+    claimedQuests: Array.from(claimedSet),
+  };
+
+  // Pass 2: meta "Complete All Monthly Quests"
+  for (const quest of QUESTS) {
+    if (quest.type !== 'all_monthly' || claimedSet.has(quest.id)) continue;
+    const progress = getQuestProgress(quest, workingState);
     if (progress.isComplete) {
       claimedSet.add(quest.id);
       newlyClaimed.push(quest);

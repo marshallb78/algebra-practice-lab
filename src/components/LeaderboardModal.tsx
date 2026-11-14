@@ -8,10 +8,27 @@ import {
   isExcludedFromLeaderboard,
   LeaderboardEntry,
 } from '../firebase/leaderboard';
+import {
+  submitPlayerSuspicionReport,
+  isDevAdminAccount,
+} from '../firebase/moderation';
+import { SEASON_2_CONFIG } from '../config/gameConfig';
 import { getAscensionMultiplier } from '../data/prestige';
-import { CHAMPION_SKIN, getSkinById } from '../data/skins';
+import { CHAMPION_SKIN, LIAM_SKIN, getSkinById } from '../data/skins';
 import { formatCoins, formatTime } from '../utils/formatters';
-import { Trophy, Crown, RefreshCw, X, UploadCloud, ArrowLeft, Eye } from 'lucide-react';
+import {
+  Trophy,
+  Crown,
+  RefreshCw,
+  X,
+  UploadCloud,
+  ArrowLeft,
+  Eye,
+  Snowflake,
+  Flag,
+  CheckCircle2,
+  Gauge,
+} from 'lucide-react';
 
 interface LeaderboardModalProps {
   isOpen: boolean;
@@ -20,6 +37,7 @@ interface LeaderboardModalProps {
   seasonId: string;
   seasonLabel: string;
   seasonRemainingSec: number;
+  isSandbox?: boolean;
   onOpenAccount: () => void;
 }
 
@@ -30,31 +48,50 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   seasonId,
   seasonLabel,
   seasonRemainingSec,
+  isSandbox = false,
   onOpenAccount,
 }) => {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [, setPlayerEntry] = useState<LeaderboardEntry | null>(null);
+  const [viewedSeasonId, setViewedSeasonId] = useState<string>(seasonId);
   const [selectedPlayer, setSelectedPlayer] = useState<{
     entry: LeaderboardEntry;
     rank: number;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [reportedUids, setReportedUids] = useState<Record<string, boolean>>({});
+  const [reportingUid, setReportingUid] = useState<string | null>(null);
 
-  const loadLeaderboard = async () => {
+  const isSeason2Launched = Date.now() >= SEASON_2_CONFIG.launchTimeMs;
+  const canViewLiveSeason2 = isSeason2Launched || isSandbox;
+  const effectiveTargetSeasonId = viewedSeasonId;
+  const isViewingMyCurrentSeason = effectiveTargetSeasonId === seasonId;
+
+  const loadLeaderboard = async (targetSeason: string = effectiveTargetSeasonId) => {
+    if (targetSeason === 'season_2' && !canViewLiveSeason2) {
+      setEntries([]);
+      setPlayerEntry(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      if (state.cloudAccount) {
+      const targetSandboxFlag = targetSeason === 'season_2' && isSandbox && !isSeason2Launched;
+      if (state.cloudAccount && targetSeason === seasonId) {
         updateLeaderboardEntry(
           state.cloudAccount.uid,
           state.cloudAccount.displayUsername,
           state,
-          seasonId
+          seasonId,
+          false,
+          isSandbox
         ).catch(() => {});
       }
 
-      const list = await fetchWorldwideLeaderboard(seasonId, 50);
+      const list = await fetchWorldwideLeaderboard(targetSeason, 500, targetSandboxFlag);
 
       if (
+        targetSeason === seasonId &&
         state.cloudAccount &&
         !isExcludedFromLeaderboard(state.cloudAccount.uid, state.cloudAccount.displayUsername)
       ) {
@@ -68,6 +105,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
           seasonalScore: localScore,
           lifetimeCoins: Math.floor(state.lifetimeCoins || 0),
           totalClicks: Math.floor(state.clicks || 0),
+          highestCps: Number((state.highestCps || 0).toFixed(1)),
           rebirthCount: state.prestigeCount || 0,
           ascensionMultiplier: getAscensionMultiplier(state.prestigeShards),
           equippedSkin: state.equippedSkin || 'classic_matthew',
@@ -75,6 +113,9 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
             Array.isArray(state.unlockedSkins) && state.unlockedSkins.length > 0
               ? state.unlockedSkins
               : ['classic_matthew'],
+          winnerBadges: state.winnerBadges || [],
+          clanName: state.clanName || undefined,
+          chestsOpened: state.chestsOpened || 0,
           totalPlaytimeSeconds: Math.floor(state.totalPlaytimeSeconds || 0),
           updatedAtMs: Date.now(),
         };
@@ -82,16 +123,19 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
         const existingIdx = list.findIndex((e) => e.uid === state.cloudAccount?.uid);
         if (existingIdx >= 0) {
           if (liveMine.seasonalScore >= list[existingIdx].seasonalScore) {
-            list[existingIdx] = liveMine;
+            list[existingIdx] = {
+              ...liveMine,
+              highestCps: Math.max(liveMine.highestCps || 0, list[existingIdx].highestCps || 0),
+            };
           }
         } else {
           list.push(liveMine);
         }
 
-        const sorted = sortLeaderboardDeterministically(list).slice(0, 50);
+        const sorted = sortLeaderboardDeterministically(list);
         setEntries(sorted);
 
-        const cloudMine = await fetchPlayerLeaderboardEntry(state.cloudAccount.uid, seasonId);
+        const cloudMine = await fetchPlayerLeaderboardEntry(state.cloudAccount.uid, targetSeason);
         setPlayerEntry(
           cloudMine && cloudMine.seasonalScore > liveMine.seasonalScore ? cloudMine : liveMine
         );
@@ -107,28 +151,116 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setSelectedPlayer(null);
-      loadLeaderboard();
+      setViewedSeasonId(seasonId);
+      loadLeaderboard(seasonId);
     }
   }, [isOpen, seasonId]);
 
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedPlayer(null);
+      loadLeaderboard(viewedSeasonId);
+    }
+  }, [viewedSeasonId]);
+
   if (!isOpen) return null;
 
+  const handleReportSuspicious = async (target: LeaderboardEntry) => {
+    if (reportingUid === target.uid || reportedUids[target.uid]) return;
+    setReportingUid(target.uid);
+    const reporterName =
+      state.cloudAccount?.displayUsername || state.cloudAccount?.username || 'A Player';
+    const ok = await submitPlayerSuspicionReport({
+      reporterUid: state.cloudAccount?.uid || null,
+      reporterUsername: reporterName,
+      targetUid: target.uid,
+      targetUsername: target.username,
+      targetHighestCps: target.highestCps || 0,
+      targetScore: target.seasonalScore || 0,
+      reason: `Suspicious activity reported from Frost Leaderboard (Peak CPS: ${(
+        target.highestCps || 0
+      ).toFixed(1)}/s)`,
+    });
+    setReportingUid(null);
+    if (ok) {
+      setReportedUids((prev) => ({ ...prev, [target.uid]: true }));
+    }
+  };
+
+  const FROST_FLAKES = [
+    { left: '6%', top: '12%', size: 18, opacity: 'opacity-20' },
+    { left: '19%', top: '64%', size: 14, opacity: 'opacity-15' },
+    { left: '34%', top: '26%', size: 22, opacity: 'opacity-15' },
+    { left: '54%', top: '8%', size: 16, opacity: 'opacity-20' },
+    { left: '72%', top: '48%', size: 24, opacity: 'opacity-15' },
+    { left: '88%', top: '20%', size: 18, opacity: 'opacity-20' },
+    { left: '91%', top: '76%', size: 15, opacity: 'opacity-15' },
+  ];
+
   return (
-    <div className="fixed inset-0 z-50 w-screen h-screen flex flex-col bg-gradient-to-b from-[#0e1429] via-[#090d1b] to-[#050710] font-chunky text-slate-100 select-none overflow-hidden animate-fade-in">
-      {/* FULL-SCREEN HEADER */}
-      <div className="flex items-center justify-between px-5 sm:px-8 py-4 bg-[#131b36]/95 border-b-2 border-yellow-400/50 shrink-0">
+    <div className="fixed inset-0 z-50 w-screen h-screen flex flex-col bg-gradient-to-b from-[#07182d] via-[#061123] to-[#030916] font-chunky text-slate-100 select-none overflow-hidden animate-fade-in">
+      {/* FROSTY AMBIENT BACKDROP */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -top-28 left-1/4 w-[36rem] h-[24rem] rounded-full bg-cyan-400/12 blur-3xl" />
+        <div className="absolute bottom-0 right-1/4 w-[34rem] h-[22rem] rounded-full bg-sky-500/12 blur-3xl" />
+        {FROST_FLAKES.map((f, i) => (
+          <Snowflake
+            key={i}
+            style={{ left: f.left, top: f.top, width: f.size, height: f.size }}
+            className={`absolute text-cyan-200 ${f.opacity} animate-pulse`}
+          />
+        ))}
+      </div>
+
+      {/* FULL-SCREEN FROST HEADER */}
+      <div className="relative z-10 flex items-center justify-between px-5 sm:px-8 py-4 bg-sky-950/75 backdrop-blur-md border-b-2 border-cyan-300/45 shadow-[0_6px_30px_rgba(34,211,238,0.16)] shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-yellow-500/20 border-2 border-yellow-400 flex items-center justify-center text-yellow-300 shadow-[0_0_20px_rgba(250,204,21,0.35)]">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-400/30 to-sky-500/20 border-2 border-cyan-300 flex items-center justify-center text-cyan-200 shadow-[0_0_24px_rgba(56,189,248,0.45)]">
             <Trophy className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl sm:text-3xl font-black text-yellow-300 uppercase tracking-wide">
-              Worldwide Leaderboard
-            </h2>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-400/50 text-[11px] font-black text-amber-300">
-                {seasonLabel} • {formatTime(seasonRemainingSec)}
-              </span>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl sm:text-3xl font-black text-cyan-100 uppercase tracking-wide drop-shadow-[0_2px_10px_rgba(56,189,248,0.45)]">
+                Frost Leaderboard
+              </h2>
+              <Snowflake className="w-5 h-5 text-cyan-300 animate-spin" style={{ animationDuration: '9s' }} />
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <div className="flex items-center gap-1 p-0.5 rounded-xl bg-slate-950/75 border border-cyan-300/30">
+                {(['season_1', 'season_2'] as const).map((sid) => {
+                  const active = viewedSeasonId === sid;
+                  const sLabel = sid === 'season_1' ? 'Season 1' : 'Season 2';
+                  return (
+                    <button
+                      key={sid}
+                      type="button"
+                      onClick={() => setViewedSeasonId(sid)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-black uppercase cursor-pointer transition ${
+                        active
+                          ? 'bg-cyan-400 text-slate-950 shadow'
+                          : 'text-cyan-200/80 hover:text-white'
+                      }`}
+                    >
+                      {sLabel}
+                    </button>
+                  );
+                })}
+              </div>
+              {isViewingMyCurrentSeason && (
+                <span className="px-2.5 py-0.5 rounded-full bg-cyan-400/20 border border-cyan-300/50 text-[11px] font-black text-cyan-200">
+                  {seasonLabel} • {formatTime(seasonRemainingSec)}
+                </span>
+              )}
+              {!isViewingMyCurrentSeason && (
+                <span className="px-2.5 py-0.5 rounded-full bg-slate-800/80 border border-cyan-300/30 text-[11px] font-black text-cyan-200">
+                  {viewedSeasonId === 'season_1' ? 'Season 1 Final Archive' : 'Season 2: Frozen Apocalypse'}
+                </span>
+              )}
+              {entries.length > 0 && (
+                <span className="px-2.5 py-0.5 rounded-full bg-sky-400/15 border border-sky-300/40 text-[11px] font-black text-sky-200">
+                  {entries.length} Players Ranked
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -136,9 +268,9 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
         <div className="flex items-center gap-2.5">
           {!selectedPlayer && (
             <button
-              onClick={loadLeaderboard}
+              onClick={() => loadLeaderboard(effectiveTargetSeasonId)}
               disabled={loading}
-              className="px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border-2 border-slate-700 text-xs font-black text-cyan-300 flex items-center gap-2 cursor-pointer transition"
+              className="px-4 py-2.5 rounded-2xl bg-sky-900/70 hover:bg-sky-800/80 border-2 border-cyan-300/40 text-xs font-black text-cyan-200 flex items-center gap-2 cursor-pointer transition shadow"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Refresh</span>
@@ -147,7 +279,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
 
           <button
             onClick={onClose}
-            className="px-4 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 border-2 border-slate-700 hover:border-yellow-400 text-white font-black text-xs uppercase flex items-center gap-1.5 cursor-pointer transition shadow-lg"
+            className="px-4 py-2.5 rounded-2xl bg-slate-900/90 hover:bg-sky-950 border-2 border-cyan-300/40 hover:border-cyan-200 text-white font-black text-xs uppercase flex items-center gap-1.5 cursor-pointer transition shadow-lg"
           >
             <X className="w-5 h-5" />
             <span className="hidden sm:inline">Close</span>
@@ -156,77 +288,118 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
       </div>
 
       {/* FULL-SCREEN BODY */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-8">
+      <div className="relative z-10 flex-1 overflow-y-auto p-4 sm:p-8">
         <div className="max-w-5xl mx-auto">
           {selectedPlayer ? (
             <div className="space-y-5">
               <button
                 onClick={() => setSelectedPlayer(null)}
-                className="px-4 py-2 rounded-2xl bg-slate-800 hover:bg-slate-700 text-xs font-black text-cyan-300 flex items-center gap-2 cursor-pointer transition"
+                className="px-4 py-2 rounded-2xl bg-sky-900/70 hover:bg-sky-800 border border-cyan-300/40 text-xs font-black text-cyan-200 flex items-center gap-2 cursor-pointer transition"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Back</span>
               </button>
 
-              {/* HERO PROFILE BANNER */}
-              <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-950/60 to-slate-900 border-2 border-cyan-400/60 flex items-center gap-5 shadow-2xl">
+              {/* HERO FROST PROFILE BANNER + REPORT SUSPICIOUS ACTIVITY */}
+              <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-sky-950/90 via-cyan-950/70 to-slate-900/90 backdrop-blur-md border-2 border-cyan-300/60 flex flex-col sm:flex-row sm:items-center gap-4 shadow-[0_12px_40px_rgba(34,211,238,0.2)]">
                 <img
                   src={getSkinById(selectedPlayer.entry.equippedSkin).image}
                   alt={selectedPlayer.entry.username}
-                  className="w-28 h-28 rounded-3xl bg-slate-950 p-2 border-2 border-amber-400 object-contain shrink-0"
+                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-slate-950/90 p-2 border-2 border-cyan-300 object-contain shrink-0 shadow-[0_0_20px_rgba(56,189,248,0.35)]"
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2.5">
-                    <span className="px-3 py-1 rounded-xl bg-yellow-400 text-slate-950 font-black text-sm">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <span className="px-3 py-1 rounded-xl bg-gradient-to-r from-cyan-300 to-sky-400 text-slate-950 font-black text-sm shadow">
                       #{selectedPlayer.rank}
                     </span>
                     <h3 className="text-2xl sm:text-3xl font-black text-white truncate">
                       {selectedPlayer.entry.username}
                     </h3>
                   </div>
-                  <p className="text-sm text-amber-300 font-black mt-1">
+                  <p className="text-sm text-cyan-200 font-black mt-1">
                     {getSkinById(selectedPlayer.entry.equippedSkin).name}
                   </p>
                 </div>
+
+                {selectedPlayer.entry.uid !== state.cloudAccount?.uid &&
+                  !isDevAdminAccount(selectedPlayer.entry.uid, selectedPlayer.entry.username) && (
+                    <div className="shrink-0">
+                      {reportedUids[selectedPlayer.entry.uid] ? (
+                        <div className="px-4 py-2.5 rounded-2xl bg-emerald-500/20 border-2 border-emerald-400/60 text-emerald-200 text-xs font-black flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Reported to Devs ✓</span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={reportingUid === selectedPlayer.entry.uid}
+                          onClick={() => handleReportSuspicious(selectedPlayer.entry)}
+                          className="px-4 py-2.5 rounded-2xl bg-rose-500/20 hover:bg-rose-500/35 border-2 border-rose-400/60 text-rose-200 font-black text-xs uppercase flex items-center gap-2 cursor-pointer transition shadow-lg disabled:opacity-50"
+                        >
+                          <Flag className="w-4 h-4" />
+                          <span>
+                            {reportingUid === selectedPlayer.entry.uid
+                              ? 'Reporting...'
+                              : 'Report Suspicious Activity'}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  )}
               </div>
 
-              {/* 5 STAT CARDS INCLUDING PLAYTIME */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3.5 text-center">
-                <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-black">Score</span>
+              {/* 7 STAT CARDS INCLUDING HIGHEST CPS, PLAYTIME & CHESTS OPENED */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
+                <div className="p-3.5 rounded-2xl bg-sky-950/75 border border-cyan-300/35 backdrop-blur-md">
+                  <span className="text-[10px] text-cyan-200/80 uppercase font-black">Score</span>
                   <p className="text-lg font-black text-amber-300 mt-1">
                     {formatCoins(selectedPlayer.entry.seasonalScore)}
                   </p>
                 </div>
-                <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-black">Ascension</span>
+                <div className="p-3.5 rounded-2xl bg-sky-950/75 border border-cyan-300/35 backdrop-blur-md">
+                  <span className="text-[10px] text-cyan-200/80 uppercase font-black">Ascension</span>
                   <p className="text-lg font-black text-fuchsia-300 mt-1">
                     {selectedPlayer.entry.ascensionMultiplier.toFixed(2)}×
                   </p>
                 </div>
-                <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-black">Clicks</span>
-                  <p className="text-lg font-black text-cyan-300 mt-1">
+                <div className="p-3.5 rounded-2xl bg-sky-950/75 border border-cyan-300/35 backdrop-blur-md">
+                  <span className="text-[10px] text-cyan-200/80 uppercase font-black">Clicks</span>
+                  <p className="text-lg font-black text-cyan-200 mt-1">
                     {formatCoins(selectedPlayer.entry.totalClicks)}
                   </p>
                 </div>
-                <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800">
-                  <span className="text-[10px] text-slate-400 uppercase font-black">Rebirths</span>
+                <div className="p-3.5 rounded-2xl bg-cyan-950/85 border-2 border-cyan-300/65 backdrop-blur-md shadow-[0_0_15px_rgba(34,211,238,0.18)]">
+                  <span className="text-[10px] text-cyan-300 uppercase font-black flex items-center justify-center gap-1">
+                    <Gauge className="w-3 h-3" />
+                    Highest CPS
+                  </span>
+                  <p className="text-lg font-black text-white mt-1">
+                    {(selectedPlayer.entry.highestCps || 0).toFixed(1)}/s
+                  </p>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-sky-950/75 border border-cyan-300/35 backdrop-blur-md">
+                  <span className="text-[10px] text-cyan-200/80 uppercase font-black">Rebirths</span>
                   <p className="text-lg font-black text-emerald-300 mt-1">
                     {selectedPlayer.entry.rebirthCount}
                   </p>
                 </div>
-                <div className="p-4 rounded-2xl bg-slate-900/90 border-2 border-sky-400/50 col-span-2 sm:col-span-1">
-                  <span className="text-[10px] text-sky-300 uppercase font-black">Time Spent</span>
-                  <p className="text-lg font-black text-sky-300 mt-1">
+                <div className="p-3.5 rounded-2xl bg-sky-950/75 border border-amber-300/40 backdrop-blur-md">
+                  <span className="text-[10px] text-amber-200 uppercase font-black">Chests</span>
+                  <p className="text-lg font-black text-amber-200 mt-1">
+                    {selectedPlayer.entry.chestsOpened ?? 0}
+                  </p>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-sky-950/75 border-2 border-sky-300/50 backdrop-blur-md">
+                  <span className="text-[10px] text-sky-200 uppercase font-black">Time Spent</span>
+                  <p className="text-lg font-black text-sky-200 mt-1">
                     {formatTime(selectedPlayer.entry.totalPlaytimeSeconds || 0)}
                   </p>
                 </div>
               </div>
 
               {/* SKIN COLLECTION GRID */}
-              <div className="p-5 rounded-3xl bg-slate-900/80 border border-slate-800">
-                <h4 className="text-xs font-black uppercase tracking-wider text-amber-300 mb-4">
+              <div className="p-5 rounded-3xl bg-sky-950/65 backdrop-blur-md border border-cyan-300/35">
+                <h4 className="text-xs font-black uppercase tracking-wider text-cyan-200 mb-4">
                   Unlocked Matthews ({selectedPlayer.entry.unlockedSkins.length})
                 </h4>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
@@ -235,7 +408,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                     return (
                       <div
                         key={skinId}
-                        className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col items-center text-center"
+                        className="p-3 rounded-2xl bg-slate-950/85 border border-cyan-400/25 flex flex-col items-center text-center"
                         title={skin.name}
                       >
                         <img
@@ -256,26 +429,28 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
             <div className="space-y-4">
               {/* COMPACT VISUAL #1 CHAMPION REWARD + PLAYER SCORE BAR */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div className="p-4 rounded-3xl bg-gradient-to-r from-amber-950/80 via-yellow-900/40 to-slate-900 border-2 border-amber-400/60 flex items-center gap-4">
+                <div className="p-4 rounded-3xl bg-gradient-to-r from-cyan-950/90 via-sky-900/60 to-slate-900/90 backdrop-blur-md border-2 border-cyan-300/55 flex items-center gap-3.5 shadow-lg">
                   <img
                     src={CHAMPION_SKIN.image}
                     alt={CHAMPION_SKIN.name}
-                    className="w-14 h-14 rounded-2xl bg-slate-950 p-1.5 border-2 border-amber-400 object-contain shrink-0"
+                    className="w-12 h-12 rounded-2xl bg-slate-950 p-1 border-2 border-cyan-300 object-contain shrink-0"
                   />
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <Crown className="w-4 h-4 text-yellow-300" />
-                      <span className="text-xs font-black text-yellow-300 uppercase">
-                        #1 Season Prize
+                      <Crown className="w-4 h-4 text-cyan-300" />
+                      <span className="text-[11px] font-black text-cyan-200 uppercase">
+                        #1 Champion &amp; S1 Top 10: {LIAM_SKIN.name}
                       </span>
                     </div>
-                    <p className="text-base font-black text-white mt-0.5">{CHAMPION_SKIN.name}</p>
+                    <p className="text-sm font-black text-white mt-0.5 truncate">
+                      {CHAMPION_SKIN.name} + {LIAM_SKIN.name}
+                    </p>
                   </div>
                 </div>
 
-                <div className="p-4 rounded-3xl bg-slate-900/95 border-2 border-slate-800 flex items-center justify-between gap-3">
+                <div className="p-4 rounded-3xl bg-sky-950/75 backdrop-blur-md border-2 border-cyan-300/35 flex items-center justify-between gap-3 shadow-lg">
                   <div>
-                    <span className="text-[10px] text-slate-400 uppercase font-black">
+                    <span className="text-[10px] text-cyan-200/80 uppercase font-black">
                       Your Score
                     </span>
                     <p className="text-xl font-black text-amber-300">
@@ -284,7 +459,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                   </div>
 
                   {state.cloudAccount ? (
-                    <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-xs font-black text-emerald-300">
+                    <span className="px-3 py-1.5 rounded-xl bg-cyan-500/20 border border-cyan-300/50 text-xs font-black text-cyan-200">
                       {state.cloudAccount.displayUsername} ✓
                     </span>
                   ) : (
@@ -293,7 +468,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                         onClose();
                         onOpenAccount();
                       }}
-                      className="px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer transition btn-chunky"
+                      className="px-4 py-2.5 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer transition btn-chunky"
                     >
                       <UploadCloud className="w-4 h-4" />
                       <span>Sign In</span>
@@ -304,13 +479,23 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
 
               {/* RANKINGS LIST */}
               <div className="space-y-2.5">
-                {loading && entries.length === 0 ? (
-                  <div className="py-16 text-center text-sm text-slate-400 font-black">
-                    Loading Leaderboard...
+                {viewedSeasonId === 'season_2' && !canViewLiveSeason2 ? (
+                  <div className="py-14 text-center bg-sky-950/60 rounded-3xl border border-cyan-300/35 p-6 space-y-2">
+                    <Snowflake className="w-12 h-12 text-cyan-300 mx-auto" />
+                    <p className="text-base font-black text-white uppercase">
+                      Season 2 Unlocks After Midnight Monday
+                    </p>
+                    <p className="text-xs font-bold text-cyan-200/80">
+                      Switch to the Season 1 tab above to view final Season 1 standings &amp; Top 10 winners.
+                    </p>
+                  </div>
+                ) : loading && entries.length === 0 ? (
+                  <div className="py-16 text-center text-sm text-cyan-200 font-black">
+                    Loading Frost Leaderboard...
                   </div>
                 ) : entries.length === 0 ? (
-                  <div className="py-14 text-center bg-slate-900/60 rounded-3xl border border-slate-800 p-6">
-                    <Trophy className="w-12 h-12 text-yellow-400 mx-auto mb-2" />
+                  <div className="py-14 text-center bg-sky-950/60 rounded-3xl border border-cyan-300/35 p-6">
+                    <Trophy className="w-12 h-12 text-cyan-300 mx-auto mb-2" />
                     <p className="text-base font-black text-white">No Scores Yet</p>
                   </div>
                 ) : (
@@ -323,24 +508,24 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                       <div
                         key={entry.uid}
                         onClick={() => setSelectedPlayer({ entry, rank })}
-                        className={`flex items-center justify-between p-3.5 sm:p-4 rounded-3xl border-2 transition cursor-pointer hover:scale-[1.005] ${
+                        className={`flex items-center justify-between p-3.5 sm:p-4 rounded-3xl border-2 backdrop-blur-md transition cursor-pointer hover:scale-[1.005] ${
                           rank === 1
-                            ? 'bg-gradient-to-r from-yellow-500/25 to-slate-900 border-yellow-400 shadow-lg'
+                            ? 'bg-gradient-to-r from-cyan-500/25 via-sky-900/75 to-slate-900/90 border-cyan-300 shadow-[0_0_24px_rgba(34,211,238,0.28)]'
                             : isMe
-                            ? 'bg-cyan-950/40 border-cyan-400'
-                            : 'bg-slate-900/85 border-slate-800 hover:border-slate-600'
+                            ? 'bg-cyan-950/65 border-cyan-400 shadow-[0_0_18px_rgba(34,211,238,0.2)]'
+                            : 'bg-sky-950/60 border-cyan-300/25 hover:border-cyan-300/65'
                         }`}
                       >
                         <div className="flex items-center gap-3.5">
                           <div
                             className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm ${
                               rank === 1
-                                ? 'bg-yellow-400 text-slate-950 shadow'
+                                ? 'bg-gradient-to-br from-cyan-300 to-sky-400 text-slate-950 shadow'
                                 : rank === 2
-                                ? 'bg-slate-300 text-slate-950'
+                                ? 'bg-sky-200 text-slate-950'
                                 : rank === 3
-                                ? 'bg-amber-600 text-white'
-                                : 'bg-slate-800 text-slate-400'
+                                ? 'bg-indigo-300 text-slate-950'
+                                : 'bg-sky-900/80 text-cyan-200 border border-cyan-300/25'
                             }`}
                           >
                             #{rank}
@@ -348,25 +533,44 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                           <img
                             src={equipped.image}
                             alt={equipped.name}
-                            className="w-12 h-12 rounded-2xl bg-slate-950 p-1 border border-slate-700 object-contain"
+                            className="w-12 h-12 rounded-2xl bg-slate-950/90 p-1 border border-cyan-300/40 object-contain"
                           />
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center flex-wrap gap-2">
                               <span className="font-black text-base text-white">
                                 {entry.username}
                               </span>
-                              {rank === 1 && <Crown className="w-4 h-4 text-yellow-300" />}
+                              {rank === 1 && <Crown className="w-4 h-4 text-cyan-300" />}
+                              {(entry.winnerBadges || []).map((badge) => (
+                                <span
+                                  key={`wb_${badge.seasonNumber}`}
+                                  className="text-[10px] px-2 py-0.5 rounded-lg bg-amber-400/20 border border-amber-300/60 text-amber-200 font-black uppercase"
+                                >
+                                  {badge.label}
+                                </span>
+                              ))}
+                              {entry.clanName && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-lg bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 font-black">
+                                  {entry.clanName}
+                                </span>
+                              )}
                               {isMe && (
-                                <span className="text-[10px] px-2 py-0.5 rounded-lg bg-cyan-500/25 text-cyan-300 font-black">
+                                <span className="text-[10px] px-2 py-0.5 rounded-lg bg-cyan-500/25 text-cyan-200 font-black">
                                   YOU
                                 </span>
                               )}
                             </div>
-                            <div className="text-[11px] font-black text-slate-400 flex items-center gap-2 mt-0.5">
+                            <div className="text-[11px] font-black text-cyan-200/75 flex items-center flex-wrap gap-2 mt-0.5">
                               <span className="text-fuchsia-300">{entry.ascensionMultiplier}×</span>
                               <span>•</span>
                               <span className="text-amber-300">{entry.unlockedSkins.length} Skins</span>
-                              <Eye className="w-3.5 h-3.5 text-cyan-400 ml-1" />
+                              {typeof entry.highestCps === 'number' && entry.highestCps > 0 && (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-cyan-300">Peak {entry.highestCps.toFixed(0)} CPS</span>
+                                </>
+                              )}
+                              <Eye className="w-3.5 h-3.5 text-cyan-300 ml-1" />
                             </div>
                           </div>
                         </div>

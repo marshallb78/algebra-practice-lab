@@ -1,0 +1,161 @@
+import React, { useEffect, useState } from 'react';
+import { CursorDefinition } from '../../data/cursors';
+
+interface CursorVisualProps {
+  cursor: CursorDefinition;
+  size?: number;
+  className?: string;
+}
+
+/**
+ * Renders the custom cursor PNG if present in public/images/cursors/<id>.png,
+ * falling back seamlessly to an elemental styled pointer SVG when the user hasn't added the PNG yet.
+ */
+export const CursorVisual: React.FC<CursorVisualProps> = ({
+  cursor,
+  size = 40,
+  className = '',
+}) => {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [cursor.image]);
+
+  if (!imgFailed) {
+    return (
+      <img
+        src={cursor.image}
+        alt={cursor.name}
+        width={size}
+        height={size}
+        draggable={false}
+        onError={() => setImgFailed(true)}
+        className={`object-contain pointer-events-none select-none ${className}`}
+        style={{
+          width: size,
+          height: size,
+          filter: `drop-shadow(0 0 8px ${cursor.glowColor})`,
+        }}
+      />
+    );
+  }
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 36 36"
+      fill="none"
+      className={`pointer-events-none select-none ${className}`}
+      style={{ filter: `drop-shadow(0 0 8px ${cursor.glowColor})` }}
+    >
+      <defs>
+        <linearGradient id={`cg-${cursor.id}`} x1="4" y1="4" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="55%" stopColor={cursor.accentColor} />
+          <stop
+            offset="100%"
+            stopColor={
+              cursor.crateType === 'frost'
+                ? '#0284c7'
+                : cursor.crateType === 'starter'
+                ? '#0369a1'
+                : '#9a3412'
+            }
+          />
+        </linearGradient>
+      </defs>
+      <path
+        d="M6 4L28 16L17.5 19.2L24.5 29.5L20.5 32L13.5 21.5L7.5 28L6 4Z"
+        fill={`url(#cg-${cursor.id})`}
+        stroke="#0f172a"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+      />
+      {cursor.freezeImmune && (
+        <circle cx="24" cy="9" r="4" fill="#fb923c" opacity="0.9" />
+      )}
+      {cursor.id === 'frosty_cursor' && (
+        <path d="M25 6L26.5 9.5L30 11L26.5 12.5L25 16L23.5 12.5L20 11L23.5 9.5Z" fill="#e0f2fe" />
+      )}
+    </svg>
+  );
+};
+
+interface EquippedCursorFollowerProps {
+  cursor: CursorDefinition | null;
+}
+
+/**
+ * Floating elemental cursor follower when the player equips a custom Cursor from Crates.
+ */
+export const EquippedCursorFollower: React.FC<EquippedCursorFollowerProps> = ({ cursor }) => {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [clicking, setClicking] = useState(false);
+
+  useEffect(() => {
+    const root = typeof document !== 'undefined' ? document.documentElement : null;
+    if (!cursor) {
+      setPos(null);
+      root?.classList.remove('in-game-custom-cursor');
+      return;
+    }
+
+    const isTouchDevice =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: coarse)').matches;
+
+    if (!isTouchDevice) {
+      root?.classList.add('in-game-custom-cursor');
+    }
+
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') {
+        root?.classList.remove('in-game-custom-cursor');
+        setPos(null);
+        return;
+      }
+      root?.classList.add('in-game-custom-cursor');
+      setPos({ x: e.clientX, y: e.clientY });
+    };
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch') setClicking(true);
+    };
+    const onUp = () => setClicking(false);
+    const onLeave = () => {
+      setPos(null);
+      root?.classList.remove('in-game-custom-cursor');
+    };
+
+    window.addEventListener('pointermove', onMove, { passive: true });
+    window.addEventListener('pointerdown', onDown, { passive: true });
+    window.addEventListener('pointerup', onUp, { passive: true });
+    document.addEventListener('mouseleave', onLeave);
+    return () => {
+      root?.classList.remove('in-game-custom-cursor');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointerup', onUp);
+      document.removeEventListener('mouseleave', onLeave);
+    };
+  }, [cursor]);
+
+  if (!cursor || !pos) return null;
+
+  return (
+    <div
+      className="fixed z-[999] pointer-events-none select-none transition-transform duration-75"
+      style={{
+        left: pos.x - 8,
+        top: pos.y - 5,
+        transformOrigin: '8px 5px',
+        transform: clicking ? 'scale(0.84) rotate(-8deg)' : 'scale(1)',
+      }}
+    >
+      <CursorVisual cursor={cursor} size={46} />
+    </div>
+  );
+};
+

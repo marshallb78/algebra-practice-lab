@@ -48,6 +48,7 @@ interface EscMenuModalProps {
   onOpenSkins: () => void;
   onOpenStormShop: () => void;
   isStormActive: boolean;
+  isDowntime?: boolean;
   seasonLabel: string;
   onNotify: (title: string, subtitle: string) => void;
 }
@@ -61,6 +62,7 @@ export const EscMenuModal: React.FC<EscMenuModalProps> = ({
   onOpenSkins,
   onOpenStormShop,
   isStormActive,
+  isDowntime = false,
   seasonLabel,
   onNotify,
 }) => {
@@ -266,13 +268,15 @@ export const EscMenuModal: React.FC<EscMenuModalProps> = ({
             </button>
           </div>
 
-          <button
-            onClick={onClose}
-            className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 hover:brightness-110 text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-lg btn-chunky"
-          >
-            <Play className="w-4 h-4 fill-slate-950" />
-            <span>Resume</span>
-          </button>
+          {!isDowntime && (
+            <button
+              onClick={onClose}
+              className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-400 to-cyan-400 hover:brightness-110 text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-lg btn-chunky"
+            >
+              <Play className="w-4 h-4 fill-slate-950" />
+              <span>Resume</span>
+            </button>
+          )}
 
           <button
             onClick={onClose}

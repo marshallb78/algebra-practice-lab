@@ -39,6 +39,7 @@ ai/models/
 ai/output/
 ai/backups/
 /Images/
+/my upoaded images/
 *.safetensors
 *.ckpt
 *.pt

@@ -1,7 +1,10 @@
-import { UPGRADES } from '../data/upgrades';
+import { getUpgradesForSeason } from '../data/upgrades';
 import { getAscensionMultiplier } from '../data/prestige';
 import { BALANCE } from '../data/balance';
-import { FRIDAY_BONUS_CONFIG } from '../config/gameConfig';
+import { FRIDAY_BONUS_CONFIG, SEASON_2_CONFIG } from '../config/gameConfig';
+import { getPetClickMultiplierBonus } from '../data/petsAndEggs';
+import { isSeasonTwoOrLater } from '../data/skins';
+import { getCursorById } from '../data/cursors';
 import { GameState } from '../types/game';
 
 export interface LiveMultiplierOptions {
@@ -77,21 +80,28 @@ export function calculateClickPower(
   liveMultiplier: number;
 } {
   let basePower = BALANCE.click.basePower;
+  const activeUpgrades = getUpgradesForSeason(state.currentSeasonId);
 
   // Add upgrade power
-  for (const upgrade of UPGRADES) {
+  for (const upgrade of activeUpgrades) {
     const level = state.upgrades[upgrade.id] || 0;
     if (level > 0 && upgrade.baseClickPower > 0) {
       basePower += level * upgrade.baseClickPower;
     }
   }
 
-  // Skins are 100% cosmetic swag/collectibles — zero stat boosts
-  const critChance = BALANCE.click.baseCritChance;
-  const critMultiplier = BALANCE.click.baseCritMultiplier;
+  // Equipped Cursor Abilities (Crit, Click, CPS, Ascension bonus)
+  const equippedCursor = getCursorById(state.equippedCursorId);
+  const critChance = BALANCE.click.baseCritChance + (equippedCursor?.critChanceBonus || 0);
+  const critMultiplier = BALANCE.click.baseCritMultiplier + (equippedCursor?.critMultiplierBonus || 0);
+  const cursorClickMult = 1 + (equippedCursor?.clickMultiplierBonus || 0);
+  const cursorAscensionBonus =
+    equippedCursor?.ascensionBonusPerShard && state.prestigeShards > 0
+      ? equippedCursor.ascensionBonusPerShard * state.prestigeShards
+      : 0;
 
   // Capybara Clicker style Ascension Multiplier: multiplies EVERYTHING
-  const ascensionMultiplier = getAscensionMultiplier(state.prestigeShards);
+  const ascensionMultiplier = getAscensionMultiplier(state.prestigeShards) + cursorAscensionBonus;
 
   // Combo multiplier
   const effectiveCombo = Math.min(state.combo, BALANCE.click.comboMax);
@@ -103,6 +113,16 @@ export function calculateClickPower(
   // Multiplicative Live Event & Friday 2x Stacking
   const { combinedMult: liveMultiplier } = getCombinedLiveMultiplier(liveOptions);
 
+  // Season 2: Equipped pets multiply clicking power
+  let petMultiplier = 1.0;
+  if (isSeasonTwoOrLater(state.currentSeasonId) && Array.isArray(state.equippedPetIds) && state.equippedPetIds.length > 0 && Array.isArray(state.pets)) {
+    const equippedSet = new Set(state.equippedPetIds.slice(0, SEASON_2_CONFIG.maxEquippedPets));
+    const bonusSum = state.pets
+      .filter((p) => equippedSet.has(p.instanceId))
+      .reduce((acc, p) => acc + getPetClickMultiplierBonus(p), 0);
+    petMultiplier = 1 + bonusSum;
+  }
+
   const totalPower = Math.max(
     1,
     Number(
@@ -111,7 +131,9 @@ export function calculateClickPower(
         ascensionMultiplier *
         comboMultiplier *
         frenzyMult *
-        liveMultiplier
+        liveMultiplier *
+        petMultiplier *
+        cursorClickMult
       ).toFixed(2)
     )
   );
@@ -129,8 +151,9 @@ export function calculateClickPower(
 
 export function calculateCPS(state: GameState, liveOptions?: LiveMultiplierOptions): number {
   let rawCps = 0;
+  const activeUpgrades = getUpgradesForSeason(state.currentSeasonId);
 
-  for (const upgrade of UPGRADES) {
+  for (const upgrade of activeUpgrades) {
     const level = state.upgrades[upgrade.id] || 0;
     if (level > 0 && upgrade.baseCps > 0) {
       rawCps += level * upgrade.baseCps;
@@ -139,8 +162,15 @@ export function calculateCPS(state: GameState, liveOptions?: LiveMultiplierOptio
 
   if (rawCps <= 0) return 0;
 
+  const equippedCursor = getCursorById(state.equippedCursorId);
+  const cursorCpsMult = 1 + (equippedCursor?.cpsMultiplierBonus || 0);
+  const cursorAscensionBonus =
+    equippedCursor?.ascensionBonusPerShard && state.prestigeShards > 0
+      ? equippedCursor.ascensionBonusPerShard * state.prestigeShards
+      : 0;
+
   // Capybara Clicker style Ascension Multiplier: multiplies EVERYTHING
-  const ascensionMultiplier = getAscensionMultiplier(state.prestigeShards);
+  const ascensionMultiplier = getAscensionMultiplier(state.prestigeShards) + cursorAscensionBonus;
 
   // Frenzy Multiplier
   const frenzyMult = state.frenzyTimer > 0 ? state.frenzyMultiplier : 1.0;
@@ -153,20 +183,21 @@ export function calculateCPS(state: GameState, liveOptions?: LiveMultiplierOptio
     rawCps *
       ascensionMultiplier *
       frenzyMult *
-      liveMultiplier
+      liveMultiplier *
+      cursorCpsMult
   );
 }
 
 /**
- * Calculates balanced Giant Matthew click reward during a Matthew Storm wave (active for 7 seconds).
+ * Calculates Giant Matthew click reward during a Matthew Storm wave:
+ * full-screen boss event paying 100x points per click!
  */
 export function calculateGiantMatthewClickReward(
   state: GameState,
   liveOptions?: LiveMultiplierOptions
 ): number {
   const { totalPower } = calculateClickPower(state, liveOptions);
-  const cps = calculateCPS(state, liveOptions);
-  return Math.max(15, Math.floor(totalPower * 1.5 + cps * 0.15));
+  return Math.max(100, Math.floor(totalPower * 100));
 }
 
 /**

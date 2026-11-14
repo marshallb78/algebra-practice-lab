@@ -227,6 +227,7 @@ export const MatthewStormModal: React.FC<MatthewStormModalProps> = ({
                 const isEquipped = state.equippedSkin === skin.id;
                 const price = skin.gemCost || GEM_ECONOMY_CONFIG.stormSkinCostGems;
                 const canAfford = state.gems >= price && stormState.shopOpen;
+                const isSpoilerMasked = !stormState.shopOpen && !isOwned;
 
                 return (
                   <div
@@ -255,15 +256,22 @@ export const MatthewStormModal: React.FC<MatthewStormModalProps> = ({
                             'radial-gradient(circle at 50% 50%, rgba(217, 70, 239, 0.45), transparent 70%)',
                         }}
                       />
-                      <img
-                        src={skin.image}
-                        alt={skin.name}
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).src =
-                            skin.fallbackImage || './images/skins/classic_matthew.png';
-                        }}
-                        className="relative z-10 w-full h-full object-contain drop-shadow-[0_14px_24px_rgba(0,0,0,0.85)] transition-transform duration-200 group-hover:scale-110"
-                      />
+                      {isSpoilerMasked ? (
+                        <div className="relative z-10 flex flex-col items-center justify-center gap-1.5 text-fuchsia-200/85">
+                          <Lock className="w-12 h-12 text-fuchsia-300 drop-shadow-[0_0_18px_rgba(232,121,249,0.7)]" />
+                          <span className="text-[10px] font-black uppercase tracking-widest">Hidden</span>
+                        </div>
+                      ) : (
+                        <img
+                          src={skin.image}
+                          alt={skin.name}
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).src =
+                              skin.fallbackImage || './images/skins/classic_matthew.png';
+                          }}
+                          className="relative z-10 w-full h-full object-contain drop-shadow-[0_14px_24px_rgba(0,0,0,0.85)] transition-transform duration-200 group-hover:scale-110"
+                        />
+                      )}
 
                       <span className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-lg bg-fuchsia-500/25 border border-fuchsia-400/50 text-[10px] font-black uppercase text-fuchsia-200">
                         Event Exclusive
@@ -272,7 +280,9 @@ export const MatthewStormModal: React.FC<MatthewStormModalProps> = ({
 
                     {/* CLEAN NAME + BIG GRAPHICAL ACTION BUTTON */}
                     <div className="w-full mt-4 text-center space-y-2.5">
-                      <h4 className="text-base font-black text-white truncate">{skin.name}</h4>
+                      <h4 className="text-base font-black text-white truncate">
+                        {isSpoilerMasked ? '??? Secret Storm Skin' : skin.name}
+                      </h4>
 
                       {isEquipped ? (
                         <div className="w-full py-2.5 rounded-2xl bg-emerald-400 text-slate-950 font-black text-xs uppercase flex items-center justify-center gap-1.5 shadow-lg">

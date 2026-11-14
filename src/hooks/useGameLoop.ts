@@ -8,7 +8,8 @@ import { saveGame, performSeasonalRollover } from '../utils/storage';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from '../components/ParticleCanvas';
 import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
-import { getActiveSeason } from '../utils/scheduleEngine';
+import { getEffectiveSeasonInfo } from '../utils/scheduleEngine';
+import { isSeasonTwoOrLater } from '../data/skins';
 
 export interface LiveMultiplierContext {
   fridayBonusActive: boolean;
@@ -121,6 +122,19 @@ export function useGameLoop({
           }
         }
 
+        // Gentle hunger decay (~100% -> ~0% over ~16 minutes of active combat play) for equipped pets in Season 2
+        const nextPets =
+          isActivelyPlaying &&
+          isSeasonTwoOrLater(prev.currentSeasonId) &&
+          Array.isArray(prev.pets) &&
+          prev.equippedPetIds?.length > 0
+            ? prev.pets.map((pet) =>
+                prev.equippedPetIds.includes(pet.instanceId)
+                  ? { ...pet, hunger: Math.max(0, pet.hunger - dt * 0.1) }
+                  : pet
+              )
+            : prev.pets;
+
         const updatedBase: GameState = {
           ...prev,
           coins: prev.coins + coinsToAdd,
@@ -136,6 +150,7 @@ export function useGameLoop({
           activePlaySecondsAccumulated: nextNormalAcc,
           stormActiveSecondsAccumulated: nextStormAcc,
           eventStats: nextEventStats,
+          pets: nextPets,
         };
 
         // Auto-claim completed quests immediately so quests cannot be hoarded across Rebirths
@@ -196,7 +211,11 @@ export function useGameLoop({
     const checker = setInterval(() => {
       const current = stateRef.current;
 
-      const activeSeason = getActiveSeason(Date.now());
+      const activeSeason = getEffectiveSeasonInfo(
+        current.cloudAccount?.uid,
+        current.sandboxS2Enabled,
+        Date.now()
+      );
       if (current.currentSeasonId && current.currentSeasonId !== activeSeason.seasonId) {
         onNotifyRef.current(
           'NEW SEASON STARTED!',

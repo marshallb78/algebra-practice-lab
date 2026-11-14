@@ -1,8 +1,10 @@
 import {
   SEASON_CONFIG,
+  SEASON_2_CONFIG,
   FRIDAY_BONUS_CONFIG,
   MATTHEW_STORM_CONFIG,
   TIMEZONE_CONFIG,
+  isSandboxSeason2Context,
 } from '../config/gameConfig';
 
 export interface ActiveSeasonInfo {
@@ -195,7 +197,8 @@ export function getSynchronizedWaveAtTime(
  */
 export function evaluateMatthewStormState(
   nowMs: number = Date.now(),
-  testSessionStartMs: number | null = null
+  testSessionStartMs: number | null = null,
+  seasonOverride?: ActiveSeasonInfo
 ): MatthewStormState {
   if (testSessionStartMs !== null) {
     const countdownDurationMs = MATTHEW_STORM_CONFIG.fullscreenCountdownSeconds * 1000;
@@ -235,7 +238,7 @@ export function evaluateMatthewStormState(
   }
 
   // Compute the current week's Friday 00:00 -> 24:00 window relative to the weekly Season anchor
-  const season = getActiveSeason(nowMs);
+  const season = seasonOverride ?? getActiveSeason(nowMs);
   const startMs = season.startTimeMs + SEASON_CONFIG.fridayEventOffsetStartMs;
   const endMs = season.startTimeMs + SEASON_CONFIG.fridayEventOffsetEndMs;
   const tenSecBeforeStartMs = startMs - MATTHEW_STORM_CONFIG.fullscreenCountdownSeconds * 1000;
@@ -280,5 +283,65 @@ export function evaluateMatthewStormState(
     secondsUntilEnd: 0,
     shopOpen: false,
     currentWave: null,
+  };
+}
+
+export interface EffectiveSeasonInfo extends ActiveSeasonInfo {
+  isSandbox: boolean;
+  isFrozenApocalypseActive: boolean;
+}
+
+/**
+ * Resolves the effective season for the active user/session.
+ * - While `nowMs < SEASON_2_CONFIG.launchTimeMs` (Monday Nov 16 00:00 EST),
+ *   everyone starts in Season Downtime counting down to Monday Midnight.
+ * - Only the 2 authorized devs (`Marshallb78` & `testmarshall` via Firebase UID) can toggle
+ *   isolated Season 2 Preview (`sandbox_s2/`). At Monday Midnight, sandbox disables for everyone.
+ */
+export function getEffectiveSeasonInfo(
+  uid?: string | null,
+  sandboxEnabled: boolean = false,
+  nowMs: number = Date.now()
+): EffectiveSeasonInfo {
+  const live = getActiveSeason(nowMs);
+  if (live.seasonNumber >= 2) {
+    return {
+      ...live,
+      isSandbox: false,
+      isFrozenApocalypseActive: true,
+    };
+  }
+
+  if (isSandboxSeason2Context(uid, sandboxEnabled, nowMs)) {
+    const startTimeMs = SEASON_2_CONFIG.launchTimeMs;
+    const activeEndTimeMs = startTimeMs + SEASON_CONFIG.activePlayDurationMs;
+    const endTimeMs = startTimeMs + SEASON_CONFIG.durationMs;
+
+    return {
+      seasonNumber: 2,
+      seasonId: 'season_2',
+      startTimeMs,
+      endTimeMs: activeEndTimeMs,
+      nextSeasonStartMs: endTimeMs,
+      remainingMs: Math.max(0, activeEndTimeMs - nowMs),
+      isDowntime: false,
+      downtimeRemainingSeconds: 0,
+      isSandbox: true,
+      isFrozenApocalypseActive: true,
+    };
+  }
+
+  const downtimeRemainingSeconds = Math.max(
+    0,
+    Math.ceil((SEASON_2_CONFIG.launchTimeMs - nowMs) / 1000)
+  );
+  return {
+    ...live,
+    nextSeasonStartMs: SEASON_2_CONFIG.launchTimeMs,
+    remainingMs: 0,
+    isDowntime: true,
+    downtimeRemainingSeconds,
+    isSandbox: false,
+    isFrozenApocalypseActive: false,
   };
 }

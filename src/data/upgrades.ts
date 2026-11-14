@@ -1,4 +1,6 @@
 import { Upgrade } from '../types/game';
+import { SEASON_2_UPGRADES } from './season2Upgrades';
+import { isSeasonTwoOrLater } from './skins';
 
 /**
  * 35 Spread-Out Click-Power-First Upgrades!
@@ -7,6 +9,12 @@ import { Upgrade } from '../types/game';
  * - Balanced in the Goldilocks zone: lively early game (12s-25s active click payback),
  *   steady mid-game in Millions/Billions (40s-85s payback), and deep endgame grind up to Decillions!
  */
+export { SEASON_2_UPGRADES };
+
+export function getUpgradesForSeason(seasonId?: string): Upgrade[] {
+  return isSeasonTwoOrLater(seasonId) ? SEASON_2_UPGRADES : UPGRADES;
+}
+
 export const UPGRADES: Upgrade[] = [
   // --- TIER 1: BEDROOM GRIND (50 – 50K) ---
   {

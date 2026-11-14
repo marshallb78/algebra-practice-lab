@@ -3,40 +3,16 @@ import {
   rtdbRestWrite,
   rtdbRestWriteKeepalive,
   rtdbRestDelete,
-  firestoreRestGetDoc,
-  firestoreRestListDocs,
+  scopeRtdbPath,
 } from './config';
-import { GameState } from '../types/game';
+import { GameState, SeasonWinnerBadge } from '../types/game';
 import { getActiveSeason } from '../utils/scheduleEngine';
 import { getAscensionMultiplier } from '../data/prestige';
 import { getCachedBanRecord, getCachedResetRecord, refreshCloudBans } from './moderation';
 
-export interface LeaderboardEntry {
-  uid: string;
-  username: string;
-  seasonalScore: number;
-  lifetimeCoins: number;
-  totalClicks: number;
-  rebirthCount: number;
-  ascensionMultiplier: number;
-  equippedSkin: string;
-  unlockedSkins: string[];
-  updatedAtMs: number;
-  totalPlaytimeSeconds?: number;
-  coins?: number;
-  prestigeShards?: number;
-  lifetimePrestigeShards?: number;
-  gems?: number;
-  lifetimeGems?: number;
-  upgrades?: Record<string, number>;
-  claimedQuests?: string[];
-  unlockedAchievements?: string[];
-  isReset?: boolean;
-}
-
 /**
- * Accounts excluded from appearing on or publishing to public leaderboards
- * WITHOUT banning or restricting their gameplay/cloud saves.
+ * Players who remain unbanned with full cloud saves and gameplay progression,
+ * while staying omitted from all seasonal and mini leaderboards.
  */
 export const LEADERBOARD_EXCLUDED_UIDS = new Set<string>([
   '0eFt9SNVpPSxm9SGPcD6n9W5u3E3', // GABBYDADDY69
@@ -56,6 +32,34 @@ export function isExcludedFromLeaderboard(
   return false;
 }
 
+export interface LeaderboardEntry {
+  uid: string;
+  username: string;
+  seasonalScore: number;
+  lifetimeCoins: number;
+  totalClicks: number;
+  highestCps?: number;
+  rebirthCount: number;
+  ascensionMultiplier: number;
+  equippedSkin: string;
+  unlockedSkins: string[];
+  updatedAtMs: number;
+  totalPlaytimeSeconds?: number;
+  coins?: number;
+  prestigeShards?: number;
+  lifetimePrestigeShards?: number;
+  gems?: number;
+  lifetimeGems?: number;
+  winnerBadges?: SeasonWinnerBadge[];
+  clanName?: string | null;
+  chestsOpened?: number;
+  zombiesDefeated?: number;
+  upgrades?: Record<string, number>;
+  claimedQuests?: string[];
+  unlockedAchievements?: string[];
+  isReset?: boolean;
+}
+
 const lastPublishedSnapshotByUid = new Map<
   string,
   {
@@ -69,15 +73,8 @@ const lastPublishedSnapshotByUid = new Map<
   }
 >();
 
-// Cache legacy Firestore entries once per browser session so pre-existing Firestore players
-// appear on the leaderboard without using ongoing Firestore read quota.
-const legacyFirestoreMapBySeason = new Map<string, Map<string, LeaderboardEntry>>();
-
 export function evictLeaderboardCacheForUid(uid: string): void {
   lastPublishedSnapshotByUid.delete(uid);
-  for (const map of legacyFirestoreMapBySeason.values()) {
-    map.delete(uid);
-  }
 }
 
 function parseRawEntry(uid: string, d: Record<string, any>): LeaderboardEntry {
@@ -94,6 +91,7 @@ function parseRawEntry(uid: string, d: Record<string, any>): LeaderboardEntry {
         ? d.seasonalScore
         : 0,
     totalClicks: typeof d.totalClicks === 'number' ? d.totalClicks : 0,
+    highestCps: typeof d.highestCps === 'number' ? d.highestCps : 0,
     rebirthCount: rebirths,
     ascensionMultiplier:
       typeof d.ascensionMultiplier === 'number'
@@ -118,6 +116,10 @@ function parseRawEntry(uid: string, d: Record<string, any>): LeaderboardEntry {
     unlockedAchievements: Array.isArray(d.unlockedAchievements)
       ? d.unlockedAchievements
       : undefined,
+    winnerBadges: Array.isArray(d.winnerBadges) ? d.winnerBadges : undefined,
+    clanName: typeof d.clanName === 'string' ? d.clanName : null,
+    chestsOpened: typeof d.chestsOpened === 'number' ? d.chestsOpened : 0,
+    zombiesDefeated: typeof d.zombiesDefeated === 'number' ? d.zombiesDefeated : 0,
     isReset: Boolean(d.isReset),
   };
 }
@@ -147,6 +149,7 @@ export function buildLeaderboardPayload(
     lifetimeCoins: Math.floor(state.lifetimeCoins || 0),
     coins: Math.floor(state.coins || 0),
     totalClicks: Math.floor(state.clicks || 0),
+    highestCps: Number((state.highestCps || 0).toFixed(1)),
     rebirthCount: rebirths,
     prestigeShards: state.prestigeShards || 0,
     lifetimePrestigeShards: state.lifetimePrestigeShards || 0,
@@ -159,6 +162,10 @@ export function buildLeaderboardPayload(
     claimedQuests: state.claimedQuests || [],
     unlockedAchievements: state.unlockedAchievements || [],
     totalPlaytimeSeconds: playtimeSeconds,
+    winnerBadges: state.winnerBadges || [],
+    clanName: state.clanName || null,
+    chestsOpened: Math.floor(state.chestsOpened || 0),
+    zombiesDefeated: Math.floor(state.zombiesDefeated || 0),
     updatedAtMs: nowMs,
     isReset: false,
   };
@@ -171,7 +178,8 @@ export function updateLeaderboardEntryKeepalive(
   uid: string,
   username: string,
   state: GameState,
-  seasonId: string = getActiveSeason().seasonId
+  seasonId: string = getActiveSeason().seasonId,
+  isSandbox: boolean = false
 ): void {
   if (
     !uid ||
@@ -182,7 +190,7 @@ export function updateLeaderboardEntryKeepalive(
     return;
   }
   const payload = buildLeaderboardPayload(uid, username, state, Date.now());
-  rtdbRestWriteKeepalive(`leaderboards/${seasonId}/${uid}`, payload, 'PUT');
+  rtdbRestWriteKeepalive(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox), payload, 'PUT');
 }
 
 /**
@@ -194,22 +202,31 @@ export async function updateLeaderboardEntry(
   username: string,
   state: GameState,
   seasonId: string = getActiveSeason().seasonId,
-  force = false
+  force = false,
+  isSandbox: boolean = false
 ): Promise<boolean> {
   if (!uid || !username) return false;
 
-  // Never allow banned, temp-banned, or leaderboard-excluded accounts onto the leaderboard
+  // Never allow banned or temp-banned accounts onto the leaderboard
   const ban = getCachedBanRecord(uid, username);
-  if (ban || isExcludedFromLeaderboard(uid, username)) {
-    rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => {});
+  if (ban) {
+    rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => {});
     return false;
+  }
+
+  // Players hidden from the leaderboard keep all cloud saves & gameplay, just skip publishing
+  if (isExcludedFromLeaderboard(uid, username)) {
+    evictLeaderboardCacheForUid(uid);
+    rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => {});
+    return true;
   }
 
   const nowMs = Date.now();
   const payload = buildLeaderboardPayload(uid, username, state, nowMs);
   const playtimeBucket = Math.floor(payload.totalPlaytimeSeconds / 30);
+  const cacheKey = `${isSandbox ? 'sbx_' : ''}${seasonId}_${uid}`;
 
-  const prev = lastPublishedSnapshotByUid.get(uid);
+  const prev = lastPublishedSnapshotByUid.get(cacheKey);
   if (
     !force &&
     prev &&
@@ -223,10 +240,14 @@ export async function updateLeaderboardEntry(
     return true;
   }
 
-  const ok = await rtdbRestWrite(`leaderboards/${seasonId}/${uid}`, payload, 'PUT');
+  const ok = await rtdbRestWrite(
+    scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox),
+    payload,
+    'PUT'
+  );
 
   if (ok) {
-    lastPublishedSnapshotByUid.set(uid, {
+    lastPublishedSnapshotByUid.set(cacheKey, {
       score: payload.seasonalScore,
       rebirths: payload.rebirthCount,
       skin: payload.equippedSkin,
@@ -248,58 +269,35 @@ export async function updateLeaderboardEntry(
  */
 export async function fetchWorldwideLeaderboard(
   seasonId: string = getActiveSeason().seasonId,
-  maxEntries = 50
+  maxEntries = 500,
+  isSandbox: boolean = false
 ): Promise<LeaderboardEntry[]> {
   try {
-    let legacyPromise: Promise<void> = Promise.resolve();
-    if (!legacyFirestoreMapBySeason.has(seasonId)) {
-      legacyPromise = firestoreRestListDocs(`leaderboards/${seasonId}/entries`, 100, 3500)
-        .then((docs) => {
-          const map = new Map<string, LeaderboardEntry>();
-          for (const { id, data } of docs) {
-            const entry = parseRawEntry(id, data);
-            map.set(entry.uid, entry);
-          }
-          legacyFirestoreMapBySeason.set(seasonId, map);
-        })
-        .catch(() => {});
-    }
-
     const [rtdbObj] = await Promise.all([
-      rtdbRestGet<Record<string, Record<string, any>>>(`leaderboards/${seasonId}`, 3500),
+      rtdbRestGet<Record<string, Record<string, any>>>(
+        scopeRtdbPath(`leaderboards/${seasonId}`, isSandbox),
+        3500
+      ),
       refreshCloudBans(),
-      legacyPromise,
     ]);
 
     const mergedByUid = new Map<string, LeaderboardEntry>();
 
-    // 1. Seed with legacy Firestore entries ONLY for UIDs not present in Realtime Database
-    const legacyMap = legacyFirestoreMapBySeason.get(seasonId);
-    if (legacyMap) {
-      for (const [uid, entry] of legacyMap.entries()) {
-        if (rtdbObj && uid in rtdbObj) continue;
-        if (
-          getCachedBanRecord(entry.uid, entry.username) ||
-          isExcludedFromLeaderboard(entry.uid, entry.username)
-        ) {
-          continue;
-        }
-        mergedByUid.set(uid, entry);
-      }
-    }
-
-    // 2. Overlay live Realtime Database entries (authoritative over legacy Firestore)
+    // Overlay live Realtime Database entries
     if (rtdbObj && typeof rtdbObj === 'object') {
       for (const [uid, raw] of Object.entries(rtdbObj)) {
         if (!raw || typeof raw !== 'object') continue;
         const rtdbEntry = parseRawEntry(uid, raw);
 
-        // If this player is banned, temp-banned, or leaderboard-excluded, purge from RTDB and skip
-        if (
-          getCachedBanRecord(rtdbEntry.uid, rtdbEntry.username) ||
-          isExcludedFromLeaderboard(rtdbEntry.uid, rtdbEntry.username)
-        ) {
+        // If this player is banned or temp-banned, purge from RTDB and skip
+        if (getCachedBanRecord(rtdbEntry.uid, rtdbEntry.username)) {
           rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => {});
+          mergedByUid.delete(rtdbEntry.uid);
+          continue;
+        }
+
+        // Skip unbanned leaderboard-hidden players
+        if (isExcludedFromLeaderboard(rtdbEntry.uid, rtdbEntry.username)) {
           mergedByUid.delete(rtdbEntry.uid);
           continue;
         }
@@ -318,7 +316,7 @@ export async function fetchWorldwideLeaderboard(
       }
     }
 
-    // 3. Final filter against banned or excluded usernames/UIDs
+    // 3. Final filter against banned or leaderboard-excluded usernames/UIDs
     const cleanEntries = Array.from(mergedByUid.values()).filter(
       (entry) =>
         !getCachedBanRecord(entry.uid, entry.username) &&
@@ -351,7 +349,7 @@ export async function fetchPlayerLeaderboardEntry(
   uid: string,
   seasonId: string = getActiveSeason().seasonId
 ): Promise<LeaderboardEntry | null> {
-  if (!uid || isExcludedFromLeaderboard(uid)) return null;
+  if (!uid || isExcludedFromLeaderboard(uid, null)) return null;
 
   try {
     const rtdbRaw = await rtdbRestGet<Record<string, any>>(
@@ -370,30 +368,37 @@ export async function fetchPlayerLeaderboardEntry(
       return parsed;
     }
 
-    const legacyMap = legacyFirestoreMapBySeason.get(seasonId);
-    if (legacyMap?.has(uid)) {
-      const entry = legacyMap.get(uid) || null;
-      if (
-        entry &&
-        (getCachedBanRecord(entry.uid, entry.username) ||
-          isExcludedFromLeaderboard(entry.uid, entry.username))
-      ) {
-        return null;
-      }
-      return entry;
-    }
-
-    const snap = await firestoreRestGetDoc(`leaderboards/${seasonId}/entries/${uid}`, false, 3000);
-    if (!snap.exists) return null;
-    const entry = parseRawEntry(uid, snap.data);
-    if (
-      getCachedBanRecord(entry.uid, entry.username) ||
-      isExcludedFromLeaderboard(entry.uid, entry.username)
-    ) {
-      return null;
-    }
-    return entry;
+    return null;
   } catch {
     return null;
+  }
+}
+
+export interface SeasonPlacementRewards {
+  isChampion: boolean;
+  isTop10: boolean;
+  rank: number | null;
+}
+
+/**
+ * Evaluates a player's official Season 1 final placement (filtering banned/excluded accounts)
+ * so #1 automatically earns Champion + Liam and Top 10 (#1-#10) automatically earn Liam.
+ */
+export async function checkSeason1PlacementRewards(
+  uid?: string | null
+): Promise<SeasonPlacementRewards> {
+  if (!uid) return { isChampion: false, isTop10: false, rank: null };
+  try {
+    const standings = await fetchWorldwideLeaderboard('season_1', 25, false);
+    const idx = standings.findIndex((entry) => entry.uid === uid);
+    if (idx < 0) return { isChampion: false, isTop10: false, rank: null };
+    const rank = idx + 1;
+    return {
+      isChampion: rank === 1,
+      isTop10: rank <= 10,
+      rank,
+    };
+  } catch {
+    return { isChampion: false, isTop10: false, rank: null };
   }
 }

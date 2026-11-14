@@ -33,6 +33,7 @@ interface AccountModalProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
   onNotify: (title: string, subtitle: string) => void;
+  allowCloseWhenSignedOut?: boolean;
 }
 
 export const AccountModal: React.FC<AccountModalProps> = ({
@@ -41,6 +42,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
   state,
   setState,
   onNotify,
+  allowCloseWhenSignedOut = false,
 }) => {
   const [username, setUsername] = useState(state.cloudAccount?.displayUsername || '');
   const [password, setPassword] = useState('');
@@ -178,7 +180,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 w-screen h-screen flex flex-col items-center justify-center p-6 bg-gradient-to-b from-[#0d1429] via-[#090d1b] to-[#050710] font-chunky text-slate-100 select-none overflow-hidden animate-fade-in">
-      {state.cloudAccount && (
+      {(state.cloudAccount || allowCloseWhenSignedOut) && (
         <button
           onClick={onClose}
           className="absolute top-5 right-6 px-4 py-2.5 rounded-2xl bg-slate-900 border-2 border-slate-700 text-slate-200 hover:text-white flex items-center gap-1.5 font-black text-xs uppercase cursor-pointer transition"
@@ -207,18 +209,24 @@ export const AccountModal: React.FC<AccountModalProps> = ({
 
         {state.cloudAccount ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-4 rounded-2xl bg-slate-950 border border-emerald-500/40">
+            <div className="grid grid-cols-3 gap-2.5">
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-emerald-500/40">
                 <span className="text-[10px] text-slate-400 font-black uppercase">Player</span>
-                <p className="text-base font-black text-emerald-300 mt-1 flex items-center justify-center gap-1">
-                  <ShieldCheck className="w-4 h-4" />
-                  {state.cloudAccount.displayUsername}
+                <p className="text-sm font-black text-emerald-300 mt-1 flex items-center justify-center gap-1 truncate">
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{state.cloudAccount.displayUsername}</span>
                 </p>
               </div>
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
                 <span className="text-[10px] text-slate-400 font-black uppercase">Skins</span>
-                <p className="text-base font-black text-amber-300 mt-1">
+                <p className="text-sm font-black text-amber-300 mt-1">
                   {state.unlockedSkins.length} Matthews
+                </p>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-cyan-500/40">
+                <span className="text-[10px] text-slate-400 font-black uppercase">Peak CPS</span>
+                <p className="text-sm font-black text-cyan-300 mt-1">
+                  {(state.highestCps || 0).toFixed(0)}/s
                 </p>
               </div>
             </div>

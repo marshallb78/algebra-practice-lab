@@ -5,7 +5,12 @@ import {
   getProgressionSkinsForSeason,
   getSkinMilestoneProgress,
   getSkinById,
+  getSkinBackgroundTheme,
+  isSeasonTwoOrLater,
 } from '../data/skins';
+import { AntiAutoclickerGuard } from '../utils/antiAutoclicker';
+import { FrozenBackground } from './s2/FrozenBackground';
+import { PetCombatStage, SnowLootDrop } from './s2/PetCombatStage';
 import { getAscensionMultiplier } from '../data/prestige';
 import { formatCoins, formatTime } from '../utils/formatters';
 import {
@@ -20,7 +25,7 @@ import { BALANCE } from '../data/balance';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { EnvironmentBackground } from './EnvironmentBackground';
-import { ServerBroadcast, isDevAdminAccount } from '../firebase/moderation';
+import { ServerBroadcast, isVerifiedLiveDevSession } from '../firebase/moderation';
 import { LeaderboardEntry } from '../firebase/leaderboard';
 import {
   Volume2,
@@ -38,6 +43,11 @@ import {
   Crown,
   Gauge,
   Megaphone,
+  Lock,
+  Check,
+  HelpCircle,
+  X,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface ClickerAreaProps {
@@ -56,6 +66,17 @@ interface ClickerAreaProps {
   stormState: MatthewStormState;
   seasonLabel: string;
   seasonRemainingSec: number;
+  isRaidActive?: boolean;
+  isBossRaidActive?: boolean;
+  raidSecondsRemaining?: number;
+  onZombieDefeated?: (coinsReward: number, gemsReward?: number) => void;
+  onZombieStealCoins?: (stolenAmount: number) => void;
+  onClaimSnowDrop?: (drop: SnowLootDrop) => void;
+  onOpenPetsModal?: () => void;
+  isCombatPaused?: boolean;
+  onCheatProbationDetected?: (details: { reason: string; cps: number }) => void;
+  probationAlertCount?: number;
+  isProbationActive?: boolean;
 }
 
 export const ClickerArea: React.FC<ClickerAreaProps> = ({
@@ -69,24 +90,41 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   onOpenDevTools,
   top3Players = [],
   serverBroadcast = null,
+  onNotify,
   fridayBonusActive,
   stormState,
   seasonLabel,
   seasonRemainingSec,
+  isRaidActive = false,
+  isBossRaidActive = false,
+  raidSecondsRemaining = 0,
+  onZombieDefeated,
+  onZombieStealCoins,
+  onClaimSnowDrop,
+  onOpenPetsModal,
+  isCombatPaused = false,
+  onCheatProbationDetected,
+  probationAlertCount = 0,
+  isProbationActive = false,
 }) => {
   const [floatingNumbers, setFloatingNumbers] = useState<FloatingNumber[]>([]);
   const [clickRipples, setClickRipples] = useState<
     { id: number; x: number; y: number; isCrit: boolean }[]
   >([]);
   const [imgSrcOverride, setImgSrcOverride] = useState<string | null>(null);
+  const [showSkinLadderModal, setShowSkinLadderModal] = useState<boolean>(false);
   const [giantWaveClicks, setGiantWaveClicks] = useState<{ waveIndex: number; clicks: number }>({
     waveIndex: -1,
     clicks: 0,
   });
 
-  // Live CPS Counter (rolling 1-second click window)
+  // Live CPS Counter (rolling 1-second click window) + Statistical Anti-Autoclicker Guard
   const [liveCps, setLiveCps] = useState<number>(0);
+  const [skinUnderAttackFlash, setSkinUnderAttackFlash] = useState<boolean>(false);
   const clickTimestampsRef = useRef<number[]>([]);
+  const clickGuardRef = useRef(new AntiAutoclickerGuard());
+  const highestCpsRef = useRef<number>(state.highestCps || 0);
+  highestCpsRef.current = Math.max(highestCpsRef.current, state.highestCps || 0);
 
   const updateLiveCps = (now: number, recordClick = false): void => {
     const timestamps = clickTimestampsRef.current;
@@ -99,6 +137,10 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     }
     const cps = timestamps.length;
     setLiveCps((prev) => (prev !== cps ? cps : prev));
+    if (cps > highestCpsRef.current) {
+      highestCpsRef.current = cps;
+      setState((prev) => (cps > (prev.highestCps || 0) ? { ...prev, highestCps: cps } : prev));
+    }
   };
 
   const characterRef = useRef<HTMLDivElement | null>(null);
@@ -108,10 +150,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
   const equippedSkin = ALL_SKINS.find((s) => s.id === state.equippedSkin) || ALL_SKINS[0];
   const ascensionMultiplier = getAscensionMultiplier(state.prestigeShards);
-  const isMarshallDev = isDevAdminAccount(
-    state.cloudAccount?.uid,
-    state.cloudAccount?.displayUsername
-  );
+  const isMarshallDev = isVerifiedLiveDevSession(state.cloudAccount?.uid);
 
   const isStormActive = stormState.status === 'active';
   const currentWave = stormState.currentWave;
@@ -189,7 +228,23 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     );
   };
 
-  const performMatthewClick = (rawX?: number, rawY?: number) => {
+  const performMatthewClick = (rawX?: number, rawY?: number, isTrusted: boolean = true) => {
+    const check = clickGuardRef.current.evaluateClick({
+      timestampMs: performance.now(),
+      isTrusted,
+    });
+    if (!check.accepted) {
+      if (check.shouldFlagProbation) {
+        onCheatProbationDetected?.({
+          reason: check.reason || 'robotic_cadence',
+          cps: Math.max(liveCps, Math.round(check.cps)),
+        });
+      } else if (check.reason === 'robotic_cadence' || check.reason === 'superhuman_rate') {
+        onNotify?.('CLICK GUARD', 'Suspicious automated click pattern detected.');
+      }
+      return;
+    }
+
     updateLiveCps(performance.now(), true);
 
     const rect = characterRef.current?.getBoundingClientRect();
@@ -254,7 +309,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       }
       e.preventDefault();
       if (e.repeat) return;
-      performClickRef.current();
+      performClickRef.current(undefined, undefined, e.isTrusted);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -280,7 +335,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       }
     }
 
-    performMatthewClick(e.clientX, e.clientY);
+    performMatthewClick(e.clientX, e.clientY, e.nativeEvent?.isTrusted !== false);
   };
 
   // Clickable Giant Rare Matthew during Storm Waves
@@ -364,14 +419,52 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   );
   const comboBonusPct = Math.round((state.combo || 0) * BALANCE.click.comboBonusPerStack * 100);
 
+  const isSeason2 = isSeasonTwoOrLater(state.currentSeasonId);
+  const skinBgTheme = getSkinBackgroundTheme(equippedSkin);
+
   return (
     <div className="relative flex-1 flex flex-col items-center justify-between h-full p-2.5 sm:p-4 select-none overflow-hidden">
-      {/* 1. ATMOSPHERIC & LIVE STORM BACKGROUND */}
-      <EnvironmentBackground
-        state={state}
+      {/* 1. ATMOSPHERIC, SKIN-MATCHED & FROZEN APOCALYPSE BACKGROUND */}
+      {!isSeason2 && (
+        <EnvironmentBackground
+          state={state}
+          isStormActive={isStormActive}
+          stormWaveActive={Boolean(currentWave)}
+        />
+      )}
+      <FrozenBackground
+        theme={skinBgTheme}
+        isFrozenApocalypse={isSeason2}
+        isRaidActive={isRaidActive || isBossRaidActive}
         isStormActive={isStormActive}
         stormWaveActive={Boolean(currentWave)}
+        combo={state.combo || 0}
+        unlockedSkinImages={(state.unlockedSkins?.length ? state.unlockedSkins : ['classic_matthew']).map(
+          (id) => getSkinById(id).image
+        )}
+        reducedMotion={state.settings.reducedMotion}
       />
+      {/* FULL-SCREEN 3D-DEPTH FROZEN HOMESTEAD, FENCE & PET vs ZOMBIE DEFENSE ARENA */}
+      {isSeason2 && (
+        <PetCombatStage
+          pets={state.pets || []}
+          equippedPetIds={state.equippedPetIds || []}
+          isRaidActive={isRaidActive}
+          isBossRaidActive={isBossRaidActive}
+          raidSecondsRemaining={raidSecondsRemaining}
+          currentCoins={state.coins}
+          zombieHitsTaken={state.zombieHitsTaken || 0}
+          isPaused={isCombatPaused}
+          onZombieDefeated={(coins, gems) => onZombieDefeated?.(coins, gems)}
+          onZombieStealCoins={(stolen) => onZombieStealCoins?.(stolen)}
+          onClaimSnowDrop={(drop) => onClaimSnowDrop?.(drop)}
+          onSkinAttacked={() => {
+            setSkinUnderAttackFlash(true);
+            window.setTimeout(() => setSkinUnderAttackFlash(false), 300);
+          }}
+          onOpenPetsModal={() => onOpenPetsModal?.()}
+        />
+      )}
 
       {/* 2. TOP BAR: NAVIGATION, ACCOUNT, LEADERBOARD, DEV TOOLS (MARSHALLB78), GEMS & LIVE BANNERS */}
       <div className="w-full flex flex-col gap-2 z-20">
@@ -379,7 +472,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
             <button
               onClick={toggleMute}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-slate-900/85 backdrop-blur-md border-2 border-slate-700/80 hover:border-amber-400/80 flex items-center justify-center text-slate-300 hover:text-white transition shadow-md active:scale-90 cursor-pointer"
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 hover:border-amber-400/70 flex items-center justify-center text-slate-300 hover:text-white transition shadow-lg active:scale-90 cursor-pointer"
               title={state.settings.isMuted ? 'Unmute' : 'Mute'}
             >
               {state.settings.isMuted ? (
@@ -391,7 +484,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
             <button
               onClick={onOpenSettings}
-              className="px-2.5 h-9 sm:h-10 rounded-2xl bg-slate-900/85 backdrop-blur-md border-2 border-slate-700/80 hover:border-cyan-400/80 flex items-center gap-1.5 text-slate-300 hover:text-white transition shadow-md active:scale-90 cursor-pointer"
+              className="px-2.5 h-9 sm:h-10 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 hover:border-cyan-400/70 flex items-center gap-1.5 text-slate-300 hover:text-white transition shadow-lg active:scale-90 cursor-pointer"
               title="Game Menu, Settings & Account (Press ESC)"
             >
               <SettingsIcon className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />
@@ -400,7 +493,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
             <button
               onClick={onOpenAccount}
-              className="px-2.5 h-9 sm:h-10 rounded-2xl bg-slate-900/85 backdrop-blur-md border-2 border-slate-700/80 hover:border-emerald-400/80 flex items-center gap-1.5 text-xs font-black text-slate-200 hover:text-white transition shadow-md cursor-pointer"
+              className="px-2.5 h-9 sm:h-10 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 hover:border-emerald-400/70 flex items-center gap-1.5 text-xs font-black text-slate-200 hover:text-white transition shadow-lg cursor-pointer"
               title="Sign In / Cloud Account"
             >
               <User className="w-4 h-4 text-emerald-400" />
@@ -411,22 +504,27 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
             <button
               onClick={onOpenLeaderboard}
-              className="px-2.5 h-9 sm:h-10 rounded-2xl bg-slate-900/85 backdrop-blur-md border-2 border-slate-700/80 hover:border-yellow-400/80 flex items-center gap-1.5 text-xs font-black text-yellow-300 hover:text-white transition shadow-md cursor-pointer"
+              className="px-2.5 h-9 sm:h-10 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 hover:border-yellow-400/70 flex items-center gap-1.5 text-xs font-black text-yellow-300 hover:text-white transition shadow-lg cursor-pointer"
               title="Worldwide Seasonal Leaderboard"
             >
               <Trophy className="w-4 h-4 text-yellow-400" />
               <span className="hidden sm:inline">Leaderboard</span>
             </button>
 
-            {/* EXCLUSIVE MARSHALLB78 DEV TOOLS BUTTON */}
+            {/* EXCLUSIVE AUTHORIZED DEV TOOLS BUTTON */}
             {isMarshallDev && onOpenDevTools && (
               <button
                 onClick={onOpenDevTools}
-                className="px-3 h-9 sm:h-10 rounded-2xl bg-gradient-to-r from-amber-500/30 to-red-500/30 backdrop-blur-md border-2 border-amber-400 text-amber-200 hover:text-white hover:border-yellow-300 flex items-center gap-1.5 text-xs font-black transition shadow-[0_0_20px_rgba(251,191,36,0.4)] cursor-pointer"
-                title="Marshallb78 Exclusive Developer Controls (Password Required)"
+                className="relative px-3 h-9 sm:h-10 rounded-lg bg-gradient-to-r from-amber-500/30 to-red-500/30 backdrop-blur-md border border-amber-400/70 text-amber-200 hover:text-white hover:border-yellow-300 flex items-center gap-1.5 text-xs font-black transition shadow-[0_0_20px_rgba(251,191,36,0.35)] cursor-pointer"
+                title="Developer Controls (Password Required)"
               >
                 <Wrench className="w-4 h-4 text-amber-300" />
                 <span>Dev Tools</span>
+                {probationAlertCount > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black leading-none animate-pulse shadow">
+                    {probationAlertCount}
+                  </span>
+                )}
               </button>
             )}
 
@@ -501,19 +599,26 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
             )}
 
             {isStormActive && (
-              <div className="flex items-center gap-2 px-3.5 py-1 rounded-full bg-gradient-to-r from-purple-700 via-fuchsia-600 to-indigo-700 border border-fuchsia-300 text-white text-xs font-black shadow-lg">
+              <div className="flex items-center gap-2 px-3.5 py-1 rounded-full bg-gradient-to-r from-purple-700 via-fuchsia-600 to-indigo-700 border-2 border-yellow-300/80 text-white text-xs font-black shadow-[0_0_24px_rgba(217,70,239,0.65)] animate-pulse">
                 <Zap className="w-4 h-4 text-yellow-300 animate-bounce" />
                 <span>
-                  MATTHEW STORM LIVE •{' '}
+                  ALL-DAY FRIDAY STORM •{' '}
                   {currentWave
-                    ? `WAVE #${currentWave.waveIndex}: ${currentWave.multiplier}× MULTIPLIER (${formatTime(
+                    ? `WAVE #${currentWave.waveIndex}: ${currentWave.multiplier}× SURGE (${formatTime(
                         currentWave.remainingWaveSeconds
                       )})`
-                    : `${MATTHEW_STORM_CONFIG.baseStormMultiplier}× STORM MULTIPLIER ACTIVE`}
+                    : `${MATTHEW_STORM_CONFIG.baseStormMultiplier}× STORM MULTIPLIER`}
                 </span>
-                <span className="text-yellow-200 font-mono">
-                  [{formatTime(stormState.secondsUntilEnd)} left]
+                <span className="text-yellow-200 font-mono" title="Ends Friday Midnight -> Weekend Downtime">
+                  [{formatTime(stormState.secondsUntilEnd)} → Midnight Downtime]
                 </span>
+              </div>
+            )}
+
+            {isProbationActive && (
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full border-2 bg-amber-950/95 border-amber-400 text-amber-100 text-xs font-black shadow-lg animate-pulse">
+                <ShieldAlert className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>⚠️ Your account is under probation — flagged for admin review.</span>
               </div>
             )}
 
@@ -544,9 +649,9 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           <div
             onClick={onOpenLeaderboard}
             title="Click to open full Leaderboard & inspect player Playtime"
-            className="hidden sm:flex flex-col gap-1 absolute left-1 sm:left-2 top-0 z-30 w-44 md:w-52 p-2 rounded-2xl bg-slate-950/90 backdrop-blur-md border-2 border-yellow-400/50 hover:border-yellow-300 shadow-[0_0_25px_rgba(250,204,21,0.2)] cursor-pointer transition-transform hover:scale-[1.02]"
+            className="hidden sm:flex flex-col gap-1 absolute left-1 sm:left-2 top-0 z-30 w-44 md:w-52 p-2.5 rounded-xl bg-black/50 backdrop-blur-md hover:bg-black/65 shadow-[0_8px_28px_rgba(0,0,0,0.45)] cursor-pointer transition-transform hover:scale-[1.02]"
           >
-            <div className="flex items-center justify-between border-b border-slate-800 pb-1 mb-0.5">
+            <div className="flex items-center justify-between border-b border-white/10 pb-1 mb-0.5">
               <div className="flex items-center gap-1.5">
                 <Trophy className="w-3.5 h-3.5 text-yellow-400" />
                 <span className="text-[10px] font-black uppercase tracking-wider text-yellow-300">
@@ -564,12 +669,12 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
               return (
                 <div
                   key={entry.uid}
-                  className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded-xl border ${
+                  className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg ${
                     rank === 1
-                      ? 'bg-yellow-500/15 border-yellow-400/60'
+                      ? 'bg-yellow-500/15'
                       : isMe
-                      ? 'bg-cyan-500/15 border-cyan-400/60'
-                      : 'bg-slate-900/90 border-slate-800'
+                      ? 'bg-cyan-500/15'
+                      : 'bg-white/5'
                   }`}
                 >
                   <div className="flex items-center gap-1.5 min-w-0">
@@ -587,7 +692,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
                     <img
                       src={skin.image}
                       alt={skin.name}
-                      className="w-5 h-5 rounded bg-slate-950 object-contain shrink-0"
+                      className="w-5 h-5 rounded object-contain shrink-0"
                     />
                     <span className="text-[11px] font-black text-white truncate">
                       {entry.username}
@@ -603,10 +708,17 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           </div>
         )}
 
+        {/* GEMS COUNTER DIRECTLY ABOVE MATTHEW COINS COUNTER */}
+        <div className="mb-1 inline-flex items-center gap-1.5 px-3 py-0.5 rounded-lg bg-black/45 backdrop-blur-md shadow-[0_0_20px_rgba(232,121,249,0.22)]">
+          <Gem className="w-3.5 h-3.5 text-fuchsia-400" />
+          <span className="text-xs sm:text-sm font-black text-fuchsia-200">{state.gems}</span>
+          <span className="text-[10px] font-bold text-fuchsia-300/80 uppercase">Gems</span>
+        </div>
+
         <div className="flex items-center justify-center gap-3 flex-wrap">
           {/* MATTHEW COINS COUNTER */}
           <div className="flex items-center gap-2.5 drop-shadow-[0_6px_18px_rgba(251,191,36,0.35)]">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-amber-500 via-yellow-300 to-amber-200 border-2 border-white flex items-center justify-center text-slate-950 font-black text-xl sm:text-2xl shadow-[0_0_22px_rgba(251,191,36,0.6)] rotate-[-4deg]">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-tr from-amber-500 via-yellow-300 to-amber-200 flex items-center justify-center text-slate-950 font-black text-xl sm:text-2xl shadow-[0_0_22px_rgba(251,191,36,0.6)] rotate-[-4deg]">
               M
             </div>
             <span className="text-4xl sm:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-yellow-100 via-yellow-300 to-amber-400 tracking-tight font-chunky drop-shadow-[0_4px_0_#78350f]">
@@ -616,12 +728,12 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
           {/* LIVE CPS COUNTER BESIDE (TO THE RIGHT OF) MATTHEW COINS COUNTER */}
           <div
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-2xl border-2 transition-all shadow-lg ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl backdrop-blur-md transition-all shadow-lg ${
               liveCps >= 12
-                ? 'bg-rose-950/90 border-rose-400 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.4)] scale-105'
+                ? 'bg-rose-950/75 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.4)] scale-105'
                 : liveCps > 0
-                ? 'bg-cyan-950/90 border-cyan-400 text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.3)]'
-                : 'bg-slate-900/90 border-slate-700/90 text-slate-300'
+                ? 'bg-cyan-950/75 text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.28)]'
+                : 'bg-black/45 text-slate-300'
             }`}
             title="Your live real-time Clicks Per Second (CPS)"
           >
@@ -643,28 +755,28 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           </div>
         </div>
 
-        {/* CLICK POWER PRIMARY PILL + PASSIVE CPS SECONDARY PILL */}
-        <div className="flex items-center justify-center gap-2 mt-1.5 flex-wrap">
-          <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-gradient-to-r from-cyan-500/25 via-sky-500/20 to-amber-500/25 border-2 border-cyan-400/70 text-xs sm:text-sm font-black text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.25)]">
+        {/* CLICK POWER + PASSIVE CPS HUD */}
+        <div className="flex items-center justify-center gap-2.5 mt-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-black/45 backdrop-blur-md text-xs sm:text-sm font-black text-cyan-200 shadow-md">
             <Zap className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
             <span className="text-yellow-300">+{formatCoins(totalPower)}</span>
             <span className="text-cyan-200">per click</span>
           </div>
 
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-950/85 border border-slate-700/90 text-xs font-bold text-slate-300">
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-black/45 backdrop-blur-md text-xs font-bold text-slate-300 shadow-md">
             <span className="text-amber-300 font-black">{formatCoins(cps)}</span>
             <span className="text-slate-400">/ sec</span>
           </div>
 
           {(fridayBonusActive || stormWaveMultiplier > 1) && (
-            <span className="px-2.5 py-0.5 rounded-full bg-fuchsia-600/30 border border-fuchsia-400 text-[11px] text-fuchsia-200 font-black">
+            <span className="px-2.5 py-0.5 rounded-lg bg-fuchsia-600/35 text-[11px] text-fuchsia-200 font-black">
               {(fridayBonusActive ? 2 : 1) * stormWaveMultiplier}× LIVE BOOST!
             </span>
           )}
         </div>
 
         {/* LIVE COMBO & CRIT METER BAR */}
-        <div className="mt-2 flex flex-col items-center gap-1 bg-slate-950/85 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-800/90 shadow-lg w-full max-w-xs">
+        <div className="mt-2 flex flex-col items-center gap-1 bg-black/45 backdrop-blur-md px-3.5 py-1.5 rounded-xl shadow-lg w-full max-w-xs">
           <div className="flex items-center justify-between w-full text-[11px] font-black">
             <span className="flex items-center gap-1 text-cyan-300">
               <Flame
@@ -680,7 +792,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
               {Math.round(critChance * 100)}% Crit ({critMultiplier}×)
             </span>
           </div>
-          <div className="w-full h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+          <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
             <div
               className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-amber-400 to-rose-500 transition-all duration-150"
               style={{ width: `${comboPercent}%` }}
@@ -688,26 +800,38 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           </div>
         </div>
 
-        {/* NEXT SKIN GOAL MILESTONE PROGRESS BAR */}
-        <div className="mt-1.5 flex flex-col items-center gap-1 bg-slate-950/80 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-800/80 shadow-md max-w-xs w-full">
+        {/* NEXT SKIN GOAL MILESTONE PROGRESS BAR (CLICK TO VIEW MYSTERY SKIN NAMES LADDER) */}
+        <button
+          type="button"
+          onClick={() => setShowSkinLadderModal(true)}
+          title="Click to see the names of all unlockable progression skins"
+          className="mt-1.5 flex flex-col items-center gap-1 bg-black/45 hover:bg-black/65 border border-white/10 hover:border-amber-400/60 backdrop-blur-md px-3.5 py-1.5 rounded-xl shadow-md max-w-xs w-full cursor-pointer transition text-left"
+        >
           <div className="flex items-center justify-between w-full text-[11px] font-black">
-            <span className="flex items-center gap-1 text-slate-300 truncate pr-2">
+            <span className="flex items-center gap-1 text-slate-200 truncate pr-2">
               <Target className="w-3 h-3 text-amber-400 shrink-0" />
               <span className="truncate">Next Skin: {nextGoalTitle}</span>
             </span>
             <span className="text-amber-300 font-mono shrink-0">{goalPercent}%</span>
           </div>
-          <div className="w-full h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden relative">
+          <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden relative">
             <div
               className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all duration-300 shadow-sm shadow-yellow-400/50"
               style={{ width: `${goalPercent}%` }}
             />
           </div>
-        </div>
+          <span className="text-[9px] font-black uppercase tracking-wider text-cyan-300/90">
+            Tap to view unlockable skin names ({progressionSkins.length - 1} total)
+          </span>
+        </button>
       </div>
 
       {/* 4. CENTRAL HERO MATTHEW CHARACTER + GIANT STORM MATTHEW */}
-      <div className="relative flex-1 flex items-center justify-center w-full z-10 py-2">
+      <div
+        className={`relative flex-1 flex items-center justify-center w-full py-2 ${
+          isSeason2 ? 'z-[12] pb-8 sm:pb-10' : 'z-10'
+        }`}
+      >
 
         <style>{`
           @keyframes clickerBreathPulse {
@@ -816,7 +940,11 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           >
             <div
               ref={spriteContainerRef}
-              className="relative w-56 h-56 sm:w-76 sm:h-76 md:w-88 md:h-88 max-w-[82vw] max-h-[48vh] flex items-center justify-center group-hover:scale-105 transition-transform duration-150 will-change-transform"
+              className={`relative w-56 h-56 sm:w-76 sm:h-76 md:w-88 md:h-88 max-w-[82vw] ${
+                isSeason2 ? 'max-h-[42vh]' : 'max-h-[48vh]'
+              } flex items-center justify-center group-hover:scale-105 transition-transform duration-150 will-change-transform ${
+                skinUnderAttackFlash ? '-translate-x-2 rotate-[-3deg]' : ''
+              }`}
               style={{ transformOrigin: '49.3% 50.1%' }}
             >
               <img
@@ -830,47 +958,74 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
                     setImgSrcOverride(fallback);
                   }
                 }}
-                className="w-full h-full object-contain pointer-events-none drop-shadow-[0_16px_22px_rgba(0,0,0,0.65)] transition-opacity duration-150"
+                style={
+                  skinUnderAttackFlash
+                    ? {
+                        filter:
+                          'brightness(1.35) drop-shadow(0 0 28px rgba(244,63,94,0.95))',
+                      }
+                    : undefined
+                }
+                className="w-full h-full object-contain pointer-events-none transition-all duration-150"
               />
+              {skinUnderAttackFlash && (
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  <div className="w-32 h-1.5 bg-gradient-to-r from-transparent via-rose-400 to-transparent rotate-[-28deg] shadow-[0_0_18px_#f43f5e]" />
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {/* CLICKABLE GIANT RARE MATTHEW BOSS TARGET */}
+        {/* FRIDAY MATTHEW STORM AMBIENT ATMOSPHERE & ELECTRIC VIGNETTE */}
+        {isStormActive && (
+          <div className="fixed inset-0 pointer-events-none z-[18] border-[4px] border-fuchsia-400/50 shadow-[inset_0_0_110px_rgba(192,38,211,0.38)] animate-pulse" />
+        )}
+
+        {/* FULL-SCREEN CLICKABLE GIANT RARE MATTHEW BOSS TARGET (100× POINTS!) */}
         {isStormActive && currentWave && currentWave.giantMatthewAvailable && giantClicksRemaining > 0 && (
           <div
             onClick={handleGiantMatthewClick}
-            className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 z-30 w-52 h-52 sm:w-72 sm:h-72 md:w-80 md:h-80 flex items-center justify-center cursor-pointer select-none group"
-            title="Click Giant Matthew before he disappears!"
+            className="fixed inset-0 z-[58] bg-gradient-to-b from-fuchsia-950/60 via-purple-950/50 to-slate-950/65 backdrop-blur-[2px] flex flex-col items-center justify-center cursor-pointer select-none group overflow-hidden"
+            title="MASSIVE 100× GIANT MATTHEW! Click anywhere on Giant Matthew!"
           >
             {!state.settings.reducedMotion && (
               <>
                 <div
-                  className="absolute inset-0 rounded-full border-4 border-dashed border-yellow-300/80 animate-spin pointer-events-none will-change-transform"
-                  style={{ animationDuration: '4s' }}
+                  className="absolute w-[95vmin] h-[95vmin] rounded-full border-[6px] border-dashed border-yellow-300/75 animate-spin pointer-events-none will-change-transform"
+                  style={{ animationDuration: '5s' }}
                 />
                 <div
-                  className="absolute inset-3 rounded-full border-2 border-fuchsia-400/80 animate-ping pointer-events-none"
-                  style={{ animationDuration: '1.2s' }}
+                  className="absolute w-[82vmin] h-[82vmin] rounded-full border-4 border-fuchsia-400/80 animate-ping pointer-events-none"
+                  style={{ animationDuration: '1.1s' }}
                 />
               </>
             )}
+            <div className="relative z-20 mb-2 px-5 py-1.5 rounded-full bg-gradient-to-r from-amber-400 via-yellow-300 to-fuchsia-400 text-slate-950 font-black text-xs sm:text-base uppercase tracking-wider shadow-[0_0_30px_rgba(250,204,21,0.9)] animate-bounce pointer-events-none">
+              ⚡ GIANT MATTHEW • 100× POINTS PER CLICK! ({giantClicksRemaining} Left) ⚡
+            </div>
             <img
               src="./images/skins/classic_matthew.png"
               alt="Giant Matthew"
               draggable={false}
-              className="relative z-10 w-full h-full object-contain animate-bounce group-hover:scale-110 group-active:scale-90 transition-transform will-change-transform"
+              className="relative z-10 w-[78vmin] h-[78vmin] sm:w-[82vmin] sm:h-[82vmin] max-w-[94vw] max-h-[82vh] object-contain drop-shadow-[0_0_55px_rgba(250,204,21,0.85)] group-hover:scale-105 group-active:scale-95 transition-transform will-change-transform"
             />
           </div>
         )}
       </div>
 
-      {/* 5. CLICK SHOCKWAVE RIPPLES */}
+      {/* 5. CLICK SHOCKWAVE RIPPLES (ENHANCED FROST SHATTER IN S2) */}
       {clickRipples.map((r) => (
         <div
           key={`ripple-${r.id}`}
-          className={`fixed pointer-events-none z-40 w-20 h-20 rounded-full border-2 ${
-            r.isCrit ? 'border-cyan-300' : 'border-amber-300'
+          className={`fixed pointer-events-none z-40 rounded-full border-2 ${
+            isSeason2
+              ? r.isCrit
+                ? 'w-24 h-24 border-cyan-200 bg-cyan-300/20 shadow-[0_0_24px_rgba(103,232,249,0.8)]'
+                : 'w-20 h-20 border-sky-300 bg-sky-400/10'
+              : r.isCrit
+              ? 'w-20 h-20 border-cyan-300'
+              : 'w-20 h-20 border-amber-300'
           }`}
           style={{
             left: r.x,
@@ -898,6 +1053,114 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           {f.value}
         </div>
       ))}
+
+      {/* MYSTERY PROGRESSION SKINS LADDER MODAL (Names & Requirements Only — No Artwork Spoilers) */}
+      {showSkinLadderModal && (
+        <div
+          className="fixed inset-0 z-[130] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in"
+          onClick={() => setShowSkinLadderModal(false)}
+        >
+          <div
+            className="w-full max-w-lg max-h-[82vh] flex flex-col rounded-3xl bg-[#0e1529] border-2 border-amber-400/60 shadow-[0_0_50px_rgba(251,191,36,0.28)] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 bg-slate-950/90 border-b border-white/10 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-400/60 flex items-center justify-center text-amber-300">
+                  <Target className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black uppercase text-white">
+                    Unlockable Skin Names
+                  </h3>
+                  <p className="text-[11px] font-bold text-slate-400">
+                    Artwork stays hidden until you unlock each milestone!
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSkinLadderModal(false)}
+                className="w-8 h-8 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {progressionSkins
+                .filter((s) => s.milestone.type !== 'free')
+                .map((skin, idx) => {
+                  const unlocked = state.unlockedSkins.includes(skin.id);
+                  const isNext = nextLockedSkin?.id === skin.id;
+                  const prog = getSkinMilestoneProgress(skin, state, cps);
+                  return (
+                    <div
+                      key={skin.id}
+                      className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${
+                        unlocked
+                          ? 'bg-emerald-950/35 border-emerald-400/50'
+                          : isNext
+                          ? 'bg-amber-950/35 border-amber-400/75 ring-1 ring-amber-400/40'
+                          : 'bg-slate-950/85 border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                            unlocked
+                              ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-300'
+                              : isNext
+                              ? 'bg-amber-500/20 border-amber-400/60 text-amber-300'
+                              : 'bg-slate-900 border-slate-700 text-slate-500'
+                          }`}
+                        >
+                          {unlocked ? (
+                            <Check className="w-5 h-5 stroke-[3]" />
+                          ) : (
+                            <HelpCircle className="w-5 h-5" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] font-mono font-black text-slate-500">
+                              #{idx + 1}
+                            </span>
+                            <span className="text-sm font-black text-white truncate">
+                              {skin.name}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-[9px] font-black uppercase text-cyan-300">
+                              {skin.rarity}
+                            </span>
+                          </div>
+                          <div className="text-[11px] font-bold text-slate-400 mt-0.5">
+                            {skin.milestone.description}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 text-right">
+                        {unlocked ? (
+                          <span className="px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 font-black text-[10px] uppercase">
+                            Unlocked
+                          </span>
+                        ) : isNext ? (
+                          <span className="px-2.5 py-1 rounded-xl bg-amber-400/20 border border-amber-400/50 text-amber-200 font-black text-[10px] uppercase">
+                            Up Next • {prog.percent}%
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-slate-900 text-slate-400 font-black text-[10px] uppercase">
+                            <Lock className="w-3 h-3" />
+                            <span>Locked</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

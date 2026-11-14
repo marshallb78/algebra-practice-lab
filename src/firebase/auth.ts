@@ -10,7 +10,10 @@ import {
   getFirebaseServices,
   rtdbRestGet,
   rtdbRestWrite,
-  firestoreRestGetDoc,
+  rtdbRestDelete,
+  rtdbRestConditionalPut,
+  scopeRtdbPath,
+  TAB_SESSION_ID,
 } from './config';
 import { isExcludedFromLeaderboard } from './leaderboard';
 
@@ -276,9 +279,9 @@ export async function authenticateUnified(
       if (userDoc && typeof userDoc.username === 'string' && userDoc.username.trim().length >= 3) {
         displayUsername = userDoc.username.trim();
       } else if (!user.displayName) {
-        const docSnap = await firestoreRestGetDoc(`usernames/${normalized}`, false, 2000);
-        if (docSnap.exists && typeof docSnap.data.username === 'string') {
-          displayUsername = docSnap.data.username;
+        const usernameNode = await rtdbRestGet<{ username?: string }>(`usernames/${normalized}`, 2000);
+        if (usernameNode && typeof usernameNode.username === 'string') {
+          displayUsername = usernameNode.username;
         }
       }
     } catch {
@@ -303,11 +306,47 @@ export async function authenticateUnified(
     }
   }
 
-  // Step 2: Try creating the account in Firebase Auth
+  // Step 2: Check RTDB atomic username lock BEFORE creating a new Firebase Auth account
+  // Prevents race conditions or two renamed/duplicate accounts claiming the same username.
+  const existingUsernameOwner = await rtdbRestGet<{ uid?: string; authEmail?: string }>(
+    `usernames/${normalized}`,
+    2500
+  );
+  if (existingUsernameOwner && existingUsernameOwner.uid) {
+    throw new Error(
+      `Username "${cleanDisplayUsername}" is already taken, or password is incorrect.`
+    );
+  }
+
+  // Try creating the account in Firebase Auth
   const internalEmail = usernameToInternalAuthEmail(normalized);
   try {
     const createCred = await createUserWithEmailAndPassword(auth, internalEmail, password);
     const user = createCred.user;
+
+    // Atomically lock the username node using RTDB If-Match: null_etag CAS
+    const claimRes = await rtdbRestConditionalPut(
+      `usernames/${normalized}`,
+      {
+        uid: user.uid,
+        username: cleanDisplayUsername,
+        normalizedUsername: normalized,
+        authEmail: internalEmail,
+        createdAtMs: Date.now(),
+      },
+      'null_etag',
+      3500
+    );
+
+    if (claimRes.conflict) {
+      // Another signup beat us cleanly in a race condition: clean up auth user and reject
+      try {
+        await user.delete();
+      } catch {
+        // ignore cleanup error
+      }
+      throw new Error(`Username "${cleanDisplayUsername}" was just claimed by another player.`);
+    }
 
     try {
       await Promise.race([
@@ -318,13 +357,15 @@ export async function authenticateUnified(
       // ignore
     }
 
-    rtdbRestWrite(`usernames/${normalized}`, {
-      uid: user.uid,
-      username: cleanDisplayUsername,
-      normalizedUsername: normalized,
-      authEmail: internalEmail,
-      createdAtMs: Date.now(),
-    }).catch(() => {});
+    if (!claimRes.ok) {
+      rtdbRestWrite(`usernames/${normalized}`, {
+        uid: user.uid,
+        username: cleanDisplayUsername,
+        normalizedUsername: normalized,
+        authEmail: internalEmail,
+        createdAtMs: Date.now(),
+      }).catch(() => {});
+    }
 
     return {
       account: {
@@ -369,7 +410,7 @@ export async function changeAccountUsername(
     return cleanNew;
   }
 
-  // Check if another player already owns this username
+  // Atomic ETag CAS claim on newNorm when switching normalized username
   const existing = await rtdbRestGet<{ uid?: string }>(`usernames/${newNorm}`, 2500);
   if (existing && existing.uid && existing.uid !== uid) {
     throw new Error(`Username "${cleanNew}" is already taken!`);
@@ -381,6 +422,24 @@ export async function changeAccountUsername(
     currentUser?.email ||
     (await resolveAuthEmailForUsername(oldNorm)).authEmail ||
     usernameToInternalAuthEmail(oldNorm);
+
+  if (newNorm !== oldNorm && (!existing || !existing.uid)) {
+    const casRes = await rtdbRestConditionalPut(
+      `usernames/${newNorm}`,
+      {
+        uid,
+        username: cleanNew,
+        normalizedUsername: newNorm,
+        authEmail,
+        updatedAtMs: Date.now(),
+      },
+      'null_etag',
+      3500
+    );
+    if (casRes.conflict) {
+      throw new Error(`Username "${cleanNew}" was just taken by another player!`);
+    }
+  }
 
   if (currentUser) {
     try {
@@ -406,18 +465,7 @@ export async function changeAccountUsername(
       'PUT'
     ),
     oldNorm && oldNorm !== newNorm
-      ? rtdbRestWrite(
-          `usernames/${oldNorm}`,
-          {
-            uid,
-            username: cleanNew,
-            normalizedUsername: newNorm,
-            authEmail,
-            redirectedTo: newNorm,
-            updatedAtMs: Date.now(),
-          },
-          'PUT'
-        )
+      ? rtdbRestDelete(`usernames/${oldNorm}`).catch(() => false)
       : Promise.resolve(true),
     rtdbRestWrite(
       `users/${uid}`,
@@ -519,3 +567,48 @@ export function subscribeToAuthChanges(
     });
   });
 }
+
+/**
+ * Claims an exclusive single-device session token in Firebase RTDB (`users/{uid}/activeSessionToken`).
+ * Enforces the "1 device per account" security rule so any previous device/session sees the conflict and locks cleanly.
+ */
+export async function claimSingleDeviceSession(
+  uid: string,
+  isSandbox: boolean = false
+): Promise<string> {
+  const token = `${TAB_SESSION_ID}_${Date.now()}`;
+  const path = scopeRtdbPath(`users/${uid}`, isSandbox);
+  await rtdbRestWrite(
+    path,
+    {
+      activeSessionToken: token,
+      activeSessionClaimedAtMs: Date.now(),
+    },
+    'PATCH',
+    3500
+  ).catch(() => false);
+  return token;
+}
+
+/**
+ * Verifies whether the current browser tab still holds the exclusive single-device session lock.
+ * Returns `{ valid: true }` unless RTDB explicitly reports a DIFFERENT activeSessionToken.
+ */
+export async function verifySingleDeviceSession(
+  uid: string,
+  expectedToken: string,
+  isSandbox: boolean = false
+): Promise<{ valid: boolean; remoteToken?: string }> {
+  if (!uid || !expectedToken) return { valid: true };
+  try {
+    const path = scopeRtdbPath(`users/${uid}/activeSessionToken`, isSandbox);
+    const remoteToken = await rtdbRestGet<string>(path, 3000);
+    if (typeof remoteToken === 'string' && remoteToken.length > 0 && remoteToken !== expectedToken) {
+      return { valid: false, remoteToken };
+    }
+  } catch {
+    // Transient offline/network hiccup does not false-kick a legitimate user
+  }
+  return { valid: true };
+}
+

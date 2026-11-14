@@ -130,6 +130,11 @@ export const SkinQualityModal: React.FC<SkinQualityModalProps> = ({
                   <span className="absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-slate-950/90 border border-slate-700 text-[9px] font-black uppercase tracking-wider text-slate-300">
                     {skin.rarity}
                   </span>
+                  {skin.isPlaceholderArt && (
+                    <span className="absolute top-2 right-2 px-2 py-0.5 rounded-lg bg-amber-400/90 text-slate-950 text-[9px] font-black uppercase tracking-wider shadow">
+                      Placeholder
+                    </span>
+                  )}
                 </div>
 
                 {/* COMPACT VISUAL FOOTER */}

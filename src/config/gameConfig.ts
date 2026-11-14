@@ -84,11 +84,11 @@ export const MATTHEW_STORM_CONFIG = {
   waveDurationMaxSeconds: 45,
   waveMultiplierMin: 4,
   waveMultiplierMax: 4,
-  /** Giant Rare Matthew per wave: disappears after 7 seconds */
-  giantMatthewDurationSeconds: 7,
+  /** Giant Rare Matthew per wave: covers the arena for 10 seconds with 100x clicks! */
+  giantMatthewDurationSeconds: 10,
   giantMatthewMaxClicksPerWave: 35,
-  /** Development-only isolated test mode duration: 10 minutes */
-  devTestDurationSeconds: 10 * 60,
+  /** Development-only isolated preview duration: full 24-hour All-Day Friday (86,400 seconds until Midnight Downtime) */
+  devTestDurationSeconds: 24 * 60 * 60,
   devTestWaveIntervalMinSeconds: 15,
   devTestWaveIntervalMaxSeconds: 25,
   devTestWaveDurationMinSeconds: 25,
@@ -108,3 +108,61 @@ export const CLICK_SAFETY_CONFIG = {
 export const DEV_FLAGS = {
   enableEventTestButton: false,
 };
+
+export const SEASON_2_CONFIG = {
+  themeName: 'Frozen Apocalypse',
+  launchIso: '2026-11-16T00:00:00-05:00',
+  launchTimeMs: Date.parse('2026-11-16T00:00:00-05:00'),
+  /** Next Friday Live Event (Season 2 Week 1 Friday: Nov 20, 2026) */
+  nextFridayEventStartIso: '2026-11-20T00:00:00-05:00',
+  nextFridayEventEndIso: '2026-11-20T23:59:59-05:00',
+  /** Daily shop size & daily rotation delta (3 leave, 3 enter daily) */
+  itemShopTotalSlots: 30,
+  itemShopDailyRotateCount: 3,
+  /** Maximum pets equipped underneath Matthew's head */
+  maxEquippedPets: 3,
+  /** Unlimited pet upgrade level (Infinity = no level cap) */
+  maxPetLevel: Number.POSITIVE_INFINITY,
+  /** Maximum clan size */
+  maxClanMembers: 5,
+  /** Random Zombie Raid interval range in seconds (10 - 15 minutes) */
+  raidIntervalMinSeconds: 10 * 60,
+  raidIntervalMaxSeconds: 15 * 60,
+  raidDurationSeconds: 75,
+  /** Ultra-rare Matthew Shop Token chance per chest (1 in 1000 odds = 0.001) */
+  matthewShopTokenChestChance: 0.001,
+  /** Chest opening costs / sources */
+  gemChestCostGems: 25,
+};
+
+export const TEST_ISOLATION_CONFIG = {
+  /** Strictly authorized Firebase UIDs allowed to toggle Season 2 preview before Monday launch (`Marshallb78`, `testmarshall`) */
+  authorizedDevUids: [
+    '89nsfff2YtaEVcNTHUBDq22V4FW2', // Marshallb78
+    'cKFezHsISfbZGH4tKjQyME0wvrt1', // testmarshall
+  ] as readonly string[],
+  sandboxStorageKey: 'matthew_clicker_s2_sandbox_v1',
+  sandboxRtdbPrefix: 'sandbox_s2/',
+};
+
+export function isAuthorizedDevUid(uid?: string | null): boolean {
+  if (!uid || typeof uid !== 'string') return false;
+  return TEST_ISOLATION_CONFIG.authorizedDevUids.includes(uid.trim());
+}
+
+/**
+ * Pre-launch Season 2 Sandbox preview is active ONLY when:
+ * 1) Current clock is before Monday midnight Season 2 launch
+ * 2) User toggled sandbox ON
+ * 3) User's Firebase UID is strictly one of the 2 authorized devs (`Marshallb78` or `testmarshall`).
+ * At Monday midnight (`nowMs >= SEASON_2_CONFIG.launchTimeMs`), everyone — including devs — rolls cleanly into live Season 2.
+ */
+export function isSandboxSeason2Context(
+  uid?: string | null,
+  sandboxEnabled?: boolean,
+  nowMs: number = Date.now()
+): boolean {
+  if (!sandboxEnabled) return false;
+  if (nowMs >= SEASON_2_CONFIG.launchTimeMs) return false;
+  return isAuthorizedDevUid(uid);
+}

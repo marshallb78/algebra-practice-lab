@@ -6,14 +6,18 @@
  * Plus low-latency Web Audio API procedural SFX for clicks, crits, and unlocks.
  */
 
+export type MusicTrackMode = 'chill' | 'storm' | 's2_winter' | 's2_event' | 's2_cutscene' | 's2_mystery';
+
 class SoundManager {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private sfxGain: GainNode | null = null;
 
-  private chillAudio: HTMLAudioElement | null = null;
-  private stormAudio: HTMLAudioElement | null = null;
-  private currentTrackMode: 'chill' | 'storm' = 'chill';
+  private tracks: Partial<Record<MusicTrackMode, HTMLAudioElement>> = {};
+  private trackMultipliers: Partial<Record<MusicTrackMode, number>> = {};
+  private currentTrackMode: MusicTrackMode = 's2_winter';
+  private fadeRafId: number | null = null;
+  private isFadedOutPaused: boolean = false;
 
   private isMuted: boolean = false;
   private masterVolume: number = 0.8;
@@ -24,72 +28,166 @@ class SoundManager {
   constructor() {
     if (typeof window !== 'undefined' && typeof Audio !== 'undefined') {
       try {
-        this.chillAudio = new Audio('./audio/chill_bgm.mp3');
-        this.chillAudio.loop = true;
-        this.chillAudio.preload = 'auto';
-
-        this.stormAudio = new Audio('./audio/storm_techno.mp3');
-        this.stormAudio.loop = true;
-        this.stormAudio.preload = 'auto';
+        const urls: Record<MusicTrackMode, string> = {
+          chill: './audio/chill_bgm.mp3',
+          storm: './audio/storm_techno.mp3',
+          s2_winter: './audio/s2/s2_winter_bgm.mp3',
+          s2_event: './audio/s2/s2_event_bgm.mp3',
+          s2_cutscene: './audio/s2/s2_cutscene_bgm.mp3',
+          s2_mystery: './audio/s2/s2_mystery_bgm.mp3',
+        };
+        (Object.keys(urls) as MusicTrackMode[]).forEach((key) => {
+          const el = new Audio(urls[key]);
+          el.loop = true;
+          el.preload = key === 's2_winter' || key === 's2_cutscene' ? 'auto' : 'metadata';
+          this.tracks[key] = el;
+          this.trackMultipliers[key] = key === this.currentTrackMode ? 1 : 0;
+        });
 
         this.syncAudioElementVolumes();
 
         const unlockAudio = () => {
-          this.ensureMusicPlaying();
+          this.unlockAndEnsureAudio();
         };
-        window.addEventListener('pointerdown', unlockAudio, { passive: true });
-        window.addEventListener('keydown', unlockAudio, { passive: true });
+        window.addEventListener('pointerdown', unlockAudio, { capture: true, passive: true });
+        window.addEventListener('keydown', unlockAudio, { capture: true, passive: true });
       } catch {
         // Ignore in headless test environments
       }
     }
   }
 
-  private syncAudioElementVolumes() {
-    const effectiveVol =
-      this.isMuted || !this.isMusicPlaying
-        ? 0
-        : Math.max(0, Math.min(1, this.masterVolume * this.musicVolume));
-    if (this.chillAudio) {
-      this.chillAudio.volume = effectiveVol;
-    }
-    if (this.stormAudio) {
-      this.stormAudio.volume = effectiveVol;
-    }
+  private getTargetVolume(): number {
+    return this.isMuted || !this.isMusicPlaying
+      ? 0
+      : Math.max(0, Math.min(1, this.masterVolume * this.musicVolume));
   }
 
-  public ensureMusicPlaying() {
-    if (typeof window === 'undefined' || !this.chillAudio || !this.stormAudio) return;
-    this.syncAudioElementVolumes();
+  private syncAudioElementVolumes() {
+    const base = this.getTargetVolume();
+    (Object.keys(this.tracks) as MusicTrackMode[]).forEach((key) => {
+      const el = this.tracks[key];
+      if (!el) return;
+      const mult = this.trackMultipliers[key] ?? (key === this.currentTrackMode ? 1 : 0);
+      el.volume = Math.max(0, Math.min(1, base * mult));
+    });
+  }
+
+  /**
+   * Call directly inside a user gesture handler (e.g., PLAY button) to unlock Web Audio & BGM reliably.
+   */
+  public unlockAndEnsureAudio(preferredMode?: MusicTrackMode) {
+    this.isFadedOutPaused = false;
+    if (preferredMode) {
+      this.currentTrackMode = preferredMode;
+    }
+    try {
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+    } catch {
+      // Ignore context resume error
+    }
+    this.ensureMusicPlaying(true);
+  }
+
+  /**
+   * Smoothly fades out all active music over fadeMs milliseconds.
+   */
+  public fadeOutMusic(fadeMs = 950) {
+    if (typeof window === 'undefined') return;
+    if (this.fadeRafId !== null) {
+      cancelAnimationFrame(this.fadeRafId);
+      this.fadeRafId = null;
+    }
+    this.isFadedOutPaused = true;
+    const startMultipliers = { ...this.trackMultipliers };
+    const startTime = performance.now();
+
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startTime) / Math.max(80, fadeMs));
+      const ease = 1 - t;
+      (Object.keys(this.tracks) as MusicTrackMode[]).forEach((key) => {
+        this.trackMultipliers[key] = (startMultipliers[key] ?? 0) * ease;
+      });
+      this.syncAudioElementVolumes();
+      if (t < 1) {
+        this.fadeRafId = requestAnimationFrame(step);
+      } else {
+        this.fadeRafId = null;
+        Object.values(this.tracks).forEach((el) => el?.pause());
+      }
+    };
+    this.fadeRafId = requestAnimationFrame(step);
+  }
+
+  public ensureMusicPlaying(withFadeIn = false) {
+    if (typeof window === 'undefined') return;
+    if (this.isFadedOutPaused) return;
 
     if (!this.isMusicPlaying || this.isMuted) {
-      this.chillAudio.pause();
-      this.stormAudio.pause();
+      this.syncAudioElementVolumes();
+      Object.values(this.tracks).forEach((el) => el?.pause());
       return;
     }
 
-    const active = this.currentTrackMode === 'storm' ? this.stormAudio : this.chillAudio;
-    const inactive = this.currentTrackMode === 'storm' ? this.chillAudio : this.stormAudio;
+    const active = this.tracks[this.currentTrackMode];
+    if (!active) return;
 
-    if (!inactive.paused) {
-      inactive.pause();
-      inactive.currentTime = 0;
+    // Crossfade smoothly between currently playing tracks and new target track
+    if (this.fadeRafId !== null) {
+      cancelAnimationFrame(this.fadeRafId);
+      this.fadeRafId = null;
     }
+
+    const fadeMs = withFadeIn ? 900 : 1050;
+    const startMultipliers: Partial<Record<MusicTrackMode, number>> = { ...this.trackMultipliers };
+    const targetMode = this.currentTrackMode;
+    const base = this.getTargetVolume();
 
     if (active.paused) {
+      this.trackMultipliers[targetMode] = withFadeIn ? 0.02 : (startMultipliers[targetMode] ?? 0.05);
+      active.volume = Math.max(0, Math.min(1, base * (this.trackMultipliers[targetMode] || 0)));
       active.play().catch(() => {
-        // Autoplay blocked until next user gesture
+        // Autoplay blocked until next user gesture; keep multiplier ready
       });
     }
+
+    const startTime = performance.now();
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - startTime) / fadeMs);
+      (Object.keys(this.tracks) as MusicTrackMode[]).forEach((key) => {
+        const el = this.tracks[key];
+        if (!el) return;
+        const from = startMultipliers[key] ?? (key === targetMode ? 0 : 0);
+        const to = key === targetMode ? 1 : 0;
+        const val = from + (to - from) * p;
+        this.trackMultipliers[key] = val;
+        if (key !== targetMode && p >= 1 && !el.paused) {
+          el.pause();
+          el.currentTime = 0;
+        }
+      });
+      this.syncAudioElementVolumes();
+      if (p < 1) {
+        this.fadeRafId = requestAnimationFrame(tick);
+      } else {
+        this.fadeRafId = null;
+      }
+    };
+    this.fadeRafId = requestAnimationFrame(tick);
   }
 
-  public setMusicTrack(mode: 'chill' | 'storm') {
-    if (this.currentTrackMode === mode) {
-      this.ensureMusicPlaying();
+  public setMusicTrack(mode: MusicTrackMode, forceFadeIn = false) {
+    this.isFadedOutPaused = false;
+    if (this.currentTrackMode === mode && !forceFadeIn) {
+      const active = this.tracks[mode];
+      if (active && !active.paused) return;
+      this.ensureMusicPlaying(true);
       return;
     }
     this.currentTrackMode = mode;
-    this.ensureMusicPlaying();
+    this.ensureMusicPlaying(true);
   }
 
   private initContext() {
@@ -402,6 +500,61 @@ class SoundManager {
 
     osc.start();
     osc.stop(this.ctx.currentTime + 0.12);
+  }
+
+  public playChestOpen() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    [392, 493.88, 587.33, 783.99, 1046.5].forEach((freq, idx) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const t = this.ctx.currentTime + idx * 0.08;
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.28, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.45);
+    });
+  }
+
+  public playTokenUnlock() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    [261.63, 329.63, 392, 523.25, 659.25, 1046.5].forEach((freq, idx) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const t = this.ctx.currentTime + idx * 0.09;
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.22, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(t);
+      osc.stop(t + 0.65);
+    });
+  }
+
+  public playCutsceneBoom() {
+    this.initContext();
+    if (!this.ctx || !this.sfxGain) return;
+    const t = this.ctx.currentTime;
+    const sub = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(115, t);
+    sub.frequency.exponentialRampToValueAtTime(34, t + 1.15);
+    g.gain.setValueAtTime(0.45, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.25);
+    sub.connect(g);
+    g.connect(this.sfxGain);
+    sub.start(t);
+    sub.stop(t + 1.25);
   }
 
   public toggleMusic(): boolean {

@@ -237,6 +237,88 @@ export function rtdbRestWriteKeepalive(
 }
 
 /**
+ * Scopes any RTDB path cleanly into `sandbox_s2/...` when testing Season 2 before Monday launch,
+ * leaving live Season 1 production paths 100% isolated.
+ */
+export function scopeRtdbPath(path: string, isSandbox: boolean = false): string {
+  const cleanPath = path.replace(/^\/+/, '');
+  if (!isSandbox) return cleanPath;
+  if (cleanPath.startsWith('sandbox_s2/')) return cleanPath;
+  return `sandbox_s2/${cleanPath}`;
+}
+
+/**
+ * Fetches an RTDB node along with its Firebase ETag header (`X-Firebase-ETag: true`)
+ * for optimistic concurrency / Compare-And-Swap (CAS) updates.
+ */
+export async function rtdbRestGetWithETag<T = any>(
+  path: string,
+  timeoutMs = 5500
+): Promise<{ ok: boolean; data: T | null; etag: string | null }> {
+  const cleanPath = path.replace(/^\/+|\.json$/g, '');
+  const token = await getAuthIdToken(1800);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = token
+      ? `${RTDB_REST_BASE}/${cleanPath}.json?auth=${encodeURIComponent(token)}`
+      : `${RTDB_REST_BASE}/${cleanPath}.json`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'X-Firebase-ETag': 'true' },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (!res.ok) return { ok: false, data: null, etag: null };
+    const etag = res.headers.get('ETag');
+    const data = (await res.json()) as T | null;
+    return { ok: true, data, etag };
+  } catch {
+    return { ok: false, data: null, etag: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Conditional Compare-And-Swap PUT using Firebase RTDB `if-match` ETag semantics.
+ * Passing `ifMatchEtag = 'null_etag'` guarantees atomic create-only (fails 412 if node already exists).
+ */
+export async function rtdbRestConditionalPut(
+  path: string,
+  data: any,
+  ifMatchEtag: string,
+  timeoutMs = 5500
+): Promise<{ ok: boolean; conflict: boolean; status: number }> {
+  const cleanPath = path.replace(/^\/+|\.json$/g, '');
+  const token = await getAuthIdToken(1800);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = token
+      ? `${RTDB_REST_BASE}/${cleanPath}.json?auth=${encodeURIComponent(token)}`
+      : `${RTDB_REST_BASE}/${cleanPath}.json`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'if-match': ifMatchEtag,
+      },
+      body: JSON.stringify(data),
+      signal: controller.signal,
+    });
+    if (res.status === 412) {
+      return { ok: false, conflict: true, status: 412 };
+    }
+    return { ok: res.ok, conflict: false, status: res.status };
+  } catch {
+    return { ok: false, conflict: false, status: 0 };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Stateless Firebase Realtime Database DELETE via HTTP REST.
  */
 export async function rtdbRestDelete(
