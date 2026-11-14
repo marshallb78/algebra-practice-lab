@@ -144,8 +144,8 @@ export const FROZEN_PROGRESSION_SKINS: Skin[] = [
 ];
 
 /**
- * 2) ITEM SHOP SKINS (30 TOTAL ROTATING SLOTS — ALL FOOD SKINS + SEASONAL COSMETIC SKINS)
- * 3 skins leave and 3 new skins rotate into the daily Item Shop showcase every 24h!
+ * 2) ITEM SHOP SKINS (6 CURATED ROTATING SKINS — ALL FOOD SKINS)
+ * 3 skins are featured at a time and 2 rotate out/in daily!
  */
 export const ITEM_SHOP_SKINS: Skin[] = [
   // ALL FOOD SKINS (in Item Shop!)
@@ -294,11 +294,11 @@ export const MATTHEW_VAULT_SKINS: Skin[] = [];
 
 /**
  * Computes which Item Shop skins are featured on a given day index (`YYYY-MM-DD`).
- * Shows up to `visibleCount` (e.g., 12 featured daily slots out of 30 total pool) rotating by 3 leaving & 3 entering each day!
+ * Shows up to `visibleCount` (default 3 out of 6 total pool), swapping skins out every day!
  */
 export function getDailyItemShopRotation(
   dateStr: string,
-  visibleCount: number = 12
+  visibleCount: number = SEASON_2_CONFIG.itemShopVisibleSlots
 ): Skin[] {
   const pool = ITEM_SHOP_SKINS;
   if (pool.length <= visibleCount) return pool;

@@ -116,9 +116,10 @@ export const SEASON_2_CONFIG = {
   /** Next Friday Live Event (Season 2 Week 1 Friday: Nov 20, 2026) */
   nextFridayEventStartIso: '2026-11-20T00:00:00-05:00',
   nextFridayEventEndIso: '2026-11-20T23:59:59-05:00',
-  /** Daily shop size & daily rotation delta (3 leave, 3 enter daily) */
-  itemShopTotalSlots: 30,
-  itemShopDailyRotateCount: 3,
+  /** Daily shop size & daily rotation delta (3 featured at a time out of 6, 2 swap daily) */
+  itemShopTotalSlots: 6,
+  itemShopVisibleSlots: 3,
+  itemShopDailyRotateCount: 2,
   /** Maximum pets equipped underneath Matthew's head */
   maxEquippedPets: 3,
   /** Unlimited pet upgrade level (Infinity = no level cap) */

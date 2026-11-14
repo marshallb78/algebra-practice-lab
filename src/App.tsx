@@ -210,6 +210,7 @@ export function App() {
   const sessionTokenRef = useRef<string>('');
   const frozenIntroSessionTriggeredRef = useRef<boolean>(false);
   const lastCutsceneEventIdRef = useRef<string | null>(null);
+  const mondayRolloverTriggeredRef = useRef<boolean>(false);
 
   const prevStormStatusRef = useRef<string>('pre_countdown');
   const prevWaveIndexRef = useRef<number>(-1);
@@ -388,7 +389,9 @@ export function App() {
   // At Monday midnight Season 2 launch, exit any active dev sandbox preview and reset to fresh Season 2
   useEffect(() => {
     if (nowMs < SEASON_2_CONFIG.launchTimeMs) return;
-    if (!sandboxS2Enabled) return;
+    if (mondayRolloverTriggeredRef.current) return;
+    if (!sandboxS2Enabled && state.currentSeasonId === 'season_2') return;
+    mondayRolloverTriggeredRef.current = true;
 
     sandboxS2EnabledRef.current = false;
     setSandboxS2Enabled(false);
@@ -420,7 +423,7 @@ export function App() {
       handleNotify('SEASON 2 LIVE!', 'Frozen Apocalypse has officially launched!');
     };
     rollToLiveSeason2();
-  }, [nowMs, sandboxS2Enabled]);
+  }, [nowMs, sandboxS2Enabled, state.currentSeasonId]);
 
   // Disable right-click context menu globally so fast trackpad clicking never opens a browser menu
   useEffect(() => {

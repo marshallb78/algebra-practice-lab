@@ -6,9 +6,15 @@ import {
   scopeRtdbPath,
 } from './config';
 import { GameState, SeasonWinnerBadge } from '../types/game';
+import { SEASON_2_CONFIG } from '../config/gameConfig';
 import { getActiveSeason } from '../utils/scheduleEngine';
 import { getAscensionMultiplier } from '../data/prestige';
-import { getCachedBanRecord, getCachedResetRecord, refreshCloudBans } from './moderation';
+import {
+  getCachedBanRecord,
+  getCachedResetRecord,
+  isDevAdminAccount,
+  refreshCloudBans,
+} from './moderation';
 
 /**
  * Players who remain unbanned with full cloud saves and gameplay progression,
@@ -24,11 +30,24 @@ export const LEADERBOARD_EXCLUDED_USERNAMES = new Set<string>([
 
 export function isExcludedFromLeaderboard(
   uid?: string | null,
-  username?: string | null
+  username?: string | null,
+  seasonId?: string | null,
+  nowMs: number = Date.now()
 ): boolean {
   if (uid && LEADERBOARD_EXCLUDED_UIDS.has(uid.trim())) return true;
   const norm = (username || '').trim().toLowerCase();
   if (norm && LEADERBOARD_EXCLUDED_USERNAMES.has(norm)) return true;
+
+  // Keep devs (Marshallb78 & testmarshall) completely off Season 2+ leaderboards until Monday launch
+  const targetSeason = seasonId ?? getActiveSeason(nowMs).seasonId;
+  if (
+    nowMs < SEASON_2_CONFIG.launchTimeMs &&
+    targetSeason !== 'season_1' &&
+    isDevAdminAccount(uid, username)
+  ) {
+    return true;
+  }
+
   return false;
 }
 
@@ -185,7 +204,7 @@ export function updateLeaderboardEntryKeepalive(
     !uid ||
     !username ||
     getCachedBanRecord(uid, username) ||
-    isExcludedFromLeaderboard(uid, username)
+    isExcludedFromLeaderboard(uid, username, seasonId)
   ) {
     return;
   }
@@ -215,7 +234,7 @@ export async function updateLeaderboardEntry(
   }
 
   // Players hidden from the leaderboard keep all cloud saves & gameplay, just skip publishing
-  if (isExcludedFromLeaderboard(uid, username)) {
+  if (isExcludedFromLeaderboard(uid, username, seasonId)) {
     evictLeaderboardCacheForUid(uid);
     rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => {});
     return true;
@@ -296,8 +315,9 @@ export async function fetchWorldwideLeaderboard(
           continue;
         }
 
-        // Skip unbanned leaderboard-hidden players
-        if (isExcludedFromLeaderboard(rtdbEntry.uid, rtdbEntry.username)) {
+        // Skip unbanned leaderboard-hidden players (and clean up pre-launch dev entries)
+        if (isExcludedFromLeaderboard(rtdbEntry.uid, rtdbEntry.username, seasonId)) {
+          rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => {});
           mergedByUid.delete(rtdbEntry.uid);
           continue;
         }
@@ -320,7 +340,7 @@ export async function fetchWorldwideLeaderboard(
     const cleanEntries = Array.from(mergedByUid.values()).filter(
       (entry) =>
         !getCachedBanRecord(entry.uid, entry.username) &&
-        !isExcludedFromLeaderboard(entry.uid, entry.username)
+        !isExcludedFromLeaderboard(entry.uid, entry.username, seasonId)
     );
 
     return sortLeaderboardDeterministically(cleanEntries).slice(0, maxEntries);
@@ -349,7 +369,7 @@ export async function fetchPlayerLeaderboardEntry(
   uid: string,
   seasonId: string = getActiveSeason().seasonId
 ): Promise<LeaderboardEntry | null> {
-  if (!uid || isExcludedFromLeaderboard(uid, null)) return null;
+  if (!uid || isExcludedFromLeaderboard(uid, null, seasonId)) return null;
 
   try {
     const rtdbRaw = await rtdbRestGet<Record<string, any>>(
@@ -360,7 +380,7 @@ export async function fetchPlayerLeaderboardEntry(
       const parsed = parseRawEntry(uid, rtdbRaw);
       if (
         getCachedBanRecord(parsed.uid, parsed.username) ||
-        isExcludedFromLeaderboard(parsed.uid, parsed.username)
+        isExcludedFromLeaderboard(parsed.uid, parsed.username, seasonId)
       ) {
         return null;
       }

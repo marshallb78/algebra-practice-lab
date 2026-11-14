@@ -27,7 +27,7 @@ export const GemItemShopModal: React.FC<GemItemShopModalProps> = ({
   const hasShopToken = Boolean(state.hasMatthewShopToken);
 
   const todayStr = getAuthoritativeDateString();
-  const dailyFeatured = getDailyItemShopRotation(todayStr, 12);
+  const dailyFeatured = getDailyItemShopRotation(todayStr);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/96 backdrop-blur-xl flex flex-col p-4 sm:p-6 overflow-hidden select-none">
@@ -42,7 +42,7 @@ export const GemItemShopModal: React.FC<GemItemShopModalProps> = ({
               MATTHEW SHOP
             </h2>
             <p className="text-xs font-bold text-slate-300">
-              {ITEM_SHOP_SKINS.length} Item Shop Skins (rotate daily • {todayStr})
+              {dailyFeatured.length} of {ITEM_SHOP_SKINS.length} Featured Today • Swaps Daily ({todayStr})
             </p>
           </div>
         </div>

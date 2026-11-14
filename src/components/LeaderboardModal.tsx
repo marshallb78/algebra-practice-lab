@@ -93,7 +93,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
       if (
         targetSeason === seasonId &&
         state.cloudAccount &&
-        !isExcludedFromLeaderboard(state.cloudAccount.uid, state.cloudAccount.displayUsername)
+        !isExcludedFromLeaderboard(state.cloudAccount.uid, state.cloudAccount.displayUsername, targetSeason)
       ) {
         const localScore = Math.max(
           0,

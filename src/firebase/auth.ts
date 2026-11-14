@@ -475,7 +475,8 @@ export async function changeAccountUsername(
       },
       'PATCH'
     ),
-    isExcludedFromLeaderboard(uid, oldUsername) || isExcludedFromLeaderboard(uid, cleanNew)
+    isExcludedFromLeaderboard(uid, oldUsername, seasonId) ||
+    isExcludedFromLeaderboard(uid, cleanNew, seasonId)
       ? Promise.resolve(true)
       : rtdbRestWrite(
           `leaderboards/${seasonId}/${uid}`,

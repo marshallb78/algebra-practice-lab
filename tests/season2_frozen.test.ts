@@ -14,6 +14,7 @@ import {
 import { ALL_SKINS, getProgressionSkinsForSeason } from '../src/data/skins';
 import { scopeRtdbPath } from '../src/firebase/config';
 import {
+  FROZEN_PROGRESSION_SKINS,
   ITEM_SHOP_SKINS,
   MATTHEW_VAULT_SKINS,
   getDailyItemShopRotation,
@@ -45,7 +46,10 @@ import {
 } from '../src/data/cursors';
 import { CRATE_DEFINITIONS, rollCrateReward } from '../src/data/crates';
 import { calculateClickPower, calculateCPS } from '../src/utils/calculations';
-import { buildLeaderboardPayload } from '../src/firebase/leaderboard';
+import {
+  buildLeaderboardPayload,
+  isExcludedFromLeaderboard,
+} from '../src/firebase/leaderboard';
 import { PLAYER_TRIGGERABLE_EVENTS, summonGlobalLiveEvent } from '../src/firebase/liveEvents';
 
 describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
@@ -156,12 +160,17 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(CRATE_DEFINITIONS.normal.skins.some((s) => s.skinId === 'gay_matthew')).toBe(false);
     const liamSkin = ALL_SKINS.find((s) => s.id === 'liam_matthew');
     expect(liamSkin).toBeDefined();
-    expect(liamSkin?.isPlaceholderArt).toBe(true);
+    expect(liamSkin?.isPlaceholderArt).toBe(false);
+    expect(liamSkin?.milestone.type).toBe('season_champion');
+    expect(FROZEN_PROGRESSION_SKINS.some((s) => s.id === 'liam_matthew')).toBe(false);
+    expect(ITEM_SHOP_SKINS.some((s) => s.id === 'liam_matthew')).toBe(false);
+    expect(CRATE_DEFINITIONS.normal.skins.some((s) => s.skinId === 'liam_matthew')).toBe(false);
+    expect(CRATE_DEFINITIONS.frost.skins.some((s) => s.skinId === 'liam_matthew')).toBe(false);
     expect(s2Skins).toContain('minecraft_matthew');
     expect(s2Skins.length).toBe(15);
   });
 
-  it('keeps curated Item Shop small (6 skins), excludes removed skins from Season 2, and moves skins into progression', () => {
+  it('keeps curated Item Shop small (6 skins), rotates featured skins daily, and excludes holiday/removed skins', () => {
     expect(ITEM_SHOP_SKINS.length).toBe(6);
     const shopIds = ITEM_SHOP_SKINS.map((s) => s.id);
     expect(shopIds).not.toContain('gay_matthew');
@@ -177,8 +186,48 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(shopIds).not.toContain('mathgoon');
     expect(MATTHEW_VAULT_SKINS.length).toBe(0);
 
-    const day1 = getDailyItemShopRotation('2026-11-16', 12).map((s) => s.id);
-    expect(day1.length).toBe(6);
+    const day1Featured = getDailyItemShopRotation('2026-11-16').map((s) => s.id);
+    const day2Featured = getDailyItemShopRotation('2026-11-17').map((s) => s.id);
+    expect(day1Featured.length).toBe(3);
+    expect(day2Featured.length).toBe(3);
+    expect(day2Featured).not.toEqual(day1Featured);
+    expect(new Set([...day1Featured, ...day2Featured]).size).toBeGreaterThan(3);
+
+    const allShop = getDailyItemShopRotation('2026-11-16', 12).map((s) => s.id);
+    expect(allShop.length).toBe(6);
+  });
+
+  it('keeps both devs off Season 2 leaderboards before Monday while preserving Season 1 & Monday live eligibility', () => {
+    const saturdayNov14Ms = Date.UTC(2026, 10, 14, 17, 0, 0);
+    const mondayNov16Ms = Date.UTC(2026, 10, 16, 6, 0, 0);
+
+    for (const devUid of TEST_ISOLATION_CONFIG.authorizedDevUids) {
+      expect(isExcludedFromLeaderboard(devUid, 'dev', 'season_2', saturdayNov14Ms)).toBe(true);
+      expect(isExcludedFromLeaderboard(devUid, 'dev', 'season_1', saturdayNov14Ms)).toBe(false);
+      expect(isExcludedFromLeaderboard(devUid, 'dev', 'season_2', mondayNov16Ms)).toBe(false);
+    }
+
+    expect(isExcludedFromLeaderboard('regular_uid', 'player', 'season_2', saturdayNov14Ms)).toBe(false);
+
+    // Monday reset clears seasonal scores while keeping Season 1 skins, gems, and Top-10/Champion rewards
+    const devS1 = {
+      ...getDefaultGameState(),
+      coins: 9999999,
+      lifetimeCoins: 9999999,
+      seasonalScore: 9999999,
+      clicks: 5000,
+      gems: 350,
+      unlockedSkins: ['classic_matthew', 'galaxy_matthew', 'god_matthew'],
+      currentSeasonId: 'season_1',
+    };
+    const rolledDev = performSeasonalRollover(devS1, 'season_2', true, true);
+    expect(rolledDev.coins).toBe(0);
+    expect(rolledDev.seasonalScore).toBe(0);
+    expect(rolledDev.clicks).toBe(0);
+    expect(rolledDev.gems).toBe(350);
+    expect(rolledDev.unlockedSkins).toContain('galaxy_matthew');
+    expect(rolledDev.unlockedSkins).toContain('champion_matthew');
+    expect(rolledDev.unlockedSkins).toContain('liam_matthew');
   });
 
   it('AntiAutoclickerGuard spares fast jittering humans while rejecting constant-interval macros & untrusted scripts', () => {

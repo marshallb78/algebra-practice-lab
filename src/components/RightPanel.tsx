@@ -296,7 +296,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   const unlockedSkinsList = ALL_SKINS.filter((s) => state.unlockedSkins.includes(s.id));
   const dailyQuests = QUESTS.filter((q) => q.scope === 'daily');
   const seasonalQuests = QUESTS.filter((q) => q.scope === 'seasonal');
-  const dailyFeatured = getDailyItemShopRotation(todayDateStr, 12);
+  const dailyFeatured = getDailyItemShopRotation(todayDateStr);
   const pets = state.pets || [];
   const equippedPetIds = state.equippedPetIds || [];
   const totalSealedEggs = Object.values(state.sealedEggs || {}).reduce((a, b) => a + b, 0);
@@ -307,7 +307,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     !isSeason2
       ? null
       : hasShopToken &&
-        ITEM_SHOP_SKINS.some((s) => !state.unlockedSkins.includes(s.id))
+        dailyFeatured.some((s) => !state.unlockedSkins.includes(s.id))
       ? {
           text: 'Matthew Shop Token Active! Claim any Item Shop skin 100% FREE!',
           cta: 'Open Skins Shop',
@@ -1013,7 +1013,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   {/* DAILY ROTATING GEM SKINS */}
                   <div>
                     <div className="text-[11px] font-black uppercase text-fuchsia-300 mb-2">
-                      Daily Gem Rotation ({todayDateStr})
+                      Daily Rotating Shop ({dailyFeatured.length}/{ITEM_SHOP_SKINS.length} • Swaps Daily • {todayDateStr})
                     </div>
                     <div className="grid grid-cols-2 gap-2.5">
                       {dailyFeatured.map((skin) => {

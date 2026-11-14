@@ -377,7 +377,7 @@ export const CHAMPION_SKIN: Skin = {
 };
 
 /**
- * Exclusive Season 1 Top 10 Reward Skin (Placeholder art until final artwork is uploaded)
+ * Exclusive Season 1 Top 10 Reward Skin
  */
 export const LIAM_SKIN: Skin = {
   id: 'liam_matthew',
@@ -388,7 +388,7 @@ export const LIAM_SKIN: Skin = {
   perkDescription: 'Season 1 Top 10 Exclusive',
   image: './images/skins/season2/liam_matthew.png',
   fallbackImage: './images/skins/classic_matthew.png',
-  isPlaceholderArt: true,
+  isPlaceholderArt: false,
   milestone: {
     type: 'season_champion',
     target: 10,
@@ -739,7 +739,8 @@ export function getSkinMilestoneProgress(
       target: 1,
       percent: owned ? 100 : 0,
       isMet: false,
-      progressLabel: '#1 Season Winner',
+      progressLabel:
+        skin.id === 'liam_matthew' ? 'Top 10 Season 1 Finalists' : '#1 Season Winner',
     };
   }
 
