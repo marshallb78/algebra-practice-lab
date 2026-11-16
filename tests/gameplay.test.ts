@@ -103,48 +103,46 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(maxInfo.totalCost).toBeLessThanOrEqual(coins);
     });
 
-    it('scales click power and CPS with balanced Ascension Multiplier (+0.035 per step), disables fast-click combo bonus, and applies Friday 4x Live Event', () => {
+    it('scales click power and CPS with Ascension Multiplier (+0.15 per step), disables fast-click combo bonus, and applies Friday 4x Live Event', () => {
       state.currentSeasonId = 'season_1';
       state.upgrades['finger_exercise'] = 10; // base click = 1 + 10*0.5 = 6, base CPS = 10*0.2 = 2
       state.upgrades['energy_coffee'] = 10; // base CPS = 2 + 10*0.5 = 7, +10*1.5 = 15 click power -> total base click = 21
-      state.prestigeShards = 12; // Ascension Multiplier = 1 + 12 * 0.035 = 1.42x
+      state.prestigeShards = 12; // Ascension Multiplier = 1 + 12 * 0.15 = 2.80x
       state.combo = 30; // Fast-clicking combo bonus is disabled -> must stay 1.0x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
       expect(normalClick.comboMultiplier).toBe(1.0);
-      expect(normalClick.ascensionMultiplier).toBeCloseTo(1.42);
-      expect(normalClick.totalPower).toBeCloseTo(29.82); // 21 * 1.42x
-      expect(normalCps).toBeCloseTo(9.94); // 7 * 1.42x
+      expect(normalClick.ascensionMultiplier).toBeCloseTo(2.8);
+      expect(normalClick.totalPower).toBeCloseTo(58.8); // 21 * 2.80x
+      expect(normalCps).toBeCloseTo(19.6); // 7 * 2.80x
 
       // Friday All-Day Live Event = 4x multiplier
       const liveOpts = { fridayBonusActive: false, stormWaveMultiplier: 4 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBeCloseTo(119.28); // 29.82 * 4
-      expect(boostedCps).toBeCloseTo(39.76); // 9.94 * 4
+      expect(boostedClick.totalPower).toBeCloseTo(235.2); // 58.8 * 4
+      expect(boostedCps).toBeCloseTo(78.4); // 19.6 * 4
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
     });
   });
 
-  describe('Rebirth (Balanced Ascension Multiplier: +0.035 per step, ~2.29x at 37 shards)', () => {
-    it('returns 0 bonus if lifetime coins are below requirement (100K)', () => {
-      expect(calculatePrestigeShards(50000)).toBe(0);
+  describe('Rebirth (Faster Ascension Multiplier: +0.15 per step, ~80x at 1 Vg)', () => {
+    it('returns 0 bonus if lifetime coins are below requirement (25K)', () => {
+      expect(calculatePrestigeShards(10000)).toBe(0);
       expect(getAscensionMultiplier(0)).toBe(1);
     });
 
-    it('calculates Ascension Multiplier bonus in +0.035 steps starting at 100K', () => {
-      expect(calculatePrestigeShards(100000)).toBe(1);
-      expect(calculatePrestigeShards(1000000)).toBe(6);
-      expect(getAscensionMultiplier(1)).toBe(1.03);
-      expect(getAscensionMultiplier(2)).toBe(1.07);
-      expect(getAscensionMultiplier(37)).toBeCloseTo(2.29, 2);
-      const qaShards = calculatePrestigeShards(1e15);
-      expect(getAscensionMultiplier(qaShards)).toBeLessThan(3.0);
-      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(2.0);
+    it('calculates Ascension Multiplier bonus in +0.15 steps starting at 25K and reaching ~80x at 1 Vg', () => {
+      expect(calculatePrestigeShards(25000)).toBe(1);
+      expect(calculatePrestigeShards(250000)).toBe(10);
+      expect(getAscensionMultiplier(1)).toBe(1.15);
+      expect(getAscensionMultiplier(2)).toBe(1.3);
+      const vgShards = calculatePrestigeShards(1e63);
+      expect(getAscensionMultiplier(vgShards)).toBeCloseTo(80.2, 1);
     });
   });
 

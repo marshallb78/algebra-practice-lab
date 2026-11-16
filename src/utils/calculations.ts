@@ -37,10 +37,19 @@ export function getCombinedLiveMultiplier(options?: LiveMultiplierOptions): {
   };
 }
 
+export function canAffordCoinCost(coins: number, cost: number): boolean {
+  if (!Number.isFinite(cost) || cost <= 0) return false;
+  if (!Number.isFinite(coins) || coins <= 0) return false;
+  if (coins >= cost) return true;
+  // Allow buying when coins are within the 1-decimal displayed rounding window (2.5%)
+  // so an upgrade showing e.g. "2.5UVg" is always clickable when the coin counter displays "2.5UVg".
+  return coins >= cost * 0.975;
+}
+
 export function getUpgradeCost(baseCost: number, multiplier: number, currentLevel: number): number {
-  const raw = Math.floor(baseCost * Math.pow(multiplier, Math.max(0, Math.floor(currentLevel || 0))));
+  const raw = baseCost * Math.pow(multiplier, Math.max(0, Math.floor(currentLevel || 0)));
   if (!Number.isFinite(raw) || raw < 0) return Infinity;
-  return raw;
+  return raw < 1e15 ? Math.floor(raw) : Number(raw.toPrecision(12));
 }
 
 export function getBulkUpgradeCost(
@@ -60,10 +69,11 @@ export function getBulkUpgradeCost(
   }
   const r = multiplier;
   const powR = Math.pow(r, safeCount);
-  const totalCost = Math.floor((a * (powR - 1)) / (r - 1));
-  if (!Number.isFinite(totalCost) || totalCost < 0) {
+  const rawTotal = (a * (powR - 1)) / (r - 1);
+  if (!Number.isFinite(rawTotal) || rawTotal < 0) {
     return { totalCost: Infinity, actualCount: safeCount };
   }
+  const totalCost = rawTotal < 1e15 ? Math.floor(rawTotal) : Number(rawTotal.toPrecision(12));
   return { totalCost, actualCount: safeCount };
 }
 
@@ -75,7 +85,12 @@ export function getMaxAffordableUpgrade(
 ): { totalCost: number; count: number } {
   const safeCoins = clampFiniteCoinAmount(currentCoins, MAX_SAFE_SEASON_COINS);
   const nextCost = getUpgradeCost(baseCost, multiplier, currentLevel);
-  if (!Number.isFinite(nextCost) || safeCoins < nextCost) return { totalCost: 0, count: 0 };
+  if (!Number.isFinite(nextCost) || !canAffordCoinCost(safeCoins, nextCost)) {
+    return { totalCost: 0, count: 0 };
+  }
+  if (safeCoins < nextCost) {
+    return { totalCost: safeCoins, count: 1 };
+  }
 
   const a = nextCost;
   const r = multiplier;

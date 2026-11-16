@@ -51,7 +51,12 @@ import {
   getCursorById,
 } from '../src/data/cursors';
 import { CRATE_DEFINITIONS, rollCrateReward } from '../src/data/crates';
-import { calculateClickPower, calculateCPS, getMaxAffordableUpgrade } from '../src/utils/calculations';
+import {
+  calculateClickPower,
+  calculateCPS,
+  canAffordCoinCost,
+  getMaxAffordableUpgrade,
+} from '../src/utils/calculations';
 import {
   LIAM_S2_REBALANCE_REVISION_MS,
   LIAM_S2_REBALANCE_UID,
@@ -349,10 +354,19 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(formatCoins(1e273)).toContain('Ng');
     expect(formatCoins(1e303)).toContain('Ctg');
 
-    expect(SEASON_2_UPGRADES.length).toBe(176);
+    expect(SEASON_2_UPGRADES.length).toBe(419);
     expect(SEASON_2_UPGRADES[SEASON_2_UPGRADES.length - 1].baseCost).toBeGreaterThanOrEqual(1e303);
     const uniqueImgs = new Set(SEASON_2_UPGRADES.map((u) => u.iconImage));
     expect(uniqueImgs.size).toBe(96);
+
+    // Bridge upgrades exist between Vg (2.5e63) and UVg (1e66), and 4 stepped upgrades exist inside UVg
+    const vgToUvgBridge = SEASON_2_UPGRADES.filter((u) => u.baseCost > 2.5e63 && u.baseCost < 1e66);
+    expect(vgToUvgBridge.length).toBe(3);
+    const uvgStepped = SEASON_2_UPGRADES.filter((u) => u.id.startsWith('s2_uvg_'));
+    expect(uvgStepped.map((u) => u.baseCost)).toEqual([1.2e66, 7.5e66, 4.5e67, 2.8e68]);
+    expect(canAffordCoinCost(1.5e64, 1.5e64)).toBe(true);
+    expect(canAffordCoinCost(2.46e68, 2.5e68)).toBe(true);
+    expect(getMaxAffordableUpgrade(1.2e66, 1.22, 0, 5e66).count).toBeGreaterThanOrEqual(1);
     for (const img of uniqueImgs) {
       expect(img).toMatch(/^\.\/images\/s2\/upgrades\/up_\d{2}\.png$/);
     }
@@ -506,8 +520,8 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(nextSeason.zombieHitsTaken).toBe(0);
   });
 
-  it('maps all 176 Season 2 upgrades across 96 unique icons and preserves active Matthew Shop Token', () => {
-    expect(SEASON_2_UPGRADES.length).toBe(176);
+  it('maps all 419 Season 2 upgrades across 96 unique icons and preserves active Matthew Shop Token', () => {
+    expect(SEASON_2_UPGRADES.length).toBe(419);
     expect(SEASON_2_UPGRADES[0].id).toBe('s2_snowball_pack');
     const uniqueImages = new Set(SEASON_2_UPGRADES.map((u) => u.iconImage));
     expect(uniqueImages.size).toBe(96);

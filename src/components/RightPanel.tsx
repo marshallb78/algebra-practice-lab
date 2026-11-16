@@ -33,6 +33,7 @@ import {
   getNextPrestigeRequirement,
 } from '../data/prestige';
 import {
+  canAffordCoinCost,
   getUpgradeCost,
   getBulkUpgradeCost,
   getMaxAffordableUpgrade,
@@ -131,13 +132,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   const isSeason2 = isSeasonTwoOrLater(state.currentSeasonId);
   const activeUpgrades = getUpgradesForSeason(state.currentSeasonId);
 
-  const handleBuyUpgrade = (upgradeId: string) => {
-    const upgrade = activeUpgrades.find((u) => u.id === upgradeId);
-    if (!upgrade) return;
-    const currentLevel = state.upgrades[upgradeId] || 0;
-    let countToBuy = 1;
-    let totalCost = 0;
-
+  const resolveUpgradePurchasePlan = (
+    upgrade: (typeof activeUpgrades)[number],
+    currentLevel: number
+  ): { countToDisplay: number; cost: number; canAfford: boolean } => {
     if (buyMode === 'MAX') {
       const maxInfo = getMaxAffordableUpgrade(
         upgrade.baseCost,
@@ -145,32 +143,75 @@ export const RightPanel: React.FC<RightPanelProps> = ({
         currentLevel,
         state.coins
       );
-      if (maxInfo.count <= 0) return;
-      countToBuy = maxInfo.count;
-      totalCost = maxInfo.totalCost;
-    } else {
-      countToBuy = buyMode;
-      const bulkInfo = getBulkUpgradeCost(
+      if (maxInfo.count > 0) {
+        return { countToDisplay: maxInfo.count, cost: maxInfo.totalCost, canAfford: true };
+      }
+      const nextCost = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, currentLevel);
+      return { countToDisplay: 1, cost: nextCost, canAfford: false };
+    }
+
+    if (buyMode === 10) {
+      const bulk10 = getBulkUpgradeCost(
         upgrade.baseCost,
         upgrade.costMultiplier,
         currentLevel,
-        countToBuy
+        10
+      ).totalCost;
+      if (canAffordCoinCost(state.coins, bulk10)) {
+        return { countToDisplay: 10, cost: bulk10, canAfford: true };
+      }
+      const maxInfo = getMaxAffordableUpgrade(
+        upgrade.baseCost,
+        upgrade.costMultiplier,
+        currentLevel,
+        state.coins
       );
-      totalCost = bulkInfo.totalCost;
-      if (state.coins < totalCost) return;
+      if (maxInfo.count > 0) {
+        const partialCount = Math.min(10, maxInfo.count);
+        const partialCost =
+          partialCount === maxInfo.count
+            ? maxInfo.totalCost
+            : getBulkUpgradeCost(
+                upgrade.baseCost,
+                upgrade.costMultiplier,
+                currentLevel,
+                partialCount
+              ).totalCost;
+        return {
+          countToDisplay: partialCount,
+          cost: partialCost,
+          canAfford: canAffordCoinCost(state.coins, partialCost),
+        };
+      }
+      return { countToDisplay: 10, cost: bulk10, canAfford: false };
     }
 
-    if (state.coins < totalCost) return;
+    const singleCost = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, currentLevel);
+    return {
+      countToDisplay: 1,
+      cost: singleCost,
+      canAfford: canAffordCoinCost(state.coins, singleCost),
+    };
+  };
+
+  const handleBuyUpgrade = (upgradeId: string) => {
+    const upgrade = activeUpgrades.find((u) => u.id === upgradeId);
+    if (!upgrade) return;
+    const currentLevel = state.upgrades[upgradeId] || 0;
+    const plan = resolveUpgradePurchasePlan(upgrade, currentLevel);
+    if (!plan.canAfford || !canAffordCoinCost(state.coins, plan.cost)) return;
+
     const nowMs = Date.now();
     setState((prev) => {
+      if (!canAffordCoinCost(prev.coins, plan.cost)) return prev;
       const next: GameState = {
         ...prev,
-        coins: prev.coins - totalCost,
+        coins: Math.max(0, prev.coins - Math.min(prev.coins, plan.cost)),
         lastSaveTime: nowMs,
         lastActiveInputTimestamp: nowMs,
         upgrades: {
           ...prev.upgrades,
-          [upgradeId]: (prev.upgrades[upgradeId] || 0) + countToBuy,
+          [upgradeId]: (prev.upgrades[upgradeId] || 0) + plan.countToDisplay,
         },
       };
       saveGame(next);
@@ -470,33 +511,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               {activeUpgrades.map((upgrade) => {
                 const currentLevel = state.upgrades[upgrade.id] || 0;
                 const isCookiePopped = justBoughtId === upgrade.id;
-                let cost = 0;
-                let countToDisplay = 1;
-                let canAfford = false;
-
-                if (buyMode === 'MAX') {
-                  const maxInfo = getMaxAffordableUpgrade(
-                    upgrade.baseCost,
-                    upgrade.costMultiplier,
-                    currentLevel,
-                    state.coins
-                  );
-                  countToDisplay = maxInfo.count > 0 ? maxInfo.count : 1;
-                  cost =
-                    maxInfo.count > 0
-                      ? maxInfo.totalCost
-                      : getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, currentLevel);
-                  canAfford = maxInfo.count > 0;
-                } else {
-                  countToDisplay = buyMode;
-                  cost = getBulkUpgradeCost(
-                    upgrade.baseCost,
-                    upgrade.costMultiplier,
-                    currentLevel,
-                    countToDisplay
-                  ).totalCost;
-                  canAfford = state.coins >= cost;
-                }
+                const { countToDisplay, cost, canAfford } = resolveUpgradePurchasePlan(
+                  upgrade,
+                  currentLevel
+                );
 
                 const affordProgressPct = Math.min(
                   100,

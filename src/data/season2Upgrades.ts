@@ -134,8 +134,8 @@ function formatNiceCost(raw: number): number {
  */
 const BASE_SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => {
   const baseCost = idx === TOTAL_STEPS ? END_COST : formatNiceCost(START_COST * Math.pow(STEP_RATIO, idx));
-  // Harder, earned ROI curve (~320s-2980s base payback) so endgame tiers stay prestigious
-  const powerAnchor = Math.max(1, Math.round(baseCost / (320 + idx * 28)));
+  // Smooth earned ROI curve scaling cleanly up to Vigintillion
+  const powerAnchor = Math.max(1, Math.round(baseCost / (210 + idx * 14)));
   const iconFallback =
     spec.focus === 'click' ? 'Sword' : spec.focus === 'cps' ? 'Zap' : 'Snowflake';
 
@@ -146,7 +146,7 @@ const BASE_SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => {
     icon: iconFallback,
     iconImage: `./images/s2/upgrades/up_${spec.iconNum}.png`,
     baseCost,
-    costMultiplier: Number((1.24 + Math.min(0.22, idx * 0.0025)).toFixed(3)),
+    costMultiplier: Number((1.21 + Math.min(0.14, idx * 0.0015)).toFixed(3)),
     baseCps:
       spec.focus === 'click'
         ? 0
@@ -159,6 +159,57 @@ const BASE_SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => {
         : spec.focus === 'click'
         ? Math.max(1, Math.round(powerAnchor * 1.15))
         : Math.max(1, Math.round(powerAnchor * 0.45)),
+    tier: (idx % 8) + 1,
+  };
+});
+
+const VG_BRIDGE_SPECS: readonly {
+  id: string;
+  iconNum: string;
+  name: string;
+  description: string;
+  focus: 'click' | 'cps' | 'hybrid';
+  baseCost: number;
+}[] = [
+  {
+    id: 's2_vg_glacial_singularity',
+    iconNum: '93',
+    name: 'Vg Glacial Singularity Core',
+    description: 'Channels 15 Vg (10^64) zero-point glacier turbines automatically.',
+    focus: 'cps',
+    baseCost: 1.5e64,
+  },
+  {
+    id: 's2_vg_permafrost_lance',
+    iconNum: '94',
+    name: 'Vg Permafrost Nova Lance',
+    description: 'Condenses 95 Vg permafrost fury into thunderous manual clicks.',
+    focus: 'click',
+    baseCost: 9.5e64,
+  },
+  {
+    id: 's2_vg_eternal_chronocore',
+    iconNum: '95',
+    name: 'Vg Eternal Chronocore',
+    description: 'Bridges 500 Vg (10^65) space-time energy straight into Unvigintillion!',
+    focus: 'hybrid',
+    baseCost: 5e65,
+  },
+];
+
+const VG_BRIDGE_UPGRADES: Upgrade[] = VG_BRIDGE_SPECS.map((spec, idx) => {
+  const powerAnchor = spec.baseCost / 140;
+  return {
+    id: spec.id,
+    name: spec.name,
+    description: spec.description,
+    icon: spec.focus === 'click' ? 'Sword' : spec.focus === 'cps' ? 'Zap' : 'Snowflake',
+    iconImage: `./images/s2/upgrades/up_${spec.iconNum}.png`,
+    baseCost: spec.baseCost,
+    costMultiplier: 1.22,
+    baseCps: spec.focus === 'click' ? 0 : spec.focus === 'cps' ? powerAnchor : powerAnchor * 0.7,
+    baseClickPower:
+      spec.focus === 'cps' ? 0 : spec.focus === 'click' ? powerAnchor * 1.15 : powerAnchor * 0.45,
     tier: (idx % 8) + 1,
   };
 });
@@ -246,32 +297,47 @@ const POST_VG_TIERS: readonly [string, string][] = [
   ['Ctg', 'Centillion'],
 ];
 
-const POST_VG_FOCUS_ROTATION: readonly ('hybrid' | 'click' | 'cps')[] = ['hybrid', 'click', 'cps'];
+const POST_VG_STEP_TEMPLATES: readonly {
+  mantissa: number;
+  idSuffix: string;
+  titleSuffix: string;
+  focus: 'cps' | 'click' | 'hybrid';
+  descVerb: string;
+}[] = [
+  { mantissa: 1.2, idSuffix: 'harvester', titleSuffix: 'Harvester', focus: 'cps', descVerb: 'Harvests' },
+  { mantissa: 7.5, idSuffix: 'striker', titleSuffix: 'Striker', focus: 'click', descVerb: 'Delivers' },
+  { mantissa: 45, idSuffix: 'reactor', titleSuffix: 'Reactor', focus: 'cps', descVerb: 'Overclocks' },
+  { mantissa: 280, idSuffix: 'ascendant', titleSuffix: 'Core', focus: 'hybrid', descVerb: 'Masters' },
+];
 
-const POST_VG_UPGRADES: Upgrade[] = POST_VG_TIERS.map(([suffix, fullName], tierIdx) => {
-  const globalIdx = S2_UPGRADE_SPECS.length + tierIdx;
-  const focus = POST_VG_FOCUS_ROTATION[tierIdx % POST_VG_FOCUS_ROTATION.length];
-  const baseCost = 2.5 * Math.pow(10, 66 + tierIdx * 3);
-  const powerAnchor = baseCost / (650 + tierIdx * 45);
-  const iconNum = String((globalIdx % 96) + 1).padStart(2, '0');
-  const iconFallback =
-    focus === 'click' ? 'Sword' : focus === 'cps' ? 'Zap' : 'Snowflake';
+const POST_VG_UPGRADES: Upgrade[] = POST_VG_TIERS.flatMap(([suffix, fullName], tierIdx) => {
+  const exp = 66 + tierIdx * 3;
+  return POST_VG_STEP_TEMPLATES.map((step, subIdx) => {
+    const globalIdx = S2_UPGRADE_SPECS.length + VG_BRIDGE_SPECS.length + tierIdx * 4 + subIdx;
+    const baseCost = Number(`${step.mantissa}e+${exp}`);
+    const powerAnchor = baseCost / (140 + tierIdx * 2);
+    const iconNum = String((globalIdx % 96) + 1).padStart(2, '0');
+    const iconFallback =
+      step.focus === 'click' ? 'Sword' : step.focus === 'cps' ? 'Zap' : 'Snowflake';
 
-  return {
-    id: `s2_${suffix.toLowerCase()}_ascendant`,
-    name: `${suffix} ${fullName} Core`,
-    description: `Harnesses ${fullName} (${suffix}) cryo-energy across the Frozen Apocalypse.`,
-    icon: iconFallback,
-    iconImage: `./images/s2/upgrades/up_${iconNum}.png`,
-    baseCost,
-    costMultiplier: 1.36,
-    baseCps: focus === 'click' ? 0 : focus === 'cps' ? powerAnchor : powerAnchor * 0.7,
-    baseClickPower: focus === 'cps' ? 0 : focus === 'click' ? powerAnchor * 1.15 : powerAnchor * 0.45,
-    tier: (globalIdx % 8) + 1,
-  };
+    return {
+      id: `s2_${suffix.toLowerCase()}_${step.idSuffix}`,
+      name: `${suffix} ${fullName} ${step.titleSuffix}`,
+      description: `${step.descVerb} ${step.mantissa} ${suffix} (${fullName}) cryo-energy across the Frozen Apocalypse.`,
+      icon: iconFallback,
+      iconImage: `./images/s2/upgrades/up_${iconNum}.png`,
+      baseCost,
+      costMultiplier: 1.22,
+      baseCps: step.focus === 'click' ? 0 : step.focus === 'cps' ? powerAnchor : powerAnchor * 0.7,
+      baseClickPower:
+        step.focus === 'cps' ? 0 : step.focus === 'click' ? powerAnchor * 1.15 : powerAnchor * 0.45,
+      tier: (globalIdx % 8) + 1,
+    };
+  });
 });
 
 export const SEASON_2_UPGRADES: Upgrade[] = [
   ...BASE_SEASON_2_UPGRADES,
+  ...VG_BRIDGE_UPGRADES,
   ...POST_VG_UPGRADES,
 ];
