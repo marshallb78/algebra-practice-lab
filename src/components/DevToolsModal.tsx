@@ -64,6 +64,9 @@ interface DevToolsModalProps {
   onTriggerZombieRaid?: () => void;
   onPreviewGlobalEvent?: (spec: PlayerEventCostSpec) => void;
   onClearPreviewEvent?: () => void;
+  onSpawnGlobalEventForAll?: (spec: PlayerEventCostSpec) => void;
+  onStopGlobalEventForAll?: () => void;
+  onSpawnGoldenSwarmForAll?: (count?: number) => void;
   onSandboxTestAction?: (action: SandboxTestAction) => void;
   isSandboxActive?: boolean;
   isSandboxStormActive?: boolean;
@@ -87,6 +90,9 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
   onTriggerZombieRaid,
   onPreviewGlobalEvent,
   onClearPreviewEvent,
+  onSpawnGlobalEventForAll,
+  onStopGlobalEventForAll,
+  onSpawnGoldenSwarmForAll,
   onSandboxTestAction,
   isSandboxActive = false,
   isSandboxStormActive = false,
@@ -364,6 +370,61 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
       if (playerSort === 'recent') return (b.updatedAtMs || 0) - (a.updatedAtMs || 0);
       return b.seasonalScore - a.seasonalScore;
     });
+
+  const renderGlobalSpawnControls = () => {
+    if (!onSpawnGlobalEventForAll && !onSpawnGoldenSwarmForAll) return null;
+    return (
+      <div className="p-5 rounded-3xl bg-gradient-to-br from-amber-950/45 via-slate-900/95 to-orange-950/35 border-2 border-amber-400/60 space-y-3 shadow-xl">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm font-black uppercase text-amber-300">
+              🌟 Spawn Global Events &amp; Flying Golden Matthews (All Screens • FREE)
+            </h3>
+            <p className="text-[11px] font-bold text-amber-100/75 mt-0.5">
+              Triggers live across every online player&apos;s screen immediately for 0 Gems.
+            </p>
+          </div>
+          {onStopGlobalEventForAll && (
+            <button
+              type="button"
+              onClick={onStopGlobalEventForAll}
+              className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/40 text-rose-200 border border-rose-400/50 font-black text-[11px] uppercase cursor-pointer transition"
+            >
+              Stop Active Global Event
+            </button>
+          )}
+        </div>
+
+        {onSpawnGoldenSwarmForAll && (
+          <button
+            type="button"
+            onClick={() => onSpawnGoldenSwarmForAll(18)}
+            className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-400 hover:brightness-110 text-slate-950 font-black text-xs sm:text-sm uppercase cursor-pointer transition shadow-lg btn-chunky"
+          >
+            🌟 Spawn 18 Flying Golden Matthews Across Everyone&apos;s Screen (FREE)
+          </button>
+        )}
+
+        {onSpawnGlobalEventForAll && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {PLAYER_TRIGGERABLE_EVENTS.map((spec) => (
+              <button
+                key={`global-spawn-${spec.id}`}
+                type="button"
+                onClick={() => onSpawnGlobalEventForAll(spec)}
+                className="py-2.5 px-3.5 rounded-xl bg-amber-500/15 hover:bg-amber-400 text-amber-200 hover:text-slate-950 border border-amber-400/45 font-black text-[11px] uppercase cursor-pointer text-left transition flex items-center justify-between gap-2"
+              >
+                <span className="truncate">{spec.label}</span>
+                <span className="px-2 py-0.5 rounded-lg bg-emerald-400/20 text-emerald-200 text-[9px] font-black shrink-0">
+                  FREE
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-[120] w-screen h-screen flex flex-col bg-gradient-to-b from-[#0b1024] via-[#070b18] to-[#04060e] font-chunky text-slate-100 select-none overflow-hidden animate-fade-in">
@@ -1125,6 +1186,8 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
             {/* ================= TAB 3: GLOBAL SERVER BROADCAST BANNER ================= */}
             {activeTab === 'broadcast' && (
               <div className="space-y-5">
+                {renderGlobalSpawnControls()}
+
                 <div className="p-6 rounded-3xl bg-slate-900/95 border-2 border-cyan-400/50 space-y-4">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div>
@@ -1283,7 +1346,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                       </button>
                     )}
 
-                    {onTriggerZombieRaid && isSandboxActive && (
+                      {onTriggerZombieRaid && isSandboxActive && (
                       <button
                         onClick={onTriggerZombieRaid}
                         className="w-full py-3 px-4 rounded-2xl bg-rose-500/20 hover:bg-rose-500 text-rose-200 hover:text-white border border-rose-400/50 font-black text-xs uppercase cursor-pointer transition"
@@ -1291,6 +1354,8 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                         Trigger Zombie Raid
                       </button>
                     )}
+
+                    {renderGlobalSpawnControls()}
 
                     {onPreviewGlobalEvent && (
                       <div className="mt-3 p-3.5 rounded-2xl bg-slate-900/90 border border-sky-400/35 space-y-2">

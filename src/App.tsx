@@ -79,9 +79,13 @@ import {
 import {
   ActiveGlobalLiveEvent,
   PlayerEventCostSpec,
+  broadcastGlobalGoldenSwarm,
   broadcastMatthewTokenPull,
+  clearGlobalLiveEvent,
   fetchActiveGlobalLiveEvent,
+  fetchLatestGlobalGoldenSwarm,
   fetchLatestMatthewTokenBroadcast,
+  summonGlobalLiveEvent,
 } from './firebase/liveEvents';
 import {
   ChestLootResult,
@@ -200,6 +204,10 @@ export function App() {
   const [playerReports, setPlayerReports] = useState<PlayerSuspicionReport[]>([]);
   const seenPlayerReportIdsRef = useRef<Set<string>>(new Set());
   const seenTokenBroadcastIdRef = useRef<string | null>(null);
+  const [goldenSwarmTrigger, setGoldenSwarmTrigger] = useState<{ id: string; count: number } | null>(
+    null
+  );
+  const seenGoldenSwarmIdRef = useRef<string | null>(null);
   const [top3Players, setTop3Players] = useState<LeaderboardEntry[]>([]);
   const [onlinePlayersCount, setOnlinePlayersCount] = useState<number>(1);
   const [serverBroadcast, setServerBroadcast] = useState<ServerBroadcast | null>(null);
@@ -1128,10 +1136,10 @@ export function App() {
     enabled: !isGameplayPaused,
   });
 
-  // Season 2: Trigger 3D widescreen cutscene once per active global live event ID
+  // Trigger 3D widescreen cutscene once per active global live event ID
   useEffect(() => {
     if (
-      !isS2Active ||
+      seasonInfo.isDowntime ||
       showIntroCutscene ||
       showFrozenIntro ||
       activeBanRecord ||
@@ -1149,7 +1157,7 @@ export function App() {
       });
     }
   }, [
-    isS2Active,
+    seasonInfo.isDowntime,
     activeGlobalEvent,
     nowMs,
     showIntroCutscene,
@@ -1187,9 +1195,9 @@ export function App() {
     });
   }, [isS2Active, isGameplayPaused, petCount, equippedPetCount]);
 
-  // Season 2: Poll global summoned live events & Matthew Shop Token pull broadcasts (every 6s while visible)
+  // Poll global summoned live events, Matthew Shop Token pull broadcasts & Flying Golden Matthew swarms (every 6s while visible)
   useEffect(() => {
-    if (!isS2Active || isInitialCloudHydrating || activeBanRecord) {
+    if (seasonInfo.isDowntime || isInitialCloudHydrating || activeBanRecord) {
       setActiveGlobalEvent(null);
       return;
     }
@@ -1197,11 +1205,12 @@ export function App() {
     const poll = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       const current = activeGlobalEventRef.current;
-      const [ev, tokenBroadcast] = await Promise.all([
+      const [ev, tokenBroadcast, goldenSwarm] = await Promise.all([
         current && current.id.startsWith('preview_') && current.endsAtMs > Date.now()
           ? Promise.resolve(current)
           : fetchActiveGlobalLiveEvent(isSandbox),
         fetchLatestMatthewTokenBroadcast(isSandbox),
+        fetchLatestGlobalGoldenSwarm(isSandbox),
       ]);
       if (cancelled) return;
 
@@ -1223,6 +1232,12 @@ export function App() {
         );
         handleNotify('MATTHEW SHOP TOKEN PULLED!', tokenBroadcast.message);
       }
+
+      if (goldenSwarm && seenGoldenSwarmIdRef.current !== goldenSwarm.id) {
+        seenGoldenSwarmIdRef.current = goldenSwarm.id;
+        setGoldenSwarmTrigger({ id: goldenSwarm.id, count: goldenSwarm.count || 18 });
+        handleNotify('🌟 FLYING GOLDEN MATTHEWS!', goldenSwarm.message);
+      }
     };
     poll();
     const id = setInterval(poll, 6000);
@@ -1230,7 +1245,7 @@ export function App() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [isS2Active, isSandbox, isInitialCloudHydrating, activeBanRecord]);
+  }, [seasonInfo.isDowntime, isSandbox, isInitialCloudHydrating, activeBanRecord]);
 
   // Season 2: Random 10-15 minute ZOMBIE RAID! waves
   useEffect(() => {
@@ -1537,6 +1552,58 @@ export function App() {
       summonedBy: previewEvent.summonedByUsername,
     });
     handleNotify('PREVIEWING EVENT', `${spec.label} (local only, 0 Gems spent)`);
+  };
+
+  const handleDevSpawnGlobalEvent = async (spec: PlayerEventCostSpec) => {
+    const currUid = stateRef.current.cloudAccount?.uid;
+    if (!isVerifiedLiveDevSession(currUid)) return;
+    const username =
+      stateRef.current.cloudAccount?.displayUsername ||
+      stateRef.current.cloudAccount?.username ||
+      'Developer';
+    const res = await summonGlobalLiveEvent({
+      spec,
+      uid: currUid || 'dev_admin',
+      username,
+      isSandbox,
+      broadcastToAll: true,
+    });
+    if (res.ok && res.event) {
+      lastCutsceneEventIdRef.current = '';
+      setShowDevToolsModal(false);
+      setActiveGlobalEvent(res.event);
+      soundManager.playStormWaveStart();
+      handleNotify('GLOBAL EVENT LAUNCHED!', `${spec.label} live on everyone's screen (FREE)!`);
+    }
+  };
+
+  const handleDevStopGlobalEvent = async () => {
+    const currUid = stateRef.current.cloudAccount?.uid;
+    if (!isVerifiedLiveDevSession(currUid)) return;
+    await clearGlobalLiveEvent(isSandbox, true);
+    setActiveGlobalEvent(null);
+    setPendingEventCutscene(null);
+    handleNotify('GLOBAL EVENT STOPPED', 'Cleared the active global event across all screens.');
+  };
+
+  const handleDevSpawnGoldenSwarm = async (count = 18) => {
+    const currUid = stateRef.current.cloudAccount?.uid;
+    if (!isVerifiedLiveDevSession(currUid)) return;
+    const username =
+      stateRef.current.cloudAccount?.displayUsername ||
+      stateRef.current.cloudAccount?.username ||
+      'Developer';
+    const b = await broadcastGlobalGoldenSwarm({
+      uid: currUid || 'dev_admin',
+      username,
+      count,
+      isSandbox,
+      broadcastToAll: true,
+    });
+    seenGoldenSwarmIdRef.current = b.id;
+    setGoldenSwarmTrigger({ id: b.id, count: b.count });
+    setShowDevToolsModal(false);
+    handleNotify('🌟 GOLDEN MATTHEW SWARM!', b.message);
   };
 
   const handleSandboxTestAction = (action: SandboxTestAction) => {
@@ -2175,6 +2242,7 @@ export function App() {
         state={state}
         setState={setState}
         onSpawnBonus={(text) => handleNotify('BONUS EVENT!', text)}
+        swarmTrigger={goldenSwarmTrigger}
         isPaused={isGameplayPaused}
       />
 
@@ -2255,8 +2323,8 @@ export function App() {
         </div>
       )}
 
-      {/* SEASON 2 ACTIVE SUMMONED LIVE EVENT OVERLAY (Falling Matthews, Golden Rain, Marathon, Screen Freeze) */}
-      {isS2Active && activeGlobalEvent && !pendingEventCutscene && (
+      {/* ACTIVE SUMMONED LIVE EVENT OVERLAY (Falling Matthews, Golden Rain, Marathon, Screen Freeze) */}
+      {!seasonInfo.isDowntime && activeGlobalEvent && !pendingEventCutscene && (
         <ActiveGlobalEventOverlay
           event={activeGlobalEvent}
           currentUid={state.cloudAccount?.uid || 'local_tester'}
@@ -2385,6 +2453,9 @@ export function App() {
           setActiveGlobalEvent(null);
           setPendingEventCutscene(null);
         }}
+        onSpawnGlobalEventForAll={handleDevSpawnGlobalEvent}
+        onStopGlobalEventForAll={handleDevStopGlobalEvent}
+        onSpawnGoldenSwarmForAll={handleDevSpawnGoldenSwarm}
         onSandboxTestAction={handleSandboxTestAction}
       />
 

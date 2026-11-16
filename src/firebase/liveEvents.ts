@@ -1,4 +1,4 @@
-import { rtdbRestGet, rtdbRestWrite, scopeRtdbPath } from './config';
+import { rtdbRestDelete, rtdbRestGet, rtdbRestWrite, scopeRtdbPath } from './config';
 
 export type GlobalEventType =
   | 'click_marathon'
@@ -93,6 +93,7 @@ export const PLAYER_TRIGGERABLE_EVENTS: (PlayerEventCostSpec & { id: string })[]
 
 const LOCAL_EVENT_KEY_PREFIX = 'matthew_clicker_global_event_fallback_v1';
 const LOCAL_TOKEN_BROADCAST_KEY_PREFIX = 'matthew_clicker_token_broadcast_fallback_v1';
+const LOCAL_GOLDEN_SWARM_KEY_PREFIX = 'matthew_clicker_golden_swarm_fallback_v1';
 
 function getLocalEventKey(isSandbox: boolean): string {
   return `${LOCAL_EVENT_KEY_PREFIX}_${isSandbox ? 'sbx' : 'live'}`;
@@ -100,6 +101,10 @@ function getLocalEventKey(isSandbox: boolean): string {
 
 function getLocalTokenBroadcastKey(isSandbox: boolean): string {
   return `${LOCAL_TOKEN_BROADCAST_KEY_PREFIX}_${isSandbox ? 'sbx' : 'live'}`;
+}
+
+function getLocalGoldenSwarmKey(isSandbox: boolean): string {
+  return `${LOCAL_GOLDEN_SWARM_KEY_PREFIX}_${isSandbox ? 'sbx' : 'live'}`;
 }
 
 export interface GlobalTokenBroadcast {
@@ -111,11 +116,22 @@ export interface GlobalTokenBroadcast {
   expiresAtMs: number;
 }
 
+export interface GlobalGoldenSwarmBroadcast {
+  id: string;
+  uid: string;
+  username: string;
+  count: number;
+  message: string;
+  timestampMs: number;
+  expiresAtMs: number;
+}
+
 export async function summonGlobalLiveEvent(params: {
   spec: PlayerEventCostSpec;
   uid: string;
   username: string;
   isSandbox?: boolean;
+  broadcastToAll?: boolean;
 }): Promise<{ ok: boolean; event?: ActiveGlobalLiveEvent }> {
   const now = Date.now();
   const isSbx = Boolean(params.isSandbox);
@@ -141,18 +157,118 @@ export async function summonGlobalLiveEvent(params: {
     excludeSummoner: params.spec.excludeSummoner,
   };
 
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(getLocalEventKey(isSbx), JSON.stringify(event));
+  const scopes = params.broadcastToAll ? [false, true] : [isSbx];
+  for (const sc of scopes) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(getLocalEventKey(sc), JSON.stringify(event));
+      }
+    } catch {
+      // Ignore storage quota errors
     }
-  } catch {
-    // Ignore storage quota errors
   }
 
   // Write under `usernames/__global_live_event` so Firebase RTDB security rules allow all signed-in players to broadcast and read
-  const path = scopeRtdbPath('usernames/__global_live_event', isSbx);
-  await rtdbRestWrite(path, event, 'PUT').catch(() => false);
+  await Promise.all(
+    scopes.map((sc) =>
+      rtdbRestWrite(scopeRtdbPath('usernames/__global_live_event', sc), event, 'PUT').catch(
+        () => false
+      )
+    )
+  );
   return { ok: true, event };
+}
+
+export async function clearGlobalLiveEvent(
+  isSandbox: boolean = false,
+  broadcastToAll: boolean = false
+): Promise<void> {
+  const scopes = broadcastToAll ? [false, true] : [Boolean(isSandbox)];
+  for (const sc of scopes) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(getLocalEventKey(sc));
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+  await Promise.all(
+    scopes.map((sc) =>
+      rtdbRestDelete(scopeRtdbPath('usernames/__global_live_event', sc)).catch(() => false)
+    )
+  );
+}
+
+export async function broadcastGlobalGoldenSwarm(params: {
+  uid: string;
+  username: string;
+  count?: number;
+  isSandbox?: boolean;
+  broadcastToAll?: boolean;
+}): Promise<GlobalGoldenSwarmBroadcast> {
+  const now = Date.now();
+  const isSbx = Boolean(params.isSandbox);
+  const count = Math.min(24, Math.max(8, Math.floor(params.count ?? 18)));
+  const broadcast: GlobalGoldenSwarmBroadcast = {
+    id: `gswarm_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    uid: params.uid,
+    username: params.username || 'Developer',
+    count,
+    message: `${params.username || 'Developer'} spawned ${count} Flying Golden Matthews across every screen!`,
+    timestampMs: now,
+    expiresAtMs: now + 60_000,
+  };
+
+  const scopes = params.broadcastToAll ? [false, true] : [isSbx];
+  for (const sc of scopes) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(getLocalGoldenSwarmKey(sc), JSON.stringify(broadcast));
+      }
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+  await Promise.all(
+    scopes.map((sc) =>
+      rtdbRestWrite(scopeRtdbPath('usernames/__golden_swarm', sc), broadcast, 'PUT').catch(
+        () => false
+      )
+    )
+  );
+  return broadcast;
+}
+
+export async function fetchLatestGlobalGoldenSwarm(
+  isSandbox: boolean = false
+): Promise<GlobalGoldenSwarmBroadcast | null> {
+  const now = Date.now();
+  try {
+    const data = await rtdbRestGet<GlobalGoldenSwarmBroadcast>(
+      scopeRtdbPath('usernames/__golden_swarm', isSandbox),
+      2500
+    );
+    if (data && data.id && data.expiresAtMs && now <= data.expiresAtMs) {
+      return data;
+    }
+  } catch {
+    // Fallback below
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(getLocalGoldenSwarmKey(isSandbox));
+      if (saved) {
+        const parsed = JSON.parse(saved) as GlobalGoldenSwarmBroadcast;
+        if (parsed && parsed.id && parsed.expiresAtMs && now <= parsed.expiresAtMs) {
+          return parsed;
+        }
+      }
+    }
+  } catch {
+    // Ignore parse error
+  }
+  return null;
 }
 
 export async function fetchActiveGlobalLiveEvent(

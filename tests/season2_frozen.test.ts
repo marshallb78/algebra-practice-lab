@@ -59,7 +59,14 @@ import {
   isExcludedFromLeaderboard,
   isLeaderboardPlayerOnline,
 } from '../src/firebase/leaderboard';
-import { PLAYER_TRIGGERABLE_EVENTS, summonGlobalLiveEvent } from '../src/firebase/liveEvents';
+import {
+  PLAYER_TRIGGERABLE_EVENTS,
+  broadcastGlobalGoldenSwarm,
+  clearGlobalLiveEvent,
+  fetchActiveGlobalLiveEvent,
+  fetchLatestGlobalGoldenSwarm,
+  summonGlobalLiveEvent,
+} from '../src/firebase/liveEvents';
 
 describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
   it('locks Season 2 in Downtime until Monday midnight while restricting preview strictly to the 2 dev UIDs', () => {
@@ -1078,5 +1085,57 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(
       isLeaderboardPlayerOnline({ uid: 'u1', updatedAtMs: nowMs - 180_000 }, 'u1', nowMs)
     ).toBe(true);
+  });
+
+  it('allows devs to broadcast global live events and Flying Golden Matthew swarms across all scopes for free', async () => {
+    const store: Record<string, string> = {};
+    const prevLS = (globalThis as any).localStorage;
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => (k in store ? store[k] : null),
+      setItem: (k: string, v: string) => {
+        store[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete store[k];
+      },
+    };
+    try {
+      const goldenSpec = PLAYER_TRIGGERABLE_EVENTS.find((e) => e.type === 'golden_rain')!;
+      const evtRes = await summonGlobalLiveEvent({
+        spec: goldenSpec,
+        uid: '89nsfff2YtaEVcNTHUBDq22V4FW2',
+        username: 'Marshallb78',
+        isSandbox: true,
+        broadcastToAll: true,
+      });
+      expect(evtRes.ok).toBe(true);
+      expect(evtRes.event?.type).toBe('golden_rain');
+
+      const liveEvt = await fetchActiveGlobalLiveEvent(false);
+      const sbxEvt = await fetchActiveGlobalLiveEvent(true);
+      expect(liveEvt?.id).toBe(evtRes.event?.id);
+      expect(sbxEvt?.id).toBe(evtRes.event?.id);
+
+      const swarmRes = await broadcastGlobalGoldenSwarm({
+        uid: '89nsfff2YtaEVcNTHUBDq22V4FW2',
+        username: 'Marshallb78',
+        count: 18,
+        isSandbox: true,
+        broadcastToAll: true,
+      });
+      expect(swarmRes.count).toBe(18);
+      expect(swarmRes.message).toContain('Marshallb78');
+
+      const fetchedLiveSwarm = await fetchLatestGlobalGoldenSwarm(false);
+      const fetchedSbxSwarm = await fetchLatestGlobalGoldenSwarm(true);
+      expect(fetchedLiveSwarm?.id).toBe(swarmRes.id);
+      expect(fetchedSbxSwarm?.id).toBe(swarmRes.id);
+
+      await clearGlobalLiveEvent(true, true);
+      expect(await fetchActiveGlobalLiveEvent(false)).toBeNull();
+      expect(await fetchActiveGlobalLiveEvent(true)).toBeNull();
+    } finally {
+      (globalThis as any).localStorage = prevLS;
+    }
   });
 });
