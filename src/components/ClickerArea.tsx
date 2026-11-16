@@ -25,7 +25,7 @@ import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { EnvironmentBackground } from './EnvironmentBackground';
 import { ServerBroadcast, isVerifiedLiveDevSession } from '../firebase/moderation';
-import { LeaderboardEntry } from '../firebase/leaderboard';
+import { LeaderboardEntry, isLeaderboardPlayerOnline } from '../firebase/leaderboard';
 import {
   Volume2,
   VolumeX,
@@ -59,6 +59,7 @@ interface ClickerAreaProps {
   onOpenStormShop: () => void;
   onOpenDevTools?: () => void;
   top3Players?: LeaderboardEntry[];
+  onlinePlayersCount?: number;
   serverBroadcast?: ServerBroadcast | null;
   onNotify?: (title: string, subtitle: string) => void;
   fridayBonusActive: boolean;
@@ -89,6 +90,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   onOpenStormShop,
   onOpenDevTools,
   top3Players = [],
+  onlinePlayersCount = 0,
   serverBroadcast = null,
   onNotify,
   fridayBonusActive,
@@ -514,10 +516,17 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
             <button
               onClick={onOpenLeaderboard}
               className="px-2.5 h-9 sm:h-10 rounded-lg bg-black/50 backdrop-blur-md border border-white/10 hover:border-yellow-400/70 flex items-center gap-1.5 text-xs font-black text-yellow-300 hover:text-white transition shadow-lg cursor-pointer"
-              title="Worldwide Seasonal Leaderboard"
+              title={`Worldwide Seasonal Leaderboard (${Math.max(
+                state.cloudAccount ? 1 : 0,
+                onlinePlayersCount
+              )} Online)`}
             >
               <Trophy className="w-4 h-4 text-yellow-400" />
               <span className="hidden sm:inline">Leaderboard</span>
+              <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-[10px] font-black text-emerald-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>{Math.max(state.cloudAccount ? 1 : 0, onlinePlayersCount)}</span>
+              </span>
             </button>
 
             {/* EXCLUSIVE AUTHORIZED DEV TOOLS BUTTON */}
@@ -667,13 +676,17 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
                   Top 3 Leaders
                 </span>
               </div>
-              <span className="text-[9px] font-bold text-cyan-300">View →</span>
+              <span className="flex items-center gap-1 text-[9px] font-black text-emerald-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>{Math.max(state.cloudAccount ? 1 : 0, onlinePlayersCount)} Online</span>
+              </span>
             </div>
 
             {top3Players.slice(0, 3).map((entry, idx) => {
               const rank = idx + 1;
               const skin = getSkinById(entry.equippedSkin);
               const isMe = state.cloudAccount?.uid === entry.uid;
+              const isOnline = isLeaderboardPlayerOnline(entry, state.cloudAccount?.uid);
 
               return (
                 <div
@@ -698,11 +711,19 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
                     >
                       #{rank}
                     </span>
-                    <img
-                      src={skin.image}
-                      alt={skin.name}
-                      className="w-5 h-5 rounded object-contain shrink-0"
-                    />
+                    <div className="relative shrink-0">
+                      <img
+                        src={skin.image}
+                        alt={skin.name}
+                        className="w-5 h-5 rounded object-contain"
+                      />
+                      {isOnline && (
+                        <span
+                          title="Online Now"
+                          className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 border border-slate-950 shadow-[0_0_5px_#34d399]"
+                        />
+                      )}
+                    </div>
                     <span className="text-[11px] font-black text-white truncate">
                       {entry.username}
                     </span>

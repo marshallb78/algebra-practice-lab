@@ -761,7 +761,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   const isEquipped = equippedPetIds.includes(pet.instanceId);
                   const isExpanded = inspectedPetId === pet.instanceId;
                   const spec = getPetSpeciesDefinition(pet.speciesId, pet.rarity);
-                  const upgCost = getPetUpgradeGemCost(pet);
+                  const upgCost = hasShopToken ? 0 : getPetUpgradeGemCost(pet);
                   const clickBonus = getPetClickMultiplierBonus(pet);
                   const nextClickBonus = getPetClickMultiplierBonus({
                     ...pet,
@@ -832,7 +832,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                               className="px-2.5 py-1.5 rounded-xl bg-fuchsia-500/20 border border-fuchsia-400/50 text-fuchsia-200 disabled:opacity-40 font-black text-[10px] uppercase cursor-pointer flex items-center gap-1"
                             >
                               <ArrowUpCircle className="w-3 h-3" />
-                              <span>{`Lv.${pet.level + 1} (${upgCost}G)`}</span>
+                              <span>{hasShopToken ? `Lv.${pet.level + 1} (FREE)` : `Lv.${pet.level + 1} (${upgCost}G)`}</span>
                             </button>
                             {onSellPet && (
                               <button
@@ -893,7 +893,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {EGG_DEFINITIONS.map((egg) => {
                     const count = state.sealedEggs?.[egg.rarity] || 0;
-                    const canHatch = count > 0 && state.gems >= egg.hatchGemCost;
+                    const hatchCost = hasShopToken ? 0 : egg.hatchGemCost;
+                    const canHatch = count > 0 && state.gems >= hatchCost;
                     return (
                       <div
                         key={egg.rarity}
@@ -929,7 +930,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                           disabled={!canHatch}
                           className="w-full py-1.5 rounded-xl bg-cyan-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-black text-[10px] uppercase cursor-pointer mt-auto"
                         >
-                          Hatch ({egg.hatchGemCost}G)
+                          Hatch ({hasShopToken ? 'FREE • Token' : `${egg.hatchGemCost}G`})
                         </button>
                         {onSellEgg && (
                           <button
@@ -1043,13 +1044,13 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         <span>Matthew Shop Token</span>
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-amber-400/20 border border-amber-300/60 text-[10px] font-black text-amber-200">
-                        {hasShopToken ? 'ACTIVE • SKINS + CURSORS FREE' : `${availableShopTokens} / 1`}
+                        {hasShopToken ? 'ACTIVE FOREVER • EVERYTHING FREE' : `${availableShopTokens} / 1`}
                       </span>
                     </div>
                     <p className="text-[10.5px] font-bold text-amber-100/80">
                       {hasShopToken
-                        ? 'Your Matthew Shop Token unlocks every skin in the Matthew Shop AND all ability Cursors for FREE!'
-                        : 'Find the ultra-rare Matthew Shop Token inside Mystery Chests or Golden Matthews to unlock all Item Shop skins & Cursors for FREE!'}
+                        ? 'Your Matthew Shop Token permanently unlocks all Shop Skins, Crates, Cursors, Egg Hatches & Pet Upgrades for FREE across all seasons!'
+                        : 'Find the ultra-rare Matthew Shop Token inside Mystery Chests or Golden Matthews to permanently unlock EVERYTHING in shops for FREE forever across all seasons!'}
                     </p>
                   </div>
 
@@ -1109,7 +1110,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                   {(['normal', 'frost'] as CrateType[]).map((ctype) => {
                     const spec = CRATE_DEFINITIONS[ctype];
                     const isFrost = ctype === 'frost';
-                    const canAfford = state.gems >= spec.gemCost;
+                    const canAfford = hasShopToken || state.gems >= spec.gemCost;
                     return (
                       <div
                         key={ctype}
@@ -1160,7 +1161,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                           }`}
                         >
                           <Sparkles className="w-3.5 h-3.5" />
-                          <span>Open {spec.name} ({spec.gemCost} Gems)</span>
+                          <span>
+                            {hasShopToken
+                              ? `Open ${spec.name} (FREE • Token)`
+                              : `Open ${spec.name} (${spec.gemCost} Gems)`}
+                          </span>
                         </button>
                       </div>
                     );

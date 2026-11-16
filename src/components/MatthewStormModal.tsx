@@ -70,7 +70,9 @@ export const MatthewStormModal: React.FC<MatthewStormModalProps> = ({
   const currentSeasonStormSkins = getStormSkinsForSeason(state.currentSeasonId);
 
   const handleBuyStormSkin = (skin: Skin) => {
-    const price = skin.gemCost || GEM_ECONOMY_CONFIG.stormSkinCostGems;
+    const price = state.hasMatthewShopToken
+      ? 0
+      : (skin.gemCost || GEM_ECONOMY_CONFIG.stormSkinCostGems);
     const isOwned = state.unlockedSkins.includes(skin.id);
 
     if (isOwned) {
@@ -225,7 +227,9 @@ export const MatthewStormModal: React.FC<MatthewStormModalProps> = ({
               {currentSeasonStormSkins.map((skin) => {
                 const isOwned = state.unlockedSkins.includes(skin.id);
                 const isEquipped = state.equippedSkin === skin.id;
-                const price = skin.gemCost || GEM_ECONOMY_CONFIG.stormSkinCostGems;
+                const price = state.hasMatthewShopToken
+                  ? 0
+                  : (skin.gemCost || GEM_ECONOMY_CONFIG.stormSkinCostGems);
                 const canAfford = state.gems >= price && stormState.shopOpen;
                 const isSpoilerMasked = !stormState.shopOpen && !isOwned;
 
@@ -320,7 +324,7 @@ export const MatthewStormModal: React.FC<MatthewStormModalProps> = ({
                           ) : (
                             <>
                               <Sparkles className="w-3.5 h-3.5" />
-                              <span>{price} 💎</span>
+                              <span>{state.hasMatthewShopToken ? 'FREE (Token)' : `${price} 💎`}</span>
                             </>
                           )}
                         </button>

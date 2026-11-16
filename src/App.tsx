@@ -6,6 +6,7 @@ import {
   saveGame,
   performBetaWipeIfDue,
   performSeasonalRollover,
+  getPermanentTokenFreeSkinIds,
 } from './utils/storage';
 import {
   equipSkin,
@@ -58,6 +59,7 @@ import {
   LeaderboardEntry,
   checkSeason1PlacementRewards,
   fetchWorldwideLeaderboard,
+  isLeaderboardPlayerOnline,
 } from './firebase/leaderboard';
 import {
   BanRecord,
@@ -199,6 +201,7 @@ export function App() {
   const seenPlayerReportIdsRef = useRef<Set<string>>(new Set());
   const seenTokenBroadcastIdRef = useRef<string | null>(null);
   const [top3Players, setTop3Players] = useState<LeaderboardEntry[]>([]);
+  const [onlinePlayersCount, setOnlinePlayersCount] = useState<number>(1);
   const [serverBroadcast, setServerBroadcast] = useState<ServerBroadcast | null>(null);
 
   // Schedule & Live Event state
@@ -344,8 +347,10 @@ export function App() {
         sandboxS2Enabled && isVerifiedLiveDevSession(currUid),
         Date.now()
       );
-      const entries = await fetchWorldwideLeaderboard(eff.seasonId, 5, eff.isSandbox);
+      const entries = await fetchWorldwideLeaderboard(eff.seasonId, 500, eff.isSandbox);
       setTop3Players(entries.slice(0, 3));
+      const onlineNow = entries.filter((e) => isLeaderboardPlayerOnline(e, currUid)).length;
+      setOnlinePlayersCount(Math.max(currUid ? 1 : 0, onlineNow));
       setServerBroadcast(getCachedServerBroadcast());
     } catch {
       // ignore transient error
@@ -1639,6 +1644,9 @@ export function App() {
           nextSealedEggs[loot.eggRarity] = (nextSealedEggs[loot.eggRarity] || 0) + 1;
         }
         const gotToken = Boolean(prev.hasMatthewShopToken || loot.foundMatthewShopToken);
+        const mergedWithTokenSkins = gotToken
+          ? Array.from(new Set([...nextSkins, ...getPermanentTokenFreeSkinIds(false)]))
+          : nextSkins;
         const next: GameState = {
           ...prev,
           gems: prev.gems + loot.gems,
@@ -1647,14 +1655,22 @@ export function App() {
           lifetimeCoins: prev.lifetimeCoins + loot.coins,
           seasonalScore: prev.seasonalScore + loot.coins,
           chestsOpened: (prev.chestsOpened || 0) + 1,
-          matthewShopTokens: (prev.matthewShopTokens || 0) + (loot.foundMatthewShopToken ? 1 : 0),
+          matthewShopTokens: Math.max(
+            gotToken ? 1 : 0,
+            (prev.matthewShopTokens || 0) + (loot.foundMatthewShopToken ? 1 : 0)
+          ),
           hasMatthewShopToken: gotToken,
           unlockedCursors: gotToken
             ? Array.from(
                 new Set([...(prev.unlockedCursors || []), ...ALL_CURSORS.map((c) => c.id)])
               )
             : prev.unlockedCursors,
-          unlockedSkins: nextSkins,
+          ownedCosmetics: gotToken
+            ? Array.from(
+                new Set([...(prev.ownedCosmetics || []), ...COSMETIC_ITEMS.map((c) => c.id)])
+              )
+            : prev.ownedCosmetics,
+          unlockedSkins: mergedWithTokenSkins,
           sealedEggs: nextSealedEggs,
         };
         saveGame(next);
@@ -1711,12 +1727,14 @@ export function App() {
     const def = getEggDefinition(rarity);
     const snap = stateRef.current;
     const avail = snap.sealedEggs?.[rarity] || 0;
-    if (avail <= 0 || snap.gems < def.hatchGemCost) return;
+    const hatchCost = snap.hasMatthewShopToken ? 0 : def.hatchGemCost;
+    if (avail <= 0 || snap.gems < hatchCost) return;
 
     const rolledSpec = rollHatchedPetSpecies(rarity);
     setState((prev) => {
       const count = prev.sealedEggs?.[rarity] || 0;
-      if (count <= 0 || prev.gems < def.hatchGemCost) return prev;
+      const effectiveCost = prev.hasMatthewShopToken ? 0 : def.hatchGemCost;
+      if (count <= 0 || prev.gems < effectiveCost) return prev;
       const newPetId = `pet_${rolledSpec.speciesId}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
       const newPet = {
         instanceId: newPetId,
@@ -1733,7 +1751,7 @@ export function App() {
           : prev.equippedPetIds;
       const next: GameState = {
         ...prev,
-        gems: prev.gems - def.hatchGemCost,
+        gems: prev.gems - effectiveCost,
         sealedEggs: {
           ...(prev.sealedEggs || {}),
           [rarity]: count - 1,
@@ -1772,7 +1790,7 @@ export function App() {
     setState((prev) => {
       const target = (prev.pets || []).find((p) => p.instanceId === instanceId);
       if (!target) return prev;
-      const cost = getPetUpgradeGemCost(target);
+      const cost = prev.hasMatthewShopToken ? 0 : getPetUpgradeGemCost(target);
       if (prev.gems < cost) return prev;
       const nextPets = prev.pets.map((p) =>
         p.instanceId === instanceId ? { ...p, level: p.level + 1 } : p
@@ -1853,21 +1871,20 @@ export function App() {
     if (!MATTHEW_VAULT_SKINS.some((s) => s.id === skinId)) return;
     const curr = stateRef.current;
     if (curr.unlockedSkins.includes(skinId)) return;
-    const currTokens = Math.max(0, curr.matthewShopTokens ?? 0);
-    if (currTokens <= 0) return;
+    const hasForeverToken = Boolean(curr.hasMatthewShopToken || (curr.matthewShopTokens ?? 0) > 0);
+    if (!hasForeverToken) return;
 
-    const nextTokens = Math.max(0, currTokens - 1);
     const updatedAt = Date.now();
     let pushedState: GameState | null = null;
     setState((prev) => {
       if (prev.unlockedSkins.includes(skinId)) return prev;
-      const availTokens = Math.max(0, prev.matthewShopTokens ?? 0);
-      if (availTokens <= 0) return prev;
-      const resolvedNextTokens = Math.max(0, availTokens - 1);
+      const hasToken = Boolean(prev.hasMatthewShopToken || (prev.matthewShopTokens ?? 0) > 0);
+      if (!hasToken) return prev;
+      const keptTokens = Math.max(1, prev.matthewShopTokens ?? 1);
       const next: GameState = {
         ...prev,
-        matthewShopTokens: resolvedNextTokens,
-        hasMatthewShopToken: resolvedNextTokens > 0,
+        matthewShopTokens: keptTokens,
+        hasMatthewShopToken: true,
         unlockedSkins: [...prev.unlockedSkins, skinId],
         equippedSkin: skinId,
         lastSaveTime: updatedAt,
@@ -1878,8 +1895,8 @@ export function App() {
     });
     const cloudTarget: GameState = pushedState || {
       ...curr,
-      matthewShopTokens: nextTokens,
-      hasMatthewShopToken: nextTokens > 0,
+      matthewShopTokens: Math.max(1, curr.matthewShopTokens ?? 1),
+      hasMatthewShopToken: true,
       unlockedSkins: [...curr.unlockedSkins, skinId],
       equippedSkin: skinId,
       lastSaveTime: updatedAt,
@@ -1916,7 +1933,8 @@ export function App() {
 
   const handleOpenMysteryChest = (): ChestLootResult | null => {
     const curr = stateRef.current;
-    if (curr.gems < SEASON_2_CONFIG.gemChestCostGems) return null;
+    const chestCost = curr.hasMatthewShopToken ? 0 : SEASON_2_CONFIG.gemChestCostGems;
+    if (curr.gems < chestCost) return null;
     const cps = calculateCPS(curr, { fridayBonusActive: fridayBonus, stormWaveMultiplier });
     const cp = calculateClickPower(curr, { fridayBonusActive: fridayBonus, stormWaveMultiplier });
     const loot = rollChestLoot(
@@ -1927,7 +1945,8 @@ export function App() {
     );
 
     setState((prev) => {
-      if (prev.gems < SEASON_2_CONFIG.gemChestCostGems) return prev;
+      const effectiveCost = prev.hasMatthewShopToken ? 0 : SEASON_2_CONFIG.gemChestCostGems;
+      if (prev.gems < effectiveCost) return prev;
       const nextSkins =
         loot.foundSkinId && !prev.unlockedSkins.includes(loot.foundSkinId)
           ? [...prev.unlockedSkins, loot.foundSkinId]
@@ -1937,21 +1956,32 @@ export function App() {
         nextSealedEggs[loot.eggRarity] = (nextSealedEggs[loot.eggRarity] || 0) + 1;
       }
       const gotToken = Boolean(prev.hasMatthewShopToken || loot.foundMatthewShopToken);
+      const mergedWithTokenSkins = gotToken
+        ? Array.from(new Set([...nextSkins, ...getPermanentTokenFreeSkinIds(false)]))
+        : nextSkins;
       const next: GameState = {
         ...prev,
-        gems: prev.gems - SEASON_2_CONFIG.gemChestCostGems + loot.gems,
+        gems: prev.gems - effectiveCost + loot.gems,
         coins: prev.coins + loot.coins,
         lifetimeCoins: prev.lifetimeCoins + loot.coins,
         seasonalScore: prev.seasonalScore + loot.coins,
         chestsOpened: (prev.chestsOpened || 0) + 1,
-        matthewShopTokens: (prev.matthewShopTokens || 0) + (loot.foundMatthewShopToken ? 1 : 0),
+        matthewShopTokens: Math.max(
+          gotToken ? 1 : 0,
+          (prev.matthewShopTokens || 0) + (loot.foundMatthewShopToken ? 1 : 0)
+        ),
         hasMatthewShopToken: gotToken,
         unlockedCursors: gotToken
           ? Array.from(
               new Set([...(prev.unlockedCursors || []), ...ALL_CURSORS.map((c) => c.id)])
             )
           : prev.unlockedCursors,
-        unlockedSkins: nextSkins,
+        ownedCosmetics: gotToken
+          ? Array.from(
+              new Set([...(prev.ownedCosmetics || []), ...COSMETIC_ITEMS.map((c) => c.id)])
+            )
+          : prev.ownedCosmetics,
+        unlockedSkins: mergedWithTokenSkins,
         sealedEggs: nextSealedEggs,
       };
       saveGame(next);
@@ -1975,8 +2005,9 @@ export function App() {
   const handleOpenCrate = (crateType: CrateType) => {
     const def = CRATE_DEFINITIONS[crateType];
     const curr = stateRef.current;
-    if (curr.gems < def.gemCost) {
-      handleNotify('NOT ENOUGH GEMS', `${def.name} costs ${def.gemCost} Gems!`);
+    const crateCost = curr.hasMatthewShopToken ? 0 : def.gemCost;
+    if (curr.gems < crateCost) {
+      handleNotify('NOT ENOUGH GEMS', `${def.name} costs ${crateCost} Gems!`);
       return;
     }
 
@@ -1987,7 +2018,8 @@ export function App() {
     );
 
     setState((prev) => {
-      if (prev.gems < def.gemCost) return prev;
+      const effectiveCost = prev.hasMatthewShopToken ? 0 : def.gemCost;
+      if (prev.gems < effectiveCost) return prev;
       const nextSkins =
         reward.rewardKind === 'skin' &&
         reward.skin &&
@@ -2000,11 +2032,15 @@ export function App() {
         !(prev.unlockedCursors || []).includes(reward.cursor.id)
           ? [...(prev.unlockedCursors || []), reward.cursor.id]
           : prev.unlockedCursors || [];
-      const duplicateRefund = reward.isDuplicate ? reward.refundGems : 0;
+      const duplicateRefund = prev.hasMatthewShopToken
+        ? 0
+        : reward.isDuplicate
+        ? reward.refundGems
+        : 0;
 
       const next: GameState = {
         ...prev,
-        gems: prev.gems - def.gemCost + duplicateRefund,
+        gems: prev.gems - effectiveCost + duplicateRefund,
         unlockedSkins: nextSkins,
         unlockedCursors: nextCursors,
         cratesOpened: (prev.cratesOpened || 0) + 1,
@@ -2057,12 +2093,13 @@ export function App() {
     if (!item) return;
     setState((prev) => {
       const owned = (prev.ownedCosmetics || []).includes(cosmeticId);
-      if (!owned && prev.gems < gemCost) return prev;
+      const effectiveCost = prev.hasMatthewShopToken ? 0 : gemCost;
+      if (!owned && prev.gems < effectiveCost) return prev;
       const prevEq = prev.equippedCosmetics || { hat: null, glasses: null };
       const isAlreadyEquipped = prevEq[slot] === cosmeticId;
       const next: GameState = {
         ...prev,
-        gems: owned ? prev.gems : prev.gems - gemCost,
+        gems: owned ? prev.gems : prev.gems - effectiveCost,
         ownedCosmetics: owned
           ? prev.ownedCosmetics
           : [...(prev.ownedCosmetics || []), cosmeticId],
@@ -2262,6 +2299,7 @@ export function App() {
           probationAlertCount={probationAlerts.length}
           isProbationActive={isProbationActive}
           top3Players={top3Players}
+          onlinePlayersCount={onlinePlayersCount}
           serverBroadcast={serverBroadcast}
           onNotify={handleNotify}
           fridayBonusActive={fridayBonus}

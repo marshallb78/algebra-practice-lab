@@ -61,6 +61,19 @@ export function isExcludedFromLeaderboard(
   return false;
 }
 
+export const ONLINE_HEARTBEAT_WINDOW_MS = 90_000; // 90s active heartbeat window
+
+export function isLeaderboardPlayerOnline(
+  entry: Pick<LeaderboardEntry, 'uid' | 'updatedAtMs'>,
+  currentViewerUid?: string | null,
+  nowMs: number = Date.now()
+): boolean {
+  if (currentViewerUid && entry.uid === currentViewerUid) return true;
+  if (!entry.updatedAtMs || entry.updatedAtMs <= 0) return false;
+  const ageMs = nowMs - entry.updatedAtMs;
+  return ageMs >= -30_000 && ageMs <= ONLINE_HEARTBEAT_WINDOW_MS;
+}
+
 export interface LeaderboardEntry {
   uid: string;
   username: string;
@@ -118,8 +131,8 @@ function parseRawEntry(uid: string, d: Record<string, any>): LeaderboardEntry {
       typeof d.lifetimeCoins === 'number'
         ? d.lifetimeCoins
         : typeof d.seasonalScore === 'number'
-        ? d.seasonalScore
-        : 0,
+          ? d.seasonalScore
+          : 0,
     totalClicks: typeof d.totalClicks === 'number' ? d.totalClicks : 0,
     highestCps: typeof d.highestCps === 'number' ? d.highestCps : 0,
     rebirthCount: rebirths,
@@ -244,14 +257,14 @@ export async function updateLeaderboardEntry(
   // Never allow banned or temp-banned accounts onto the leaderboard
   const ban = getCachedBanRecord(uid, username);
   if (ban) {
-    rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => {});
+    rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => { });
     return false;
   }
 
   // Players hidden from the leaderboard keep all cloud saves & gameplay, just skip publishing
   if (isExcludedFromLeaderboard(uid, username, seasonId)) {
     evictLeaderboardCacheForUid(uid);
-    rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => {});
+    rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => { });
     return true;
   }
 
@@ -264,6 +277,7 @@ export async function updateLeaderboardEntry(
   if (
     !force &&
     prev &&
+    nowMs - prev.publishedAtMs < 25000 &&
     prev.score === payload.seasonalScore &&
     prev.rebirths === payload.rebirthCount &&
     prev.skin === payload.equippedSkin &&
@@ -353,14 +367,14 @@ export async function fetchWorldwideLeaderboard(
 
         // If this player is banned or temp-banned, purge from RTDB and skip
         if (getCachedBanRecord(rtdbEntry.uid, rtdbEntry.username)) {
-          rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => {});
+          rtdbRestDelete(`leaderboards/${seasonId}/${uid}`).catch(() => { });
           mergedByUid.delete(rtdbEntry.uid);
           continue;
         }
 
         // Skip unbanned leaderboard-hidden players (and clean up pre-launch dev entries)
         if (isExcludedFromLeaderboard(rtdbEntry.uid, rtdbEntry.username, seasonId)) {
-          rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => {});
+          rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => { });
           mergedByUid.delete(rtdbEntry.uid);
           continue;
         }

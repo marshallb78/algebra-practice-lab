@@ -233,6 +233,9 @@ function buildUserCloudPayload(
         totalPlaytimeSeconds: Math.floor(state.totalPlaytimeSeconds || 0),
         goldenMatthewsClicked: state.goldenMatthewsClicked,
         giantMatthewsClicked: state.giantMatthewsClicked || 0,
+        chestsOpened: state.chestsOpened || 0,
+        hasMatthewShopToken: Boolean(state.hasMatthewShopToken),
+        matthewShopTokens: state.matthewShopTokens ?? 0,
         lastSaveTime: nowMs,
       },
     },
@@ -404,8 +407,8 @@ export function reconcileCloudAndLocalState(params: {
       typeof src.prestigeCount === 'number'
         ? src.prestigeCount
         : typeof src.rebirthCount === 'number'
-        ? src.rebirthCount
-        : 0;
+          ? src.rebirthCount
+          : 0;
     const pShards = typeof src.prestigeShards === 'number' ? src.prestigeShards : 0;
     const lpShards =
       typeof src.lifetimePrestigeShards === 'number' ? src.lifetimePrestigeShards : pShards;
@@ -413,14 +416,14 @@ export function reconcileCloudAndLocalState(params: {
       typeof src.lifetimeCoins === 'number'
         ? src.lifetimeCoins
         : typeof src.seasonalScore === 'number'
-        ? src.seasonalScore
-        : 0;
+          ? src.seasonalScore
+          : 0;
     const saveTs =
       typeof src.lastSaveTime === 'number'
         ? src.lastSaveTime
         : typeof src.updatedAtMs === 'number'
-        ? src.updatedAtMs
-        : 0;
+          ? src.updatedAtMs
+          : 0;
 
     if (!wasExplicitlyReset) {
       cloudMaxPrestigeCount = Math.max(cloudMaxPrestigeCount, pCount);
@@ -500,15 +503,15 @@ export function reconcileCloudAndLocalState(params: {
   const localInActiveSeason = localState.currentSeasonId === activeSeasonId;
   const localSnap: ProgressSnapshot = localInActiveSeason
     ? {
-        lifetimeCoins: localState.lifetimeCoins || 0,
-        prestigeCount: localState.prestigeCount || 0,
-        saveTs: localState.lastSaveTime || 0,
-      }
+      lifetimeCoins: localState.lifetimeCoins || 0,
+      prestigeCount: localState.prestigeCount || 0,
+      saveTs: localState.lastSaveTime || 0,
+    }
     : {
-        lifetimeCoins: -1,
-        prestigeCount: -1,
-        saveTs: 0,
-      };
+      lifetimeCoins: -1,
+      prestigeCount: -1,
+      saveTs: 0,
+    };
 
   const forceCloudAfterReset =
     resetAtMs > 0 &&
@@ -530,10 +533,10 @@ export function reconcileCloudAndLocalState(params: {
     useCloudBase && cloudEquippedSkin && mergedSkins.includes(cloudEquippedSkin)
       ? cloudEquippedSkin
       : mergedSkins.includes(localState.equippedSkin)
-      ? localState.equippedSkin
-      : cloudEquippedSkin && mergedSkins.includes(cloudEquippedSkin)
-      ? cloudEquippedSkin
-      : 'classic_matthew';
+        ? localState.equippedSkin
+        : cloudEquippedSkin && mergedSkins.includes(cloudEquippedSkin)
+          ? cloudEquippedSkin
+          : 'classic_matthew';
 
   const newestCloudSaveTs = Math.max(
     bestCloudSnapshot.saveTs || 0,
@@ -546,18 +549,18 @@ export function reconcileCloudAndLocalState(params: {
     isFreshSeasonRollover || forceCloudAfterReset
       ? {}
       : authoritativeSeason.upgrades && typeof authoritativeSeason.upgrades === 'object'
-      ? authoritativeSeason.upgrades
-      : {};
+        ? authoritativeSeason.upgrades
+        : {};
   const hasAnyPassiveUpgrades = Object.values(authUpgrades).some(
     (cnt) => typeof cnt === 'number' && cnt > 0
   );
   const authCoins = isFreshSeasonRollover
     ? 0
     : typeof authoritativeSeason.coins === 'number'
-    ? authoritativeSeason.coins
-    : localInActiveSeason
-    ? localState.coins || 0
-    : 0;
+      ? authoritativeSeason.coins
+      : localInActiveSeason
+        ? localState.coins || 0
+        : 0;
 
   // Prevent stale offline earnings after a Rebirth or Admin Reset when switching devices
   let effectiveLastSaveTime =
@@ -574,17 +577,17 @@ export function reconcileCloudAndLocalState(params: {
   const mergedPrestigeCount = forceSeasonalZero
     ? 0
     : isCloudAdjustmentPending
-    ? typeof authoritativeSeason.prestigeCount === 'number'
-      ? authoritativeSeason.prestigeCount
-      : typeof authoritativeSeason.rebirthCount === 'number'
-      ? authoritativeSeason.rebirthCount
-      : cloudMaxPrestigeCount
-    : Math.max(
+      ? typeof authoritativeSeason.prestigeCount === 'number'
+        ? authoritativeSeason.prestigeCount
+        : typeof authoritativeSeason.rebirthCount === 'number'
+          ? authoritativeSeason.rebirthCount
+          : cloudMaxPrestigeCount
+      : Math.max(
         typeof authoritativeSeason.prestigeCount === 'number'
           ? authoritativeSeason.prestigeCount
           : typeof authoritativeSeason.rebirthCount === 'number'
-          ? authoritativeSeason.rebirthCount
-          : 0,
+            ? authoritativeSeason.rebirthCount
+            : 0,
         cloudMaxPrestigeCount,
         localInActiveSeason ? localState.prestigeCount || 0 : 0
       );
@@ -592,10 +595,10 @@ export function reconcileCloudAndLocalState(params: {
   const mergedPrestigeShards = forceSeasonalZero
     ? 0
     : isCloudAdjustmentPending
-    ? typeof authoritativeSeason.prestigeShards === 'number'
-      ? authoritativeSeason.prestigeShards
-      : cloudMaxPrestigeShards
-    : Math.max(
+      ? typeof authoritativeSeason.prestigeShards === 'number'
+        ? authoritativeSeason.prestigeShards
+        : cloudMaxPrestigeShards
+      : Math.max(
         typeof authoritativeSeason.prestigeShards === 'number'
           ? authoritativeSeason.prestigeShards
           : 0,
@@ -606,10 +609,10 @@ export function reconcileCloudAndLocalState(params: {
   const mergedLifetimePrestigeShards = forceSeasonalZero
     ? 0
     : isCloudAdjustmentPending
-    ? typeof authoritativeSeason.lifetimePrestigeShards === 'number'
-      ? authoritativeSeason.lifetimePrestigeShards
-      : mergedPrestigeShards
-    : Math.max(
+      ? typeof authoritativeSeason.lifetimePrestigeShards === 'number'
+        ? authoritativeSeason.lifetimePrestigeShards
+        : mergedPrestigeShards
+      : Math.max(
         typeof authoritativeSeason.lifetimePrestigeShards === 'number'
           ? authoritativeSeason.lifetimePrestigeShards
           : mergedPrestigeShards,
@@ -620,10 +623,10 @@ export function reconcileCloudAndLocalState(params: {
   const mergedClicks = forceSeasonalZero
     ? 0
     : isCloudAdjustmentPending
-    ? typeof authoritativeSeason.clicks === 'number'
-      ? authoritativeSeason.clicks
-      : cloudMaxClicks
-    : Math.max(
+      ? typeof authoritativeSeason.clicks === 'number'
+        ? authoritativeSeason.clicks
+        : cloudMaxClicks
+      : Math.max(
         typeof authoritativeSeason.clicks === 'number' ? authoritativeSeason.clicks : 0,
         cloudMaxClicks,
         localInActiveSeason ? localState.clicks || 0 : 0
@@ -632,7 +635,7 @@ export function reconcileCloudAndLocalState(params: {
   const mergedLifetimeCoins = forceSeasonalZero
     ? 0
     : isCloudAdjustmentPending
-    ? Math.max(
+      ? Math.max(
         typeof authoritativeSeason.lifetimeCoins === 'number'
           ? authoritativeSeason.lifetimeCoins
           : 0,
@@ -640,7 +643,7 @@ export function reconcileCloudAndLocalState(params: {
           ? authoritativeSeason.seasonalScore
           : 0
       )
-    : Math.max(
+      : Math.max(
         typeof authoritativeSeason.lifetimeCoins === 'number'
           ? authoritativeSeason.lifetimeCoins
           : 0,
@@ -653,18 +656,40 @@ export function reconcileCloudAndLocalState(params: {
   const mergedSeasonalScore = forceSeasonalZero
     ? 0
     : isCloudAdjustmentPending
-    ? Math.max(
+      ? Math.max(
         typeof authoritativeSeason.seasonalScore === 'number'
           ? authoritativeSeason.seasonalScore
           : 0,
         Math.floor(mergedLifetimeCoins)
       )
-    : Math.max(
+      : Math.max(
         typeof authoritativeSeason.seasonalScore === 'number'
           ? authoritativeSeason.seasonalScore
           : 0,
         Math.floor(mergedLifetimeCoins),
         localInActiveSeason ? localState.seasonalScore || 0 : 0
+      );
+
+  const permanentShopToken = forceCloudAfterReset
+    ? false
+    : Boolean(
+        localState.hasMatthewShopToken ||
+          (localState.matthewShopTokens || 0) > 0 ||
+          rtdbUser?.hasMatthewShopToken ||
+          (typeof rtdbUser?.matthewShopTokens === 'number' && rtdbUser.matthewShopTokens > 0) ||
+          authoritativeSeason.hasMatthewShopToken ||
+          (typeof authoritativeSeason.matthewShopTokens === 'number' &&
+            authoritativeSeason.matthewShopTokens > 0)
+      );
+  const permanentShopTokenCount = forceCloudAfterReset
+    ? 0
+    : Math.max(
+        permanentShopToken ? 1 : 0,
+        localState.matthewShopTokens || 0,
+        typeof rtdbUser?.matthewShopTokens === 'number' ? rtdbUser.matthewShopTokens : 0,
+        typeof authoritativeSeason.matthewShopTokens === 'number'
+          ? authoritativeSeason.matthewShopTokens
+          : 0
       );
 
   const mergedRaw: Partial<GameState> = {
@@ -677,21 +702,21 @@ export function reconcileCloudAndLocalState(params: {
     criticalClicks: forceSeasonalZero
       ? 0
       : Math.max(
-          typeof authoritativeSeason.criticalClicks === 'number'
-            ? authoritativeSeason.criticalClicks
-            : 0,
-          cloudMaxCritClicks,
-          localInActiveSeason ? localState.criticalClicks || 0 : 0
-        ),
+        typeof authoritativeSeason.criticalClicks === 'number'
+          ? authoritativeSeason.criticalClicks
+          : 0,
+        cloudMaxCritClicks,
+        localInActiveSeason ? localState.criticalClicks || 0 : 0
+      ),
     maxComboReached: forceSeasonalZero
       ? 0
       : Math.max(
-          typeof authoritativeSeason.maxComboReached === 'number'
-            ? authoritativeSeason.maxComboReached
-            : 0,
-          cloudMaxComboReached,
-          localInActiveSeason ? localState.maxComboReached || 0 : 0
-        ),
+        typeof authoritativeSeason.maxComboReached === 'number'
+          ? authoritativeSeason.maxComboReached
+          : 0,
+        cloudMaxComboReached,
+        localInActiveSeason ? localState.maxComboReached || 0 : 0
+      ),
     prestigeCount: mergedPrestigeCount,
     prestigeShards: mergedPrestigeShards,
     lifetimePrestigeShards: mergedLifetimePrestigeShards,
@@ -705,10 +730,17 @@ export function reconcileCloudAndLocalState(params: {
     uperCompleted: isFreshSeasonRollover ? false : Boolean(authoritativeSeason.uperCompleted || localState.uperCompleted),
     pets: isFreshSeasonRollover ? [] : (authoritativeSeason.pets as GameState['pets']) ?? localState.pets ?? [],
     equippedPetIds: isFreshSeasonRollover ? [] : (authoritativeSeason.equippedPetIds as string[]) ?? localState.equippedPetIds ?? [],
-    chestsOpened: isFreshSeasonRollover ? 0 : (typeof authoritativeSeason.chestsOpened === 'number' ? authoritativeSeason.chestsOpened : localState.chestsOpened || 0),
+    chestsOpened: forceCloudAfterReset
+      ? 0
+      : Math.max(
+          typeof authoritativeSeason.chestsOpened === 'number' ? authoritativeSeason.chestsOpened : 0,
+          typeof rtdbUser?.chestsOpened === 'number' ? rtdbUser.chestsOpened : 0,
+          typeof rtdbLb?.chestsOpened === 'number' ? rtdbLb.chestsOpened : 0,
+          localState.chestsOpened || 0
+        ),
     zombiesDefeated: isFreshSeasonRollover ? 0 : (typeof authoritativeSeason.zombiesDefeated === 'number' ? authoritativeSeason.zombiesDefeated : localState.zombiesDefeated || 0),
-    hasMatthewShopToken: isFreshSeasonRollover ? false : Boolean(authoritativeSeason.hasMatthewShopToken ?? localState.hasMatthewShopToken),
-    matthewShopTokens: isFreshSeasonRollover ? 0 : (typeof authoritativeSeason.matthewShopTokens === 'number' ? authoritativeSeason.matthewShopTokens : localState.matthewShopTokens || 0),
+    hasMatthewShopToken: permanentShopToken,
+    matthewShopTokens: permanentShopTokenCount,
     sandboxS2Enabled: nowMs >= SEASON_2_CONFIG.launchTimeMs ? false : Boolean(localState.sandboxS2Enabled),
     unlockedSkins: mergedSkins,
     equippedSkin: chosenEquippedSkin,
@@ -732,21 +764,21 @@ export function reconcileCloudAndLocalState(params: {
     goldenMatthewsClicked: forceCloudAfterReset
       ? 0
       : Math.max(
-          typeof authoritativeSeason.goldenMatthewsClicked === 'number'
-            ? authoritativeSeason.goldenMatthewsClicked
-            : 0,
-          cloudMaxGoldenClicked,
-          localState.goldenMatthewsClicked || 0
-        ),
+        typeof authoritativeSeason.goldenMatthewsClicked === 'number'
+          ? authoritativeSeason.goldenMatthewsClicked
+          : 0,
+        cloudMaxGoldenClicked,
+        localState.goldenMatthewsClicked || 0
+      ),
     giantMatthewsClicked: forceCloudAfterReset
       ? 0
       : Math.max(
-          typeof authoritativeSeason.giantMatthewsClicked === 'number'
-            ? authoritativeSeason.giantMatthewsClicked
-            : 0,
-          cloudMaxGiantClicked,
-          localState.giantMatthewsClicked || 0
-        ),
+        typeof authoritativeSeason.giantMatthewsClicked === 'number'
+          ? authoritativeSeason.giantMatthewsClicked
+          : 0,
+        cloudMaxGiantClicked,
+        localState.giantMatthewsClicked || 0
+      ),
     permanentAchievements: Array.from(allPermAch),
     unlockedAchievements: forceCloudAfterReset ? [] : Array.from(allUnlockedAchievements),
     claimedQuests: forceCloudAfterReset ? [] : Array.from(allClaimedQuests),
@@ -862,8 +894,8 @@ export function reconcileCloudAndLocalState(params: {
       recoveredFromCareerLoss || needsLiamS2Reset
         ? nowMs
         : isCloudAdjustmentPending
-        ? Math.max(nowMs, effectiveLastSaveTime)
-        : effectiveLastSaveTime,
+          ? Math.max(nowMs, effectiveLastSaveTime)
+          : effectiveLastSaveTime,
   };
 
   // Only push back up if local state contributed newer gains, missing skins, claim dates, removed unauthorized champion skin, or recovered Marshallb78's score;
@@ -1048,7 +1080,7 @@ export async function loadAndReconcileCloudSave(
           lastOwnerUid: uid,
         };
         saveGame(taggedInitial, true, storageOverride);
-        saveStateToCloud(uid, username, taggedInitial, true).catch(() => {});
+        saveStateToCloud(uid, username, taggedInitial, true).catch(() => { });
         return taggedInitial;
       }
 
@@ -1093,11 +1125,11 @@ export async function loadAndReconcileCloudSave(
       const rawEquippedPets = ignoreStaleS2Extras
         ? []
         : Array.from(
-            new Set([
-              ...(reconciled.equippedPetIds || []),
-              ...(Array.isArray(rtdbUser?.equippedPetIds) ? rtdbUser.equippedPetIds : []),
-            ])
-          ).filter((id) => validPetIds.has(id));
+          new Set([
+            ...(reconciled.equippedPetIds || []),
+            ...(Array.isArray(rtdbUser?.equippedPetIds) ? rtdbUser.equippedPetIds : []),
+          ])
+        ).filter((id) => validPetIds.has(id));
       const mergedEquippedPetIds =
         rawEquippedPets.length > 0
           ? rawEquippedPets.slice(0, 3)
@@ -1118,8 +1150,8 @@ export async function loadAndReconcileCloudSave(
         !ignoreStaleS2Extras && typeof rtdbUser?.matthewShopTokens === 'number'
           ? Math.max(0, Math.floor(rtdbUser.matthewShopTokens))
           : ignoreStaleS2Extras
-          ? 0
-          : undefined;
+            ? 0
+            : undefined;
       const localTokens = Math.max(0, Math.floor(reconciled.matthewShopTokens ?? 0));
       const cloudNewer =
         typeof rtdbUser?.updatedAtMs === 'number' &&
@@ -1133,8 +1165,15 @@ export async function loadAndReconcileCloudSave(
         cloudNewer && cloudTokens !== undefined
           ? cloudTokens
           : localNewerAfterSpend
-          ? localTokens
-          : Math.max(localTokens, cloudTokens ?? 0);
+            ? localTokens
+            : Math.max(localTokens, cloudTokens ?? 0);
+      const hasTokenForever =
+        !ignoreStaleS2Extras &&
+        Boolean(
+          reconciled.hasMatthewShopToken ||
+            rtdbUser?.hasMatthewShopToken ||
+            mergedShopTokens > 0
+        );
 
       const rawBadges = Array.isArray(rtdbUser?.winnerBadges)
         ? rtdbUser.winnerBadges
@@ -1171,13 +1210,13 @@ export async function loadAndReconcileCloudSave(
           hat: null,
           glasses: rtdbUser?.equippedCosmetics?.glasses || reconciled.equippedCosmetics?.glasses || null,
         },
-        hasMatthewShopToken: ignoreStaleS2Extras ? false : mergedShopTokens > 0,
-        matthewShopTokens: ignoreStaleS2Extras ? 0 : mergedShopTokens,
+        hasMatthewShopToken: hasTokenForever,
+        matthewShopTokens: hasTokenForever ? Math.max(1, mergedShopTokens) : 0,
         unlockedCursors: ignoreStaleS2Extras
           ? [STARTER_CURSOR_ID]
           : Array.isArray(rtdbUser?.unlockedCursors)
-          ? Array.from(new Set([...(reconciled.unlockedCursors || []), ...rtdbUser.unlockedCursors]))
-          : reconciled.unlockedCursors || [],
+            ? Array.from(new Set([...(reconciled.unlockedCursors || []), ...rtdbUser.unlockedCursors]))
+            : reconciled.unlockedCursors || [],
         equippedCursorId: ignoreStaleS2Extras
           ? STARTER_CURSOR_ID
           : rtdbUser?.equippedCursorId ?? reconciled.equippedCursorId ?? null,
@@ -1206,7 +1245,7 @@ export async function loadAndReconcileCloudSave(
       saveGame(mergedUserFields, true, storageOverride);
 
       if (!banRecord && shouldPushToCloud) {
-        await saveStateToCloud(uid, username, mergedUserFields, true).catch(() => {});
+        await saveStateToCloud(uid, username, mergedUserFields, true).catch(() => { });
       }
 
       return mergedUserFields;
@@ -1276,9 +1315,10 @@ export async function saveStateToCloud(
   const isSandbox = false;
   const scopeKey = `${isSandbox ? 'sbx_' : ''}${uid}`;
   const playtimeBucket = Math.floor((state.totalPlaytimeSeconds || 0) / 20);
+  const heartbeatBucket = Math.floor(Date.now() / 25000);
   const petSig = (state.pets || []).map((p) => `${p.instanceId}:${p.level}`).join(',');
   const upgradeCount = Object.values(state.upgrades || {}).reduce((acc, n) => acc + (n || 0), 0);
-  const signature = `${isSandbox ? 'sbx' : 'live'}_${Math.floor(state.lifetimeCoins)}_${Math.floor(state.coins)}_${Math.floor(state.clicks)}_${state.prestigeCount}_${upgradeCount}_${state.equippedSkin}_${state.unlockedSkins.length}_${state.gems}_${state.lastDailyLoginClaimDate || ''}_${Boolean(state.season2IntroSeen)}_${petSig}_${(state.equippedPetIds || []).join(',')}_${state.matthewShopTokens ?? 0}_${state.hasMatthewShopToken}_${state.claimedQuests?.length || 0}_${playtimeBucket}_${username}`;
+  const signature = `${isSandbox ? 'sbx' : 'live'}_${Math.floor(state.lifetimeCoins)}_${Math.floor(state.coins)}_${Math.floor(state.clicks)}_${state.prestigeCount}_${upgradeCount}_${state.equippedSkin}_${state.unlockedSkins.length}_${state.gems}_${state.lastDailyLoginClaimDate || ''}_${Boolean(state.season2IntroSeen)}_${petSig}_${(state.equippedPetIds || []).join(',')}_${state.matthewShopTokens ?? 0}_${state.hasMatthewShopToken}_${state.claimedQuests?.length || 0}_${playtimeBucket}_${heartbeatBucket}_${username}`;
 
   if (!force && lastSavedSignatureByUid.get(scopeKey) === signature) {
     return true;
@@ -1329,7 +1369,9 @@ export async function purchaseStormSkinAtomic(
     return { nextState: equipped, success: true };
   }
 
-  const cost = stormSkin.gemCost ?? GEM_ECONOMY_CONFIG.stormSkinCostGems;
+  const cost = state.hasMatthewShopToken
+    ? 0
+    : (stormSkin.gemCost ?? GEM_ECONOMY_CONFIG.stormSkinCostGems);
   if (state.gems < cost) {
     return {
       nextState: state,
@@ -1353,7 +1395,7 @@ export async function purchaseStormSkinAtomic(
   saveGame(updatedState);
 
   if (uid && username) {
-    saveStateToCloud(uid, username, updatedState, true).catch(() => {});
+    saveStateToCloud(uid, username, updatedState, true).catch(() => { });
   }
 
   return { nextState: updatedState, success: true };
@@ -1390,7 +1432,7 @@ export async function signInAndReconcileAccount(
     },
   };
   saveGame(nextState, true);
-  saveStateToCloud(uid, username, nextState, true).catch(() => {});
+  saveStateToCloud(uid, username, nextState, true).catch(() => { });
   return nextState;
 }
 
@@ -1411,18 +1453,18 @@ export async function syncAccountBidirectional(
     lastOwnerUid: uid,
     cloudAccount: currentState.cloudAccount
       ? {
-          ...currentState.cloudAccount,
-          uid,
-          username,
-          displayUsername: username,
-          lastCloudSync: now,
-        }
+        ...currentState.cloudAccount,
+        uid,
+        username,
+        displayUsername: username,
+        lastCloudSync: now,
+      }
       : {
-          uid,
-          username,
-          displayUsername: username,
-          lastCloudSync: now,
-        },
+        uid,
+        username,
+        displayUsername: username,
+        lastCloudSync: now,
+      },
   };
   saveGame(nextState, true);
   return { nextState, ok };

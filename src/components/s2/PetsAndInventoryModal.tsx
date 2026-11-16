@@ -34,6 +34,7 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
   onSellPet,
 }) => {
   const [tab, setTab] = useState<'pets' | 'eggs'>('pets');
+  const hasShopToken = Boolean(state.hasMatthewShopToken);
   const pets = state.pets || [];
   const equippedIds = state.equippedPetIds || [];
   const [inspectedPetId, setInspectedPetId] = useState<string | null>(
@@ -151,7 +152,7 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
                     ...inspectedPet,
                     level: inspectedPet.level + 1,
                   });
-                  const upgCost = getPetUpgradeGemCost(inspectedPet);
+                  const upgCost = hasShopToken ? 0 : getPetUpgradeGemCost(inspectedPet);
                   const isEquipped = equippedIds.includes(inspectedPet.instanceId);
                   const squadSharePct =
                     isEquipped && totalSquadDps > 0
@@ -243,7 +244,7 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
                           </span>
                           <span className="text-sm font-black flex items-center gap-1 mt-0.5">
                             <ArrowUpCircle className="w-3.5 h-3.5" />
-                            {upgCost}G
+                            {hasShopToken ? 'FREE (Token)' : `${upgCost}G`}
                           </span>
                         </button>
                       </div>
@@ -256,7 +257,7 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
                     const isEquipped = equippedIds.includes(pet.instanceId);
                     const isInspected = inspectedPet?.instanceId === pet.instanceId;
                     const spec = getPetSpeciesDefinition(pet.speciesId, pet.rarity);
-                    const upgCost = getPetUpgradeGemCost(pet);
+                    const upgCost = hasShopToken ? 0 : getPetUpgradeGemCost(pet);
                     const clickBonus = getPetClickMultiplierBonus(pet);
                     const dps = getPetCombatDps(pet);
 
@@ -323,7 +324,7 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
                             className="py-2 rounded-xl bg-fuchsia-500/20 hover:bg-fuchsia-500/35 disabled:opacity-40 border border-fuchsia-400/50 text-fuchsia-200 font-black text-xs uppercase cursor-pointer transition flex items-center justify-center gap-1"
                           >
                             <ArrowUpCircle className="w-3.5 h-3.5" />
-                            <span>{`Lv.${pet.level + 1} (${upgCost}G)`}</span>
+                            <span>{hasShopToken ? `Lv.${pet.level + 1} (FREE)` : `Lv.${pet.level + 1} (${upgCost}G)`}</span>
                           </button>
 
                           {onSellPet && (
@@ -355,7 +356,8 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
             {EGG_DEFINITIONS.map((egg) => {
               const count = state.sealedEggs?.[egg.rarity] || 0;
-              const canHatch = count > 0 && state.gems >= egg.hatchGemCost;
+              const hatchCost = hasShopToken ? 0 : egg.hatchGemCost;
+              const canHatch = count > 0 && state.gems >= hatchCost;
               return (
                 <div
                   key={egg.rarity}
@@ -397,7 +399,7 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
                     className="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-sky-400 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-slate-950 font-black text-xs uppercase cursor-pointer transition flex items-center justify-center gap-1.5 mt-auto"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Hatch ({egg.hatchGemCost}G)</span>
+                    <span>{hasShopToken ? 'Hatch (FREE • Token)' : `Hatch (${egg.hatchGemCost}G)`}</span>
                   </button>
                   {onSellEgg && (
                     <button

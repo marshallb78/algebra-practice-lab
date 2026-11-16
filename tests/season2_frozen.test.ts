@@ -57,6 +57,7 @@ import {
   LIAM_S2_REBALANCE_UID,
   buildLeaderboardPayload,
   isExcludedFromLeaderboard,
+  isLeaderboardPlayerOnline,
 } from '../src/firebase/leaderboard';
 import { PLAYER_TRIGGERABLE_EVENTS, summonGlobalLiveEvent } from '../src/firebase/liveEvents';
 
@@ -479,22 +480,22 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
 
     const nextSeason = performSeasonalRollover(prevSeason, 'season_3', false);
     expect(nextSeason.currentSeasonId).toBe('season_3');
-    // Carryover: Skins, Glasses, and Gems
+    // Carryover: Skins, Glasses, Gems, and Matthew Shop Token
     expect(nextSeason.unlockedSkins).toEqual(['classic_matthew', 'king_matthew']);
     expect(nextSeason.equippedSkin).toBe('king_matthew');
     expect(nextSeason.ownedCosmetics).toEqual(['glasses_shades']);
     expect(nextSeason.equippedCosmetics).toEqual({ hat: null, glasses: 'glasses_shades' });
     expect(nextSeason.gems).toBe(250);
+    expect(nextSeason.hasMatthewShopToken).toBe(true);
+    expect(nextSeason.matthewShopTokens).toBe(2);
 
-    // Seasonal reset: coins, upgrades, pets, eggs, tokens, hits
+    // Seasonal reset: coins, upgrades, pets, eggs, hits
     expect(nextSeason.coins).toBe(0);
     expect(nextSeason.upgrades).toEqual({});
     expect(nextSeason.pets).toEqual([]);
     expect(nextSeason.equippedPetIds).toEqual([]);
     expect(nextSeason.sealedEggs['Common Egg']).toBe(0);
     expect(nextSeason.sealedEggs['Mythic Egg']).toBe(0);
-    expect(nextSeason.hasMatthewShopToken).toBe(false);
-    expect(nextSeason.matthewShopTokens).toBe(0);
     expect(nextSeason.zombieHitsTaken).toBe(0);
   });
 
@@ -1013,5 +1014,69 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     const maxBuy = getMaxAffordableUpgrade(25, 1.2, 0, 1e310);
     expect(Number.isFinite(maxBuy.totalCost)).toBe(true);
     expect(maxBuy.totalCost).toBeLessThanOrEqual(9.99e305);
+  });
+
+  it('keeps Matthew Shop Token permanent across seasons, unlocks all shop/crate skins & cursors for free, and tracks online leaderboard presence', () => {
+    const tokenHolderS2 = {
+      ...getDefaultGameState(),
+      currentSeasonId: 'season_2',
+      hasMatthewShopToken: true,
+      matthewShopTokens: 1,
+      chestsOpened: 19,
+      highestCps: 14.6,
+    };
+
+    const validatedS2 = sanitizeAndValidateGameState(tokenHolderS2);
+    expect(validatedS2.hasMatthewShopToken).toBe(true);
+    expect(validatedS2.matthewShopTokens).toBeGreaterThanOrEqual(1);
+    expect(validatedS2.unlockedCursors?.length).toBe(11);
+    for (const shopSkin of ITEM_SHOP_SKINS) {
+      expect(validatedS2.unlockedSkins).toContain(shopSkin.id);
+    }
+    for (const crateSkin of CRATE_DEFINITIONS.normal.skins) {
+      expect(validatedS2.unlockedSkins).toContain(crateSkin.skinId);
+    }
+    for (const crateSkin of CRATE_DEFINITIONS.frost.skins) {
+      expect(validatedS2.unlockedSkins).toContain(crateSkin.skinId);
+    }
+
+    const rolledToS3 = performSeasonalRollover(validatedS2, 'season_3');
+    expect(rolledToS3.hasMatthewShopToken).toBe(true);
+    expect(rolledToS3.matthewShopTokens).toBeGreaterThanOrEqual(1);
+    expect(rolledToS3.chestsOpened).toBe(19);
+    expect(rolledToS3.highestCps).toBe(14.6);
+
+    const cloudRollover = reconcileCloudAndLocalState({
+      uid: 'u_token_holder',
+      username: 'token_player',
+      localState: {
+        ...validatedS2,
+        lastOwnerUid: 'u_token_holder',
+      },
+      rtdbUser: {
+        uid: 'u_token_holder',
+        hasMatthewShopToken: true,
+        matthewShopTokens: 1,
+        chestsOpened: 19,
+      },
+      rtdbLb: null,
+      wasExplicitlyReset: false,
+      resetAtMs: 0,
+      activeSeasonId: 'season_3',
+    });
+    expect(cloudRollover.state.hasMatthewShopToken).toBe(true);
+    expect(cloudRollover.state.matthewShopTokens).toBeGreaterThanOrEqual(1);
+    expect(cloudRollover.state.chestsOpened).toBe(19);
+
+    const nowMs = Date.UTC(2026, 10, 16, 18, 0, 0);
+    expect(
+      isLeaderboardPlayerOnline({ uid: 'u1', updatedAtMs: nowMs - 30_000 }, 'u2', nowMs)
+    ).toBe(true);
+    expect(
+      isLeaderboardPlayerOnline({ uid: 'u1', updatedAtMs: nowMs - 180_000 }, 'u2', nowMs)
+    ).toBe(false);
+    expect(
+      isLeaderboardPlayerOnline({ uid: 'u1', updatedAtMs: nowMs - 180_000 }, 'u1', nowMs)
+    ).toBe(true);
   });
 });

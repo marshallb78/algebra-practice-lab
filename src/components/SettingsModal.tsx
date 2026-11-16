@@ -292,6 +292,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {formatTime(state.totalPlaytimeSeconds)}
               </p>
             </div>
+
+            <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+              <span className="text-[10px] uppercase font-bold text-slate-400">Chests Opened</span>
+              <p className="text-base font-extrabold text-amber-300 mt-0.5">
+                {formatNumber(state.chestsOpened || 0)}
+              </p>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+              <span className="text-[10px] uppercase font-bold text-slate-400">Highest CPS</span>
+              <p className="text-base font-extrabold text-emerald-400 mt-0.5">
+                {(state.highestCps || 0).toFixed(1)}/s
+              </p>
+            </div>
           </div>
         </div>
 

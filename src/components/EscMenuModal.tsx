@@ -37,6 +37,8 @@ import {
   Infinity as InfinityIcon,
   Clock,
   MousePointerClick,
+  Gift,
+  Gauge,
 } from 'lucide-react';
 
 interface EscMenuModalProps {
@@ -314,8 +316,8 @@ export const EscMenuModal: React.FC<EscMenuModalProps> = ({
                 <h3 className="text-xl font-black text-white mt-1">{equippedSkin.name}</h3>
               </div>
 
-              {/* 6 VISUAL STAT TILES */}
-              <div className="lg:col-span-8 grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {/* 8 VISUAL STAT TILES */}
+              <div className="lg:col-span-8 grid grid-cols-2 sm:grid-cols-4 gap-3.5">
                 <div className="p-5 rounded-3xl bg-slate-900/90 border-2 border-amber-400/40 flex flex-col items-center justify-center text-center shadow-xl">
                   <div className="w-11 h-11 rounded-2xl bg-amber-400/20 border border-amber-400/50 flex items-center justify-center text-amber-300 font-black text-lg mb-2">
                     M
@@ -373,6 +375,26 @@ export const EscMenuModal: React.FC<EscMenuModalProps> = ({
                   <span className="text-[10px] font-black uppercase text-slate-400">Playtime</span>
                   <p className="text-xl sm:text-2xl font-black text-sky-300 mt-0.5">
                     {formatTime(state.totalPlaytimeSeconds)}
+                  </p>
+                </div>
+
+                <div className="p-5 rounded-3xl bg-slate-900/90 border-2 border-amber-300/40 flex flex-col items-center justify-center text-center shadow-xl">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-400/20 border border-amber-300/50 flex items-center justify-center text-amber-300 mb-2">
+                    <Gift className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase text-slate-400">Chests Opened</span>
+                  <p className="text-xl sm:text-2xl font-black text-amber-300 mt-0.5">
+                    {formatNumber(state.chestsOpened || 0)}
+                  </p>
+                </div>
+
+                <div className="p-5 rounded-3xl bg-slate-900/90 border-2 border-emerald-300/40 flex flex-col items-center justify-center text-center shadow-xl">
+                  <div className="w-11 h-11 rounded-2xl bg-emerald-400/20 border border-emerald-300/50 flex items-center justify-center text-emerald-300 mb-2">
+                    <Gauge className="w-6 h-6" />
+                  </div>
+                  <span className="text-[10px] font-black uppercase text-slate-400">Highest CPS</span>
+                  <p className="text-xl sm:text-2xl font-black text-emerald-300 mt-0.5">
+                    {(state.highestCps || 0).toFixed(1)}/s
                   </p>
                 </div>
               </div>

@@ -6,6 +6,7 @@ import {
   updateLeaderboardEntry,
   sortLeaderboardDeterministically,
   isExcludedFromLeaderboard,
+  isLeaderboardPlayerOnline,
   LeaderboardEntry,
 } from '../firebase/leaderboard';
 import {
@@ -66,15 +67,23 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   const canViewLiveSeason2 = isSeason2Launched || isSandbox;
   const effectiveTargetSeasonId = viewedSeasonId;
   const isViewingMyCurrentSeason = effectiveTargetSeasonId === seasonId;
+  const onlineCount = entries.filter((e) =>
+    isLeaderboardPlayerOnline(e, state.cloudAccount?.uid)
+  ).length;
 
-  const loadLeaderboard = async (targetSeason: string = effectiveTargetSeasonId) => {
+  const loadLeaderboard = async (
+    targetSeason: string = effectiveTargetSeasonId,
+    silent = false
+  ) => {
     if (targetSeason === 'season_2' && !canViewLiveSeason2) {
       setEntries([]);
       setPlayerEntry(null);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const targetSandboxFlag = targetSeason === 'season_2' && isSandbox && !isSeason2Launched;
       if (state.cloudAccount && targetSeason === seasonId) {
@@ -162,6 +171,16 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
       loadLeaderboard(viewedSeasonId);
     }
   }, [viewedSeasonId]);
+
+  // Refresh leaderboard quietly every 20s while open so Online status bubbles stay current
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      loadLeaderboard(viewedSeasonId, true);
+    }, 20000);
+    return () => clearInterval(id);
+  }, [isOpen, viewedSeasonId, seasonId]);
 
   if (!isOpen) return null;
 
@@ -257,9 +276,15 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 </span>
               )}
               {entries.length > 0 && (
-                <span className="px-2.5 py-0.5 rounded-full bg-sky-400/15 border border-sky-300/40 text-[11px] font-black text-sky-200">
-                  {entries.length} Players Ranked
-                </span>
+                <>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/60 text-[11px] font-black text-emerald-200 flex items-center gap-1.5 shadow-[0_0_12px_rgba(16,185,129,0.28)]">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]" />
+                    <span>{onlineCount} Online</span>
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full bg-sky-400/15 border border-sky-300/40 text-[11px] font-black text-sky-200">
+                    {entries.length} Players Ranked
+                  </span>
+                </>
               )}
             </div>
           </div>
@@ -301,12 +326,28 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
               </button>
 
               {/* HERO FROST PROFILE BANNER + REPORT SUSPICIOUS ACTIVITY */}
+              {(() => {
+                const selectedOnline = isLeaderboardPlayerOnline(
+                  selectedPlayer.entry,
+                  state.cloudAccount?.uid
+                );
+                return (
               <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-sky-950/90 via-cyan-950/70 to-slate-900/90 backdrop-blur-md border-2 border-cyan-300/60 flex flex-col sm:flex-row sm:items-center gap-4 shadow-[0_12px_40px_rgba(34,211,238,0.2)]">
-                <img
-                  src={getSkinById(selectedPlayer.entry.equippedSkin).image}
-                  alt={selectedPlayer.entry.username}
-                  className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-slate-950/90 p-2 border-2 border-cyan-300 object-contain shrink-0 shadow-[0_0_20px_rgba(56,189,248,0.35)]"
-                />
+                <div className="relative shrink-0 self-start sm:self-auto">
+                  <img
+                    src={getSkinById(selectedPlayer.entry.equippedSkin).image}
+                    alt={selectedPlayer.entry.username}
+                    className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-slate-950/90 p-2 border-2 border-cyan-300 object-contain shadow-[0_0_20px_rgba(56,189,248,0.35)]"
+                  />
+                  <span
+                    title={selectedOnline ? 'Online Now' : 'Offline'}
+                    className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-slate-950 ${
+                      selectedOnline
+                        ? 'bg-emerald-400 shadow-[0_0_10px_#34d399]'
+                        : 'bg-slate-600'
+                    }`}
+                  />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <span className="px-3 py-1 rounded-xl bg-gradient-to-r from-cyan-300 to-sky-400 text-slate-950 font-black text-sm shadow">
@@ -315,6 +356,20 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                     <h3 className="text-2xl sm:text-3xl font-black text-white truncate">
                       {selectedPlayer.entry.username}
                     </h3>
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase flex items-center gap-1.5 border ${
+                        selectedOnline
+                          ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-200'
+                          : 'bg-slate-800/80 border-slate-600 text-slate-400'
+                      }`}
+                    >
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          selectedOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                        }`}
+                      />
+                      <span>{selectedOnline ? 'Online' : 'Offline'}</span>
+                    </span>
                   </div>
                   <p className="text-sm text-cyan-200 font-black mt-1">
                     {getSkinById(selectedPlayer.entry.equippedSkin).name}
@@ -347,6 +402,8 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                     </div>
                   )}
               </div>
+                );
+              })()}
 
               {/* 7 STAT CARDS INCLUDING HIGHEST CPS, PLAYTIME & CHESTS OPENED */}
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
@@ -503,6 +560,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                     const rank = idx + 1;
                     const isMe = state.cloudAccount?.uid === entry.uid;
                     const equipped = getSkinById(entry.equippedSkin);
+                    const isOnline = isLeaderboardPlayerOnline(entry, state.cloudAccount?.uid);
 
                     return (
                       <div
@@ -530,16 +588,32 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                           >
                             #{rank}
                           </div>
-                          <img
-                            src={equipped.image}
-                            alt={equipped.name}
-                            className="w-12 h-12 rounded-2xl bg-slate-950/90 p-1 border border-cyan-300/40 object-contain"
-                          />
+                          <div className="relative shrink-0">
+                            <img
+                              src={equipped.image}
+                              alt={equipped.name}
+                              className="w-12 h-12 rounded-2xl bg-slate-950/90 p-1 border border-cyan-300/40 object-contain"
+                            />
+                            <span
+                              title={isOnline ? 'Online Now' : 'Offline'}
+                              className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-950 ${
+                                isOnline
+                                  ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]'
+                                  : 'bg-slate-600'
+                              }`}
+                            />
+                          </div>
                           <div>
                             <div className="flex items-center flex-wrap gap-2">
                               <span className="font-black text-base text-white">
                                 {entry.username}
                               </span>
+                              {isOnline && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 font-black flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  <span>Online</span>
+                                </span>
+                              )}
                               {rank === 1 && <Crown className="w-4 h-4 text-cyan-300" />}
                               {(entry.winnerBadges || []).map((badge) => (
                                 <span

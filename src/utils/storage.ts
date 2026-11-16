@@ -9,7 +9,8 @@ import {
   normalizePetSpeciesId,
 } from '../data/petsAndEggs';
 import { COSMETIC_ITEMS } from '../data/cosmetics';
-import { MATTHEW_VAULT_SKINS } from '../data/season2Skins';
+import { ITEM_SHOP_SKINS, MATTHEW_VAULT_SKINS } from '../data/season2Skins';
+import { CRATE_DEFINITIONS } from '../data/crates';
 import { ALL_CURSORS, STARTER_CURSOR_ID, isValidCursorId, resolveCursorId } from '../data/cursors';
 import { getActiveSeason, getAuthoritativeDateString } from './scheduleEngine';
 import {
@@ -24,6 +25,20 @@ const SAVE_KEY = 'matthew_clicker_save_v1';
 
 const VALID_REALMS: RealmId[] = ['earth', 'under', 'ocean', 'space', 'uper'];
 const VALID_COSMETIC_IDS = new Set(COSMETIC_ITEMS.map((c) => c.id));
+
+/**
+ * Returns all Item Shop, Vault, and Crate skins unlocked permanently for Matthew Shop Token holders.
+ */
+export function getPermanentTokenFreeSkinIds(preLaunchLive = false): string[] {
+  return Array.from(
+    new Set([
+      ...ITEM_SHOP_SKINS.map((s) => s.id),
+      ...MATTHEW_VAULT_SKINS.map((s) => s.id),
+      ...CRATE_DEFINITIONS.normal.skins.map((s) => s.skinId),
+      ...CRATE_DEFINITIONS.frost.skins.map((s) => s.skinId),
+    ])
+  ).filter((id) => isValidSkinId(id) && (!preLaunchLive || !isSeason2OnlySkinId(id)));
+}
 
 export function getDefaultGameState(): GameState {
   const activeSeason = getActiveSeason();
@@ -191,7 +206,7 @@ export function performSeasonalRollover(
     activePlaySecondsAccumulated: 0,
     stormActiveSecondsAccumulated: 0,
 
-    // Season 2: Skins & Cosmetics persist across seasons; seasonal pets/eggs/tokens reset cleanly
+    // Season 2: Skins, Cosmetics, and Matthew Shop Token (+ unlocked cursors) persist forever across seasons
     ownedCosmetics: (state.ownedCosmetics || []).filter((id) => VALID_COSMETIC_IDS.has(id)),
     equippedCosmetics: {
       hat: null,
@@ -205,12 +220,19 @@ export function performSeasonalRollover(
     equippedPetIds: [],
     sealedEggs: createEmptySealedEggs(),
     foodInventory: createDefaultFoodInventory(),
-    hasMatthewShopToken: false,
-    matthewShopTokens: 0,
+    ...(() => {
+      const keepShopToken = Boolean(
+        state.hasMatthewShopToken || (state.matthewShopTokens || 0) > 0
+      );
+      return {
+        hasMatthewShopToken: keepShopToken,
+        matthewShopTokens: keepShopToken ? Math.max(1, state.matthewShopTokens || 1) : 0,
+      };
+    })(),
     unlockedCursors: (state.unlockedCursors || []).filter((id) => isValidCursorId(id)),
     equippedCursorId: isValidCursorId(state.equippedCursorId) ? state.equippedCursorId : null,
     cratesOpened: state.cratesOpened || 0,
-    chestsOpened: 0,
+    chestsOpened: state.chestsOpened || 0,
     zombiesDefeated: 0,
     zombiesStolenCoins: 0,
     zombieHitsTaken: 0,
@@ -439,18 +461,23 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
   const normalizeSkinId = (id: string) =>
     id === 'og_mathjew' || id === 'updated_mathjew' ? 'mathjew' : id;
 
-  let validUnlockedSkins: string[] = ['classic_matthew'];
-  if (Array.isArray(parsed.unlockedSkins)) {
-    const preLaunchLive =
-      Date.now() < SEASON_2_CONFIG.launchTimeMs &&
-      !parsed.sandboxS2Enabled &&
-      (!parsed.currentSeasonId || parsed.currentSeasonId === 'season_1');
-    const legitimate = parsed.unlockedSkins
-      .filter((id: unknown): id is string => typeof id === 'string')
-      .map(normalizeSkinId)
-      .filter((id: string) => isValidSkinId(id) && (!preLaunchLive || !isSeason2OnlySkinId(id)));
-    validUnlockedSkins = Array.from(new Set(['classic_matthew', ...legitimate]));
-  }
+  const hasPermanentToken =
+    Boolean(parsed.hasMatthewShopToken) ||
+    (typeof parsed.matthewShopTokens === 'number' && parsed.matthewShopTokens > 0);
+  const preLaunchLive =
+    Date.now() < SEASON_2_CONFIG.launchTimeMs &&
+    !parsed.sandboxS2Enabled &&
+    (!parsed.currentSeasonId || parsed.currentSeasonId === 'season_1');
+  const legitimateUnlocked = Array.isArray(parsed.unlockedSkins)
+    ? parsed.unlockedSkins
+        .filter((id: unknown): id is string => typeof id === 'string')
+        .map(normalizeSkinId)
+        .filter((id: string) => isValidSkinId(id) && (!preLaunchLive || !isSeason2OnlySkinId(id)))
+    : [];
+  const tokenFreeSkinIds = hasPermanentToken ? getPermanentTokenFreeSkinIds(preLaunchLive) : [];
+  const validUnlockedSkins = Array.from(
+    new Set(['classic_matthew', ...legitimateUnlocked, ...tokenFreeSkinIds])
+  );
 
   // 3. Validate equipped skin against legitimate unlocked collection.
   // NEVER grant a skin solely because an old save claims it was equipped.
@@ -558,7 +585,9 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
       }
       return base;
     })(),
-    ownedCosmetics: Array.isArray(parsed.ownedCosmetics)
+    ownedCosmetics: hasPermanentToken
+      ? COSMETIC_ITEMS.map((c) => c.id)
+      : Array.isArray(parsed.ownedCosmetics)
       ? parsed.ownedCosmetics.filter((id: unknown): id is string => typeof id === 'string' && VALID_COSMETIC_IDS.has(id))
       : [],
     equippedCosmetics: {
@@ -566,8 +595,9 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
       glasses:
         parsed.equippedCosmetics?.glasses &&
         VALID_COSMETIC_IDS.has(parsed.equippedCosmetics.glasses) &&
-        Array.isArray(parsed.ownedCosmetics) &&
-        parsed.ownedCosmetics.includes(parsed.equippedCosmetics.glasses)
+        (hasPermanentToken ||
+          (Array.isArray(parsed.ownedCosmetics) &&
+            parsed.ownedCosmetics.includes(parsed.equippedCosmetics.glasses)))
           ? parsed.equippedCosmetics.glasses
           : null,
     },
