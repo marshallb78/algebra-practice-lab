@@ -7,8 +7,8 @@ import { isSeasonTwoOrLater } from '../data/skins';
 import { getCursorById } from '../data/cursors';
 import { GameState } from '../types/game';
 
-/** Maximum safe finite coin/score cap per season (1 UVg = 10^66, cleanly above 2.5 Vg max tier). */
-export const MAX_SAFE_SEASON_COINS = 1e66;
+/** Maximum safe finite coin/score cap per season (999 Ctg = 9.99e305, cleanly below Number.MAX_VALUE). */
+export const MAX_SAFE_SEASON_COINS = 9.99e305;
 
 export function clampFiniteCoinAmount(val: number, maxVal = MAX_SAFE_SEASON_COINS): number {
   if (typeof val !== 'number' || !Number.isFinite(val) || val <= 0) return 0;
@@ -39,7 +39,7 @@ export function getCombinedLiveMultiplier(options?: LiveMultiplierOptions): {
 
 export function getUpgradeCost(baseCost: number, multiplier: number, currentLevel: number): number {
   const raw = Math.floor(baseCost * Math.pow(multiplier, Math.max(0, Math.floor(currentLevel || 0))));
-  if (!Number.isFinite(raw) || raw < 0) return Number.MAX_SAFE_INTEGER;
+  if (!Number.isFinite(raw) || raw < 0) return Infinity;
   return raw;
 }
 
@@ -55,6 +55,9 @@ export function getBulkUpgradeCost(
   }
 
   const a = getUpgradeCost(baseCost, multiplier, currentLevel);
+  if (!Number.isFinite(a)) {
+    return { totalCost: Infinity, actualCount: safeCount };
+  }
   const r = multiplier;
   const powR = Math.pow(r, safeCount);
   const totalCost = Math.floor((a * (powR - 1)) / (r - 1));
@@ -76,8 +79,10 @@ export function getMaxAffordableUpgrade(
 
   const a = nextCost;
   const r = multiplier;
-  const term = (safeCoins * (r - 1)) / a + 1;
-  let count = Math.max(1, Math.min(5000, Math.floor(Math.log(term) / Math.log(r))));
+  const term = (safeCoins / a) * (r - 1) + 1;
+  let count = Number.isFinite(term)
+    ? Math.max(1, Math.min(5000, Math.floor(Math.log(term) / Math.log(r))))
+    : 5000;
   if (!Number.isFinite(count) || count < 1) count = 1;
   let { totalCost } = getBulkUpgradeCost(baseCost, multiplier, currentLevel, count);
   while (count > 1 && (!Number.isFinite(totalCost) || totalCost > safeCoins)) {

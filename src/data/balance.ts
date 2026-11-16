@@ -44,7 +44,7 @@ export const BALANCE = {
 
   // --- PRESTIGE (COSMIC ASCENSION) ---
   prestige: {
-    baseShardRequirement: 250000, // 250K lifetime coins for 1st Rebirth
-    unspentShardBonus: 0.04, // +0.04x per Rebirth step
+    baseShardRequirement: 100000, // 100K lifetime coins for 1st Rebirth
+    unspentShardBonus: 0.035, // +0.035x per Rebirth step
   },
 } as const;

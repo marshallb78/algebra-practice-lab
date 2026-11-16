@@ -1,12 +1,15 @@
 /**
- * MATTHEW CLICKER — STATISTICAL ANTI-AUTOCLICKER GUARD (v2.0)
+ * MATTHEW CLICKER — STATISTICAL ANTI-AUTOCLICKER GUARD (v3.0)
  *
- * Designed from behavioral click-cadence research so:
- *  - Fast legitimate humans (butterfly, jitter, drag-burst up to ~18 CPS with human variance) NEVER trigger false positives.
- *  - Synthetic scripts / hardware macros / automated DOM `.click()` dispatchers (`event.isTrusted === false`,
- *    robotic constant intervals `CV < 0.045`, near-zero Shannon Entropy `H < 0.9`, or superhuman sustained `> 22 CPS`)
- *    are rejected cleanly and logged for moderator inspection.
+ * Tuned for 60Hz Chromebook/trackpad timing so fast natural clicking (< 25 CPS with natural jitter)
+ * never triggers false positives, while rejecting:
+ *  - Non-user synthetic events (`event.isTrusted === false`)
+ *  - Superhuman bursts at or above the 25 CPS cutoff (`cps >= AUTOCLICKER_CPS_CUTOFF`)
+ *  - Robotic hardware/software macro loops (`CV < 0.042 && stdDev < 2.2` or near-identical repeating intervals)
  */
+
+export const AUTOCLICKER_CPS_CUTOFF = 25;
+export const AUTOBAN_CPS_CUTOFF = 50;
 
 export interface ClickValidationInput {
   timestampMs: number;
@@ -17,6 +20,7 @@ export interface ClickValidationResult {
   accepted: boolean;
   reason?: 'untrusted_event' | 'robotic_cadence' | 'low_entropy' | 'superhuman_rate';
   shouldFlagProbation?: boolean;
+  shouldAutoBan?: boolean;
   cps: number;
   cv: number;
   entropy: number;
@@ -26,10 +30,11 @@ export interface ClickValidationResult {
 export class AntiAutoclickerGuard {
   private timestamps: number[] = [];
   private consecutiveBotFlags = 0;
+  private consecutiveCpsViolations = 0;
   private throttledUntilMs = 0;
   private probationRaised = false;
   private readonly maxWindowMs = 2000;
-  private readonly maxSamples = 48;
+  private readonly maxSamples = 60;
 
   public evaluateClick(input: ClickValidationInput): ClickValidationResult {
     const { timestampMs, isTrusted } = input;
@@ -50,19 +55,7 @@ export class AntiAutoclickerGuard {
       };
     }
 
-    // If temporarily rate-throttled from blatant robotic bursts, wait cooldown
-    if (timestampMs < this.throttledUntilMs) {
-      return {
-        accepted: false,
-        reason: 'robotic_cadence',
-        cps: this.getInstantCps(timestampMs),
-        cv: 0,
-        entropy: 0,
-        anomalyScore: 1,
-      };
-    }
-
-    // Push & prune sliding window
+    // Record every trusted click timestamp BEFORE early exits so instant CPS reflects raw true speed (25..100+ CPS)
     this.timestamps.push(timestampMs);
     if (this.timestamps.length > this.maxSamples) {
       this.timestamps.shift();
@@ -73,13 +66,43 @@ export class AntiAutoclickerGuard {
 
     const cps = this.getInstantCps(timestampMs);
 
-    // 2. Superhuman sustained speed hard guard (> 23 CPS inside recent 1s window)
-    if (cps > 23) {
+    // 2. Immediate auto-ban flag threshold at >= 50 CPS
+    if (cps >= AUTOBAN_CPS_CUTOFF) {
       this.consecutiveBotFlags += 1;
-      if (this.consecutiveBotFlags >= 6) {
-        this.throttledUntilMs = timestampMs + 1500;
-      }
-      const shouldFlagProbation = !this.probationRaised && this.consecutiveBotFlags >= 4;
+      this.throttledUntilMs = timestampMs + 5000;
+      const shouldFlagProbation = !this.probationRaised;
+      this.probationRaised = true;
+      return {
+        accepted: false,
+        reason: 'superhuman_rate',
+        shouldFlagProbation,
+        shouldAutoBan: true,
+        cps,
+        cv: 0,
+        entropy: 0,
+        anomalyScore: 1,
+      };
+    }
+
+    // If temporarily rate-throttled from blatant robotic bursts, wait cooldown
+    if (timestampMs < this.throttledUntilMs) {
+      return {
+        accepted: false,
+        reason: 'robotic_cadence',
+        cps,
+        cv: 0,
+        entropy: 0,
+        anomalyScore: 1,
+      };
+    }
+
+    // 3. Superhuman speed cutoff (>= 25 CPS inside 1s window)
+    if (cps >= AUTOCLICKER_CPS_CUTOFF) {
+      this.consecutiveCpsViolations += 1;
+      this.consecutiveBotFlags += 1;
+      this.throttledUntilMs = timestampMs + 1500;
+      const shouldFlagProbation =
+        !this.probationRaised && (this.consecutiveCpsViolations >= 2 || cps >= 28);
       if (shouldFlagProbation) this.probationRaised = true;
       return {
         accepted: false,
@@ -91,9 +114,10 @@ export class AntiAutoclickerGuard {
         anomalyScore: 0.95,
       };
     }
+    this.consecutiveCpsViolations = 0;
 
-    // Not enough intervals yet for cadence statistics (< 14 clicks in window)
-    if (this.timestamps.length < 14) {
+    // Require >= 20 samples and >= 12 CPS before cadence variance checks (avoids 60Hz Chromebook false positives)
+    if (this.timestamps.length < 20 || cps < 12) {
       this.consecutiveBotFlags = Math.max(0, this.consecutiveBotFlags - 1);
       return {
         accepted: true,
@@ -106,7 +130,7 @@ export class AntiAutoclickerGuard {
 
     const intervals: number[] = [];
     for (let i = 1; i < this.timestamps.length; i++) {
-      const dt = Math.max(1, this.timestamps[i] - this.timestamps[i - 1]);
+      const dt = Math.max(0.5, this.timestamps[i] - this.timestamps[i - 1]);
       intervals.push(dt);
     }
 
@@ -116,43 +140,37 @@ export class AntiAutoclickerGuard {
     const stdDev = Math.sqrt(variance);
     const cv = mean > 0 ? stdDev / mean : 1;
 
-    // Binned Shannon entropy (5ms bins) of inter-click intervals
-    const binCounts = new Map<number, number>();
-    for (const dt of intervals) {
-      const bin = Math.floor(dt / 5);
-      binCounts.set(bin, (binCounts.get(bin) || 0) + 1);
+    // Count nearly identical adjacent intervals (|dt[i] - dt[i-1]| <= 1.5ms), typical of timer loops
+    let nearIdenticalPairs = 0;
+    for (let i = 1; i < intervals.length; i++) {
+      if (Math.abs(intervals[i] - intervals[i - 1]) <= 1.5) {
+        nearIdenticalPairs++;
+      }
     }
-    let entropy = 0;
-    const total = intervals.length;
-    for (const count of binCounts.values()) {
-      const p = count / total;
-      entropy -= p * Math.log2(p);
-    }
+    const nearIdenticalRatio =
+      intervals.length > 1 ? nearIdenticalPairs / (intervals.length - 1) : 0;
 
-    // Only flag fast clicks (>= 9 CPS) that ALSO exhibit razor-sharp machine regularity
-    // Legitimate butterfly/jitter human clicks have CV typically 0.12 - 0.55 and entropy >= 1.4
-    const isMachinicCadence = cps >= 9 && cv < 0.042;
-    const isZeroEntropyLoop = cps >= 10 && entropy < 0.72 && cv < 0.08;
+    const isMachinicCadence = cv < 0.042 && stdDev < 2.2;
+    const isLoopPattern = nearIdenticalRatio >= 0.85 && cv < 0.065;
 
     let anomalyScore = 0;
-    if (isMachinicCadence) anomalyScore += 0.65;
-    if (isZeroEntropyLoop) anomalyScore += 0.35;
+    if (isMachinicCadence) anomalyScore += 0.7;
+    if (isLoopPattern) anomalyScore += 0.65;
 
     if (anomalyScore >= 0.65) {
       this.consecutiveBotFlags += 1;
-      if (this.consecutiveBotFlags >= 8) {
-        // Gentle 1.5s macro throttle so scripts stall without false-banning accounts automatically
+      if (this.consecutiveBotFlags >= 4) {
         this.throttledUntilMs = timestampMs + 1500;
       }
       const shouldFlagProbation = !this.probationRaised && this.consecutiveBotFlags >= 4;
       if (shouldFlagProbation) this.probationRaised = true;
       return {
         accepted: false,
-        reason: isZeroEntropyLoop ? 'low_entropy' : 'robotic_cadence',
+        reason: isLoopPattern && !isMachinicCadence ? 'low_entropy' : 'robotic_cadence',
         shouldFlagProbation,
         cps,
         cv,
-        entropy,
+        entropy: nearIdenticalRatio,
         anomalyScore,
       };
     }
@@ -162,7 +180,7 @@ export class AntiAutoclickerGuard {
       accepted: true,
       cps,
       cv,
-      entropy,
+      entropy: nearIdenticalRatio,
       anomalyScore,
     };
   }
@@ -180,6 +198,7 @@ export class AntiAutoclickerGuard {
   public reset(): void {
     this.timestamps = [];
     this.consecutiveBotFlags = 0;
+    this.consecutiveCpsViolations = 0;
     this.throttledUntilMs = 0;
     this.probationRaised = false;
   }

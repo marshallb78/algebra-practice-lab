@@ -577,11 +577,12 @@ export async function claimSingleDeviceSession(
   uid: string,
   isSandbox: boolean = false
 ): Promise<string> {
-  const token = `${TAB_SESSION_ID}_${Date.now()}`;
+  const token = TAB_SESSION_ID;
   const path = scopeRtdbPath(`users/${uid}`, isSandbox);
   await rtdbRestWrite(
     path,
     {
+      activeSessionId: token,
       activeSessionToken: token,
       activeSessionClaimedAtMs: Date.now(),
     },
@@ -593,7 +594,7 @@ export async function claimSingleDeviceSession(
 
 /**
  * Verifies whether the current browser tab still holds the exclusive single-device session lock.
- * Returns `{ valid: true }` unless RTDB explicitly reports a DIFFERENT activeSessionToken.
+ * Returns `{ valid: true }` unless RTDB explicitly reports a DIFFERENT activeSessionId / activeSessionToken.
  */
 export async function verifySingleDeviceSession(
   uid: string,
@@ -602,10 +603,22 @@ export async function verifySingleDeviceSession(
 ): Promise<{ valid: boolean; remoteToken?: string }> {
   if (!uid || !expectedToken) return { valid: true };
   try {
-    const path = scopeRtdbPath(`users/${uid}/activeSessionToken`, isSandbox);
-    const remoteToken = await rtdbRestGet<string>(path, 3000);
-    if (typeof remoteToken === 'string' && remoteToken.length > 0 && remoteToken !== expectedToken) {
-      return { valid: false, remoteToken };
+    const [remoteId, remoteToken] = await Promise.all([
+      rtdbRestGet<string>(scopeRtdbPath(`users/${uid}/activeSessionId`, isSandbox), 3000),
+      rtdbRestGet<string>(scopeRtdbPath(`users/${uid}/activeSessionToken`, isSandbox), 3000),
+    ]);
+    const authoritativeRemote =
+      typeof remoteToken === 'string' && remoteToken.length > 0
+        ? remoteToken
+        : typeof remoteId === 'string' && remoteId.length > 0
+        ? remoteId
+        : '';
+    if (
+      authoritativeRemote.length > 0 &&
+      authoritativeRemote !== expectedToken &&
+      authoritativeRemote !== TAB_SESSION_ID
+    ) {
+      return { valid: false, remoteToken: authoritativeRemote };
     }
   } catch {
     // Transient offline/network hiccup does not false-kick a legitimate user

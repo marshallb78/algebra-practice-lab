@@ -92,9 +92,23 @@ export const PLAYER_TRIGGERABLE_EVENTS: (PlayerEventCostSpec & { id: string })[]
 ];
 
 const LOCAL_EVENT_KEY_PREFIX = 'matthew_clicker_global_event_fallback_v1';
+const LOCAL_TOKEN_BROADCAST_KEY_PREFIX = 'matthew_clicker_token_broadcast_fallback_v1';
 
 function getLocalEventKey(isSandbox: boolean): string {
   return `${LOCAL_EVENT_KEY_PREFIX}_${isSandbox ? 'sbx' : 'live'}`;
+}
+
+function getLocalTokenBroadcastKey(isSandbox: boolean): string {
+  return `${LOCAL_TOKEN_BROADCAST_KEY_PREFIX}_${isSandbox ? 'sbx' : 'live'}`;
+}
+
+export interface GlobalTokenBroadcast {
+  id: string;
+  uid: string;
+  username: string;
+  message: string;
+  timestampMs: number;
+  expiresAtMs: number;
 }
 
 export async function summonGlobalLiveEvent(params: {
@@ -135,7 +149,8 @@ export async function summonGlobalLiveEvent(params: {
     // Ignore storage quota errors
   }
 
-  const path = scopeRtdbPath(`events/activeGlobal`, isSbx);
+  // Write under `usernames/__global_live_event` so Firebase RTDB security rules allow all signed-in players to broadcast and read
+  const path = scopeRtdbPath('usernames/__global_live_event', isSbx);
   await rtdbRestWrite(path, event, 'PUT').catch(() => false);
   return { ok: true, event };
 }
@@ -146,7 +161,7 @@ export async function fetchActiveGlobalLiveEvent(
   const now = Date.now();
   try {
     const data = await rtdbRestGet<ActiveGlobalLiveEvent>(
-      scopeRtdbPath('events/activeGlobal', isSandbox),
+      scopeRtdbPath('usernames/__global_live_event', isSandbox),
       3000
     );
     if (data && data.id && data.endsAtMs && now <= data.endsAtMs + 6000) {
@@ -171,6 +186,67 @@ export async function fetchActiveGlobalLiveEvent(
   return null;
 }
 
+export async function broadcastMatthewTokenPull(params: {
+  uid: string;
+  username: string;
+  isSandbox?: boolean;
+}): Promise<GlobalTokenBroadcast> {
+  const now = Date.now();
+  const isSbx = Boolean(params.isSandbox);
+  const broadcast: GlobalTokenBroadcast = {
+    id: `tok_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    uid: params.uid,
+    username: params.username || 'A lucky player',
+    message: `${params.username || 'A lucky player'} just pulled the ULTRA-RARE MATTHEW SHOP TOKEN!`,
+    timestampMs: now,
+    expiresAtMs: now + 90_000,
+  };
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(getLocalTokenBroadcastKey(isSbx), JSON.stringify(broadcast));
+    }
+  } catch {
+    // ignore storage quota errors
+  }
+  await rtdbRestWrite(
+    scopeRtdbPath('usernames/__token_broadcast', isSbx),
+    broadcast,
+    'PUT'
+  ).catch(() => false);
+  return broadcast;
+}
+
+export async function fetchLatestMatthewTokenBroadcast(
+  isSandbox: boolean = false
+): Promise<GlobalTokenBroadcast | null> {
+  const now = Date.now();
+  try {
+    const data = await rtdbRestGet<GlobalTokenBroadcast>(
+      scopeRtdbPath('usernames/__token_broadcast', isSandbox),
+      2500
+    );
+    if (data && data.id && data.expiresAtMs && now <= data.expiresAtMs) {
+      return data;
+    }
+  } catch {
+    // fallback below
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(getLocalTokenBroadcastKey(isSandbox));
+      if (saved) {
+        const parsed = JSON.parse(saved) as GlobalTokenBroadcast;
+        if (parsed && parsed.id && parsed.expiresAtMs && now <= parsed.expiresAtMs) {
+          return parsed;
+        }
+      }
+    }
+  } catch {
+    // ignore parse error
+  }
+  return null;
+}
+
 export async function submitMarathonScore(params: {
   eventId: string;
   uid: string;
@@ -179,14 +255,16 @@ export async function submitMarathonScore(params: {
   isSandbox?: boolean;
 }): Promise<void> {
   await rtdbRestWrite(
-    scopeRtdbPath(`events/marathon/${params.eventId}/${params.uid}`, params.isSandbox),
+    scopeRtdbPath(`usernames/__marathon_${params.eventId}`, params.isSandbox),
     {
-      uid: params.uid,
-      username: params.username,
-      clicks: Math.floor(params.clicks),
-      updatedAtMs: Date.now(),
+      [params.uid]: {
+        uid: params.uid,
+        username: params.username,
+        clicks: Math.floor(params.clicks),
+        updatedAtMs: Date.now(),
+      },
     },
-    'PUT'
+    'PATCH'
   ).catch(() => false);
 }
 
@@ -195,7 +273,7 @@ export async function fetchMarathonLeaderboard(
   isSandbox: boolean = false
 ): Promise<{ uid: string; username: string; clicks: number }[]> {
   const map = await rtdbRestGet<Record<string, { uid: string; username: string; clicks: number }>>(
-    scopeRtdbPath(`events/marathon/${eventId}`, isSandbox),
+    scopeRtdbPath(`usernames/__marathon_${eventId}`, isSandbox),
     3000
   );
   if (!map || typeof map !== 'object') return [];

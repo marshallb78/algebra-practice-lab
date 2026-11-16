@@ -410,8 +410,22 @@ export function getPetHungerEffectiveness(_hunger: number): number {
 export function getPetClickMultiplierBonus(pet: PetInstance): number {
   const spec = getPetSpeciesDefinition(pet.speciesId, pet.rarity);
   const lvl = Math.max(1, pet.level || 1);
-  const levelScale = 1 + (lvl - 1) * 0.55 + Math.max(0, lvl - 5) * 0.25;
+  const levelScale = 1 + (lvl - 1) * 0.35 + Math.max(0, lvl - 5) * 0.12;
   return Number((spec.baseMultiplierBonus * levelScale).toFixed(2));
+}
+
+const PET_BASE_SELL_GEMS_BY_TIER = [3, 5, 7, 10, 14, 18, 25, 32, 55, 95];
+
+export function getEggSellGemValue(rarity: EggRarity): number {
+  const def = getEggDefinition(rarity);
+  return Math.max(2, Math.floor(def.hatchGemCost * 0.6));
+}
+
+export function getPetSellGemValue(pet: PetInstance): number {
+  const spec = getPetSpeciesDefinition(pet.speciesId, pet.rarity);
+  const lvl = Math.max(1, Math.floor(pet.level || 1));
+  const baseGems = PET_BASE_SELL_GEMS_BY_TIER[spec.tierOrder] ?? 4;
+  return baseGems + Math.floor((lvl - 1) * (2.5 + spec.tierOrder * 1.0));
 }
 
 export function getPetCombatDps(pet: PetInstance): number {

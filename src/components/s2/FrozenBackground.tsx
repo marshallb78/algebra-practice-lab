@@ -34,17 +34,17 @@ const THEME_GRADIENTS: Record<SkinBackgroundTheme, string> = {
   infernal: 'radial-gradient(circle at 50% 45%, rgba(239,68,68,0.32), rgba(124,45,18,0.26), rgba(15,8,8,0.76))',
 };
 
-const SNOWFLAKES = Array.from({ length: 42 }, (_, i) => ({
+const SNOWFLAKES = Array.from({ length: 16 }, (_, i) => ({
   id: i,
   left: `${(i * 37) % 100}%`,
-  size: i % 6 === 0 ? 7 : 3 + (i % 4) * 1.5,
-  opacity: i % 6 === 0 ? 0.55 : 0.4 + (i % 4) * 0.16,
-  blur: i % 6 === 0 ? 2 : 0,
-  delay: `${(i % 9) * 0.6}s`,
-  duration: `${3.4 + (i % 6) * 0.95}s`,
+  size: i % 5 === 0 ? 6 : 3 + (i % 3) * 1.5,
+  opacity: i % 5 === 0 ? 0.55 : 0.45 + (i % 4) * 0.14,
+  blur: 0,
+  delay: `${(i % 8) * 0.65}s`,
+  duration: `${3.6 + (i % 5) * 0.9}s`,
 }));
 
-const STARS = Array.from({ length: 34 }, (_, i) => ({
+const STARS = Array.from({ length: 14 }, (_, i) => ({
   id: i,
   left: `${(i * 53 + 7) % 98}%`,
   top: `${(i * 29 + 4) % 48}%`,

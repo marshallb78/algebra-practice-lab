@@ -74,6 +74,7 @@ interface ClickerAreaProps {
   onOpenPetsModal?: () => void;
   isCombatPaused?: boolean;
   onCheatProbationDetected?: (details: { reason: string; cps: number }) => void;
+  onAutoBan50CpsDetected?: (cps: number) => void;
   probationAlertCount?: number;
   isProbationActive?: boolean;
 }
@@ -103,6 +104,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   onOpenPetsModal,
   isCombatPaused = false,
   onCheatProbationDetected,
+  onAutoBan50CpsDetected,
   probationAlertCount = 0,
   isProbationActive = false,
 }) => {
@@ -125,7 +127,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   const highestCpsRef = useRef<number>(state.highestCps || 0);
   highestCpsRef.current = Math.max(highestCpsRef.current, state.highestCps || 0);
 
-  const updateLiveCps = (now: number, recordClick = false): void => {
+  const updateLiveCps = (now: number, recordClick = false): number => {
     const timestamps = clickTimestampsRef.current;
     if (recordClick) {
       timestamps.push(now);
@@ -140,6 +142,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       highestCpsRef.current = cps;
       setState((prev) => (cps > (prev.highestCps || 0) ? { ...prev, highestCps: cps } : prev));
     }
+    return cps;
   };
 
   const characterRef = useRef<HTMLDivElement | null>(null);
@@ -187,11 +190,15 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     };
   }, []);
 
-  // 100ms ticker to keep Live CPS Counter smoothly updated even when clicks stop
+  // 200ms ticker to keep Live CPS Counter smoothly updated while idle-skipping when already at 0
   useEffect(() => {
     const ticker = setInterval(() => {
-      updateLiveCps(performance.now());
-    }, 100);
+      if (clickTimestampsRef.current.length > 0) {
+        updateLiveCps(performance.now());
+      } else {
+        setLiveCps((prev) => (prev !== 0 ? 0 : prev));
+      }
+    }, 200);
     return () => clearInterval(ticker);
   }, []);
 
@@ -228,23 +235,32 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   };
 
   const performMatthewClick = (rawX?: number, rawY?: number, isTrusted: boolean = true) => {
+    const nowPerf = performance.now();
+    const rawCps = updateLiveCps(nowPerf, isTrusted);
+    if (rawCps >= 50 && !isMarshallDev) {
+      onAutoBan50CpsDetected?.(rawCps);
+      return;
+    }
+
     const check = clickGuardRef.current.evaluateClick({
-      timestampMs: performance.now(),
+      timestampMs: nowPerf,
       isTrusted,
     });
     if (!check.accepted) {
+      if (check.shouldAutoBan && !isMarshallDev) {
+        onAutoBan50CpsDetected?.(Math.max(rawCps, Math.round(check.cps)));
+        return;
+      }
       if (check.shouldFlagProbation) {
         onCheatProbationDetected?.({
-          reason: check.reason || 'robotic_cadence',
-          cps: Math.max(liveCps, Math.round(check.cps)),
+          reason: check.reason || 'Autoclicker detected',
+          cps: Math.max(rawCps, liveCps, Math.round(check.cps)),
         });
       } else if (check.reason === 'robotic_cadence' || check.reason === 'superhuman_rate') {
         onNotify?.('CLICK GUARD', 'Suspicious automated click pattern detected.');
       }
       return;
     }
-
-    updateLiveCps(performance.now(), true);
 
     const rect = characterRef.current?.getBoundingClientRect();
     let clientX = rawX || 0;
@@ -273,7 +289,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     const floatValue = isCrit ? `⚡ CRIT! +${formatCoins(earned)}` : `+${formatCoins(earned)}`;
 
     setFloatingNumbers((prev) => [
-      ...prev.slice(-10),
+      ...prev.slice(-9),
       { id: floatId, x: floatX, y: floatY, value: floatValue, isCrit },
     ]);
 

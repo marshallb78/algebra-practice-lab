@@ -137,7 +137,8 @@ interface ActiveGlobalEventOverlayProps {
   event: ActiveGlobalLiveEvent;
   currentUid: string;
   currentUsername: string;
-  currentCoins: number;
+  currentCps: number;
+  currentClickPower: number;
   isSandbox: boolean;
   hasFireCursor?: boolean;
   onAwardCoins: (amount: number, reason: string) => void;
@@ -163,7 +164,8 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
   event,
   currentUid,
   currentUsername,
-  currentCoins,
+  currentCps,
+  currentClickPower,
   isSandbox,
   hasFireCursor = false,
   onAwardCoins,
@@ -186,8 +188,10 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
   const settledRef = useRef<string | null>(null);
   const marathonClicksRef = useRef(0);
   marathonClicksRef.current = marathonClicks;
-  const currentCoinsRef = useRef(currentCoins);
-  currentCoinsRef.current = currentCoins;
+  const baseProd = Math.max(50, (currentCps || 0) + (currentClickPower || 1) * 4);
+  const baseProdRef = useRef(baseProd);
+  baseProdRef.current = baseProd;
+  const earnedEventGemsRef = useRef(0);
 
   const isAffected =
     !event.excludeSummoner || (event.summonedByUid && event.summonedByUid !== currentUid);
@@ -203,6 +207,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
     setCaughtCount(0);
     setEarnedEventCoins(0);
     setEarnedEventGems(0);
+    earnedEventGemsRef.current = 0;
     setClickBurstText(null);
     setIsPopupMinimized(false);
     setFreezeCracks(0);
@@ -220,22 +225,28 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
         const taps = marathonClicksRef.current;
         if (event.id.startsWith('preview_')) {
           if (taps > 0) {
-            const reward = Math.max(5000, Math.floor(currentCoinsRef.current * 9));
-            onAwardCoins(reward, 'Click Fast Marathon Preview Champion (~10× Coins!)');
+            const reward = Math.max(5000, Math.floor(baseProdRef.current * 120));
+            onAwardCoins(reward, 'Click Fast Marathon Preview Champion (+20 Gems!)');
+            onAwardGems(20);
           }
           return;
         }
         fetchMarathonLeaderboard(event.id, isSandbox).then((board) => {
           setLeaders(board);
           if (board[0] && board[0].uid === currentUid && taps > 0) {
-            const reward = Math.max(5000, Math.floor(currentCoinsRef.current * 9));
-            onAwardCoins(reward, 'Click Fast Marathon Champion (~10× Coins!)');
+            const reward = Math.max(5000, Math.floor(baseProdRef.current * 120));
+            onAwardCoins(reward, 'Click Fast Marathon Champion (+20 Gems!)');
+            onAwardGems(20);
+          } else if (taps >= 20) {
+            const reward = Math.max(1500, Math.floor(baseProdRef.current * 35));
+            onAwardCoins(reward, 'Click Fast Marathon Finisher (+5 Gems!)');
+            onAwardGems(5);
           }
         });
       }
     }, 250);
     return () => clearInterval(t);
-  }, [event.id, event.endsAtMs, event.type, isSandbox, currentUid, onAwardCoins]);
+  }, [event.id, event.endsAtMs, event.type, isSandbox, currentUid, onAwardCoins, onAwardGems]);
 
   // Smoothly animate Falling Matthews & 100 Golden Rain sprites inside the Click Event Pop-up Arena
   useEffect(() => {
@@ -296,7 +307,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
     if (secondsLeft <= 0) return;
     const next = marathonClicks + 1;
     setMarathonClicks(next);
-    const bonusCoin = Math.max(25, Math.floor(currentCoins * 0.002));
+    const bonusCoin = Math.max(25, Math.floor((currentClickPower || 1) * 2 + (currentCps || 0) * 0.4));
     setEarnedEventCoins((c) => c + bonusCoin);
     onAwardCoins(bonusCoin, 'Marathon Tap');
 
@@ -321,17 +332,20 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
     setCaughtCount((c) => c + 1);
 
     const coinGain = item.isGolden
-      ? Math.max(500, Math.floor(currentCoins * 0.08))
-      : Math.max(150, Math.floor(currentCoins * 0.03));
+      ? Math.max(300, Math.floor(baseProd * 6))
+      : Math.max(120, Math.floor(baseProd * 3));
     setEarnedEventCoins((c) => c + coinGain);
     onAwardCoins(coinGain, item.isGolden ? 'Golden Rain Catch' : 'Falling Matthew Catch');
 
-    if (item.isGolden && Math.random() < 0.3) {
+    const maxGemsPerEvent = item.isGolden ? 12 : 8;
+    const gemChance = item.isGolden ? 0.1 : 0.06;
+    if (earnedEventGemsRef.current < maxGemsPerEvent && Math.random() < gemChance) {
+      earnedEventGemsRef.current += 1;
       setEarnedEventGems((g) => g + 1);
       onAwardGems(1);
-      setClickBurstText(`+${formatNumber(coinGain)} MC & +1 Gem!`);
+      setClickBurstText(`+${formatCoins(coinGain)} MC & +1 Gem!`);
     } else {
-      setClickBurstText(`+${formatNumber(coinGain)} MC!`);
+      setClickBurstText(`+${formatCoins(coinGain)} MC!`);
     }
   };
 
@@ -414,7 +428,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
                     MASH MATTHEW AS FAST AS YOU CAN!
                   </div>
                   <div className="text-xs font-bold text-slate-300 mt-1">
-                    Winner Prize: ~10× Coins ({formatCoins(Math.floor(currentCoins * 9))})
+                    Winner Prize: {formatCoins(Math.max(5000, Math.floor(baseProd * 120)))} Coins &amp; +20 Gems!
                   </div>
                 </div>
 

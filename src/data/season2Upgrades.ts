@@ -130,12 +130,12 @@ function formatNiceCost(raw: number): number {
 
 /**
  * SEASON 2: FROZEN APOCALYPSE — 96 SMOOTHLY STEPPED PROGRESSION TIERS UP TO VIGINTILLION (Vg, 10^63)
- * Eliminates dragged-out cost walls with ~4.45x spacing and pairs every upgrade 1-to-1 with its matching icon (up_01..up_96).
+ * PLUS 80 POST-VG TIERS FROM UVg (10^66) THROUGH CENTILLION (Ctg, 10^303).
  */
-export const SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => {
+const BASE_SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => {
   const baseCost = idx === TOTAL_STEPS ? END_COST : formatNiceCost(START_COST * Math.pow(STEP_RATIO, idx));
-  // Balanced ROI curve (~180s-1510s base payback) so Season 2 progression feels earned
-  const powerAnchor = Math.max(1, Math.round(baseCost / (180 + idx * 14)));
+  // Harder, earned ROI curve (~320s-2980s base payback) so endgame tiers stay prestigious
+  const powerAnchor = Math.max(1, Math.round(baseCost / (320 + idx * 28)));
   const iconFallback =
     spec.focus === 'click' ? 'Sword' : spec.focus === 'cps' ? 'Zap' : 'Snowflake';
 
@@ -146,7 +146,7 @@ export const SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => 
     icon: iconFallback,
     iconImage: `./images/s2/upgrades/up_${spec.iconNum}.png`,
     baseCost,
-    costMultiplier: Number((1.2 + Math.min(0.18, idx * 0.002)).toFixed(3)),
+    costMultiplier: Number((1.24 + Math.min(0.22, idx * 0.0025)).toFixed(3)),
     baseCps:
       spec.focus === 'click'
         ? 0
@@ -162,3 +162,116 @@ export const SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => 
     tier: (idx % 8) + 1,
   };
 });
+
+const POST_VG_TIERS: readonly [string, string][] = [
+  ['UVg', 'Unvigintillion'],
+  ['DVg', 'Duovigintillion'],
+  ['TrVg', 'Tresvigintillion'],
+  ['QaVg', 'Quattuorvigintillion'],
+  ['QnVg', 'Quinvigintillion'],
+  ['SeVg', 'Sesvigintillion'],
+  ['SpVg', 'Septemvigintillion'],
+  ['OVg', 'Octovigintillion'],
+  ['NVg', 'Novemvigintillion'],
+  ['Tg', 'Trigintillion'],
+  ['UTg', 'Untrigintillion'],
+  ['DTg', 'Duotrigintillion'],
+  ['TrTg', 'Trestrigintillion'],
+  ['QaTg', 'Quattuortrigintillion'],
+  ['QnTg', 'Quintrigintillion'],
+  ['SeTg', 'Sestrigintillion'],
+  ['SpTg', 'Septentrigintillion'],
+  ['OTg', 'Octotrigintillion'],
+  ['NTg', 'Noventrigintillion'],
+  ['QAg', 'Quadragintillion'],
+  ['UQAg', 'Unquadragintillion'],
+  ['DQAg', 'Duoquadragintillion'],
+  ['TrQAg', 'Tresquadragintillion'],
+  ['QaQAg', 'Quattuorquadragintillion'],
+  ['QnQAg', 'Quinquadragintillion'],
+  ['SeQAg', 'Sesquadragintillion'],
+  ['SpQAg', 'Septenquadragintillion'],
+  ['OQAg', 'Octoquadragintillion'],
+  ['NQAg', 'Novenquadragintillion'],
+  ['Qqg', 'Quinquagintillion'],
+  ['UQqg', 'Unquinquagintillion'],
+  ['DQqg', 'Duoquinquagintillion'],
+  ['TrQqg', 'Tresquinquagintillion'],
+  ['QaQqg', 'Quattuorquinquagintillion'],
+  ['QnQqg', 'Quinquinquagintillion'],
+  ['SeQqg', 'Sesquinquagintillion'],
+  ['SpQqg', 'Septenquinquagintillion'],
+  ['OQqg', 'Octoquinquagintillion'],
+  ['NQqg', 'Novenquinquagintillion'],
+  ['Sxg', 'Sexagintillion'],
+  ['USxg', 'Unsexagintillion'],
+  ['DSxg', 'Duosexagintillion'],
+  ['TrSxg', 'Tressexagintillion'],
+  ['QaSxg', 'Quattuorsexagintillion'],
+  ['QnSxg', 'Quinsexagintillion'],
+  ['SeSxg', 'Sesexagintillion'],
+  ['SpSxg', 'Septensexagintillion'],
+  ['OSxg', 'Octosexagintillion'],
+  ['NSxg', 'Novensexagintillion'],
+  ['Stg', 'Septuagintillion'],
+  ['UStg', 'Unseptuagintillion'],
+  ['DStg', 'Duoseptuagintillion'],
+  ['TrStg', 'Treseptuagintillion'],
+  ['QaStg', 'Quattuorseptuagintillion'],
+  ['QnStg', 'Quinseptuagintillion'],
+  ['SeStg', 'Seseptuagintillion'],
+  ['SpStg', 'Septenseptuagintillion'],
+  ['OStg', 'Octoseptuagintillion'],
+  ['NStg', 'Novenseptuagintillion'],
+  ['Og', 'Octogintillion'],
+  ['UOg', 'Unoctogintillion'],
+  ['DOg', 'Duooctogintillion'],
+  ['TrOg', 'Tresoctogintillion'],
+  ['QaOg', 'Quattuoroctogintillion'],
+  ['QnOg', 'Quinoctogintillion'],
+  ['SeOg', 'Sexoctogintillion'],
+  ['SpOg', 'Septemoctogintillion'],
+  ['OOg', 'Octooctogintillion'],
+  ['NOg', 'Novemoctogintillion'],
+  ['Ng', 'Nonagintillion'],
+  ['UNg', 'Unnonagintillion'],
+  ['DNg', 'Duononagintillion'],
+  ['TrNg', 'Tresnonagintillion'],
+  ['QaNg', 'Quattuornonagintillion'],
+  ['QnNg', 'Quinnonagintillion'],
+  ['SeNg', 'Sesnonagintillion'],
+  ['SpNg', 'Septennonagintillion'],
+  ['ONg', 'Octononagintillion'],
+  ['NNg', 'Novennonagintillion'],
+  ['Ctg', 'Centillion'],
+];
+
+const POST_VG_FOCUS_ROTATION: readonly ('hybrid' | 'click' | 'cps')[] = ['hybrid', 'click', 'cps'];
+
+const POST_VG_UPGRADES: Upgrade[] = POST_VG_TIERS.map(([suffix, fullName], tierIdx) => {
+  const globalIdx = S2_UPGRADE_SPECS.length + tierIdx;
+  const focus = POST_VG_FOCUS_ROTATION[tierIdx % POST_VG_FOCUS_ROTATION.length];
+  const baseCost = 2.5 * Math.pow(10, 66 + tierIdx * 3);
+  const powerAnchor = baseCost / (650 + tierIdx * 45);
+  const iconNum = String((globalIdx % 96) + 1).padStart(2, '0');
+  const iconFallback =
+    focus === 'click' ? 'Sword' : focus === 'cps' ? 'Zap' : 'Snowflake';
+
+  return {
+    id: `s2_${suffix.toLowerCase()}_ascendant`,
+    name: `${suffix} ${fullName} Core`,
+    description: `Harnesses ${fullName} (${suffix}) cryo-energy across the Frozen Apocalypse.`,
+    icon: iconFallback,
+    iconImage: `./images/s2/upgrades/up_${iconNum}.png`,
+    baseCost,
+    costMultiplier: 1.36,
+    baseCps: focus === 'click' ? 0 : focus === 'cps' ? powerAnchor : powerAnchor * 0.7,
+    baseClickPower: focus === 'cps' ? 0 : focus === 'click' ? powerAnchor * 1.15 : powerAnchor * 0.45,
+    tier: (globalIdx % 8) + 1,
+  };
+});
+
+export const SEASON_2_UPGRADES: Upgrade[] = [
+  ...BASE_SEASON_2_UPGRADES,
+  ...POST_VG_UPGRADES,
+];

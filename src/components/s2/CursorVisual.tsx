@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CursorDefinition } from '../../data/cursors';
 
 interface CursorVisualProps {
   cursor: CursorDefinition;
   size?: number;
   className?: string;
+  disableDropShadow?: boolean;
 }
 
 /**
@@ -15,6 +16,7 @@ export const CursorVisual: React.FC<CursorVisualProps> = ({
   cursor,
   size = 40,
   className = '',
+  disableDropShadow = false,
 }) => {
   const [imgFailed, setImgFailed] = useState(false);
 
@@ -35,7 +37,9 @@ export const CursorVisual: React.FC<CursorVisualProps> = ({
         style={{
           width: size,
           height: size,
-          filter: `drop-shadow(0 0 8px ${cursor.glowColor})`,
+          ...(disableDropShadow
+            ? {}
+            : { filter: `drop-shadow(0 0 8px ${cursor.glowColor})` }),
         }}
       />
     );
@@ -48,7 +52,7 @@ export const CursorVisual: React.FC<CursorVisualProps> = ({
       viewBox="0 0 36 36"
       fill="none"
       className={`pointer-events-none select-none ${className}`}
-      style={{ filter: `drop-shadow(0 0 8px ${cursor.glowColor})` }}
+      style={disableDropShadow ? undefined : { filter: `drop-shadow(0 0 8px ${cursor.glowColor})` }}
     >
       <defs>
         <linearGradient id={`cg-${cursor.id}`} x1="4" y1="4" x2="30" y2="30" gradientUnits="userSpaceOnUse">
@@ -88,16 +92,24 @@ interface EquippedCursorFollowerProps {
 }
 
 /**
- * Floating elemental cursor follower when the player equips a custom Cursor from Crates.
+ * Floating elemental cursor follower using direct GPU transform mutations (zero React re-renders per mouse move)
+ * so 4GB RAM Chromebooks stay smooth at 60fps.
  */
 export const EquippedCursorFollower: React.FC<EquippedCursorFollowerProps> = ({ cursor }) => {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const [clicking, setClicking] = useState(false);
+  const followerRef = useRef<HTMLDivElement | null>(null);
+  const clickingRef = useRef(false);
+  const lastPosRef = useRef<{ x: number; y: number; visible: boolean }>({
+    x: -100,
+    y: -100,
+    visible: false,
+  });
 
   useEffect(() => {
     const root = typeof document !== 'undefined' ? document.documentElement : null;
+    const el = followerRef.current;
     if (!cursor) {
-      setPos(null);
+      if (el) el.style.opacity = '0';
+      lastPosRef.current.visible = false;
       root?.classList.remove('in-game-custom-cursor');
       return;
     }
@@ -111,21 +123,41 @@ export const EquippedCursorFollower: React.FC<EquippedCursorFollowerProps> = ({ 
       root?.classList.add('in-game-custom-cursor');
     }
 
+    const applyTransform = () => {
+      const node = followerRef.current;
+      const p = lastPosRef.current;
+      if (!node || !p.visible) return;
+      node.style.opacity = '1';
+      node.style.transform = `translate3d(${p.x - 8}px, ${p.y - 5}px, 0) ${
+        clickingRef.current ? 'scale(0.84) rotate(-8deg)' : 'scale(1)'
+      }`;
+    };
+
     const onMove = (e: PointerEvent) => {
       if (e.pointerType === 'touch') {
         root?.classList.remove('in-game-custom-cursor');
-        setPos(null);
+        lastPosRef.current.visible = false;
+        if (followerRef.current) followerRef.current.style.opacity = '0';
         return;
       }
       root?.classList.add('in-game-custom-cursor');
-      setPos({ x: e.clientX, y: e.clientY });
+      lastPosRef.current.x = e.clientX;
+      lastPosRef.current.y = e.clientY;
+      lastPosRef.current.visible = true;
+      applyTransform();
     };
     const onDown = (e: PointerEvent) => {
-      if (e.pointerType !== 'touch') setClicking(true);
+      if (e.pointerType === 'touch') return;
+      clickingRef.current = true;
+      applyTransform();
     };
-    const onUp = () => setClicking(false);
+    const onUp = () => {
+      clickingRef.current = false;
+      applyTransform();
+    };
     const onLeave = () => {
-      setPos(null);
+      lastPosRef.current.visible = false;
+      if (followerRef.current) followerRef.current.style.opacity = '0';
       root?.classList.remove('in-game-custom-cursor');
     };
 
@@ -142,19 +174,21 @@ export const EquippedCursorFollower: React.FC<EquippedCursorFollowerProps> = ({ 
     };
   }, [cursor]);
 
-  if (!cursor || !pos) return null;
+  if (!cursor) return null;
 
   return (
     <div
-      className="fixed z-[999] pointer-events-none select-none transition-transform duration-75"
+      ref={followerRef}
+      className="fixed z-[999] pointer-events-none select-none"
       style={{
-        left: pos.x - 8,
-        top: pos.y - 5,
+        left: 0,
+        top: 0,
+        opacity: 0,
         transformOrigin: '8px 5px',
-        transform: clicking ? 'scale(0.84) rotate(-8deg)' : 'scale(1)',
+        willChange: 'transform',
       }}
     >
-      <CursorVisual cursor={cursor} size={46} />
+      <CursorVisual cursor={cursor} size={46} disableDropShadow={true} />
     </div>
   );
 };

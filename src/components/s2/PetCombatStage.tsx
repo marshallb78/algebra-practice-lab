@@ -334,8 +334,8 @@ export const PetCombatStage: React.FC<PetCombatStageProps> = ({
       const teamDps = dpsRef.current;
       const spawnIntervalMs = raidOn ? 5200 : teamDps < 6 ? 19000 : teamDps < 20 ? 15000 : 12000;
       const maxSimultaneous = raidOn ? 4 : teamDps < 6 ? 1 : 2;
-      const isCombatTick = tick % 5 === 0;
-      const dpsPerCombatTick = teamDps > 0 ? teamDps * 0.5 : 0;
+      const isCombatTick = tick % 3 === 0;
+      const dpsPerCombatTick = teamDps > 0 ? teamDps * 0.45 : 0;
 
       setZombies((prev) => {
         const nextList: ActiveZombie[] = [];
@@ -410,9 +410,10 @@ export const PetCombatStage: React.FC<PetCombatStageProps> = ({
           }
 
           const strikePoint = z.fromLeft ? 42.5 : 57.5;
+          const stepPx = z.speedPerTick * 1.5;
           const nextX = z.fromLeft
-            ? Math.min(strikePoint, z.xPercent + z.speedPerTick)
-            : Math.max(strikePoint, z.xPercent - z.speedPerTick);
+            ? Math.min(strikePoint, z.xPercent + stepPx)
+            : Math.max(strikePoint, z.xPercent - stepPx);
           const atSkin = Math.abs(nextX - strikePoint) <= 0.9;
 
           let nextStepAcc = z.stepAccumulator + Math.abs(nextX - z.xPercent);
@@ -443,7 +444,10 @@ export const PetCombatStage: React.FC<PetCombatStageProps> = ({
           }
 
           if (nextHp <= 0) {
-            const coinBounty = Math.max(20, Math.round(currentCoinsRef.current * 0.00055 * z.tierCfg.coinMult));
+            const coinBounty = Math.max(
+              25,
+              Math.round(Math.max(10, dpsRef.current * 18) * z.tierCfg.coinMult)
+            );
             const gemReward = rollZombieGemReward(z);
             onZombieDefeatedRef.current(coinBounty, gemReward);
             if (raidOn) setRaidKills((k) => k + 1);
@@ -469,7 +473,7 @@ export const PetCombatStage: React.FC<PetCombatStageProps> = ({
             continue;
           }
 
-          let attackCooldownMs = Math.max(0, z.attackCooldownMs - 100);
+          let attackCooldownMs = Math.max(0, z.attackCooldownMs - 150);
           if (atSkin) {
             pose = attackCooldownMs > 3000 ? 'lunge' : 'walk';
             if (attackCooldownMs <= 0) {
@@ -545,13 +549,13 @@ export const PetCombatStage: React.FC<PetCombatStageProps> = ({
         setSnowDrops((prev) => [...prev, ...freshlyDropped].slice(-7));
       }
 
-      if (footprintQueueRef.current.length > 0 || tick % 10 === 0) {
-        const fresh = footprintQueueRef.current.splice(0, 16);
-        setFootprints((prev) => [...prev.filter((fp) => now - fp.createdAt < 8500), ...fresh].slice(-72));
+      if (footprintQueueRef.current.length > 0 || tick % 12 === 0) {
+        const fresh = footprintQueueRef.current.splice(0, 8);
+        setFootprints((prev) => [...prev.filter((fp) => now - fp.createdAt < 8500), ...fresh].slice(-18));
       }
 
       setBreachAlert((prev) => (prev && now > prev.expiresAt ? null : prev));
-    }, 100);
+    }, 150);
 
     return () => window.clearInterval(timer);
   }, []);

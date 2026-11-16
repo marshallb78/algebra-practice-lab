@@ -529,6 +529,58 @@ export async function adminBanPlayer(
 }
 
 /**
+ * Automatically bans a non-dev account caught clicking at >= 50 CPS, persists the ban locally and in `users/{uid}`,
+ * removes their leaderboard entry, and notifies dev admins.
+ */
+export async function enforceAutoBan50Cps(
+  uid: string,
+  username: string,
+  detectedCps: number,
+  seasonId: string = getActiveSeason().seasonId,
+  isSandbox: boolean = false
+): Promise<BanRecord | null> {
+  if (isDevAdminAccount(uid, username)) return null;
+
+  const cleanUser = username.trim() || uid || 'Player';
+  const norm = cleanUser.toLowerCase();
+  const uidKey = uid || `user_${norm}`;
+  const now = Date.now();
+
+  const record: BanRecord = {
+    uid: uidKey,
+    username: cleanUser,
+    normalizedUsername: norm,
+    status: 'banned',
+    reason: OFFICIAL_BAN_MESSAGE,
+    detectedCps: Number((detectedCps || 50).toFixed(1)),
+    bannedBy: 'Auto-Ban (50+ CPS)',
+    bannedAtMs: now,
+  };
+
+  cachedBansByUid[uidKey] = record;
+  cachedBansByUsername[norm] = record;
+  saveLocalBanRecord(record);
+
+  if (uid && !uid.startsWith('local_') && !uid.startsWith('user_')) {
+    await Promise.all([
+      rtdbRestWrite(
+        `users/${uid}`,
+        {
+          banStatus: 'banned',
+          banReason: OFFICIAL_BAN_MESSAGE,
+          banDetectedCps: record.detectedCps,
+          updatedAtMs: now,
+        },
+        'PATCH'
+      ).catch(() => false),
+      rtdbRestDelete(scopeRtdbPath(`leaderboards/${seasonId}/${uid}`, isSandbox)).catch(() => false),
+    ]);
+  }
+
+  return record;
+}
+
+/**
  * Called by Marshallb78 from the Dev Tools panel to unban / pardon a player.
  */
 export async function adminUnbanPlayer(
@@ -766,7 +818,8 @@ export async function reportAccountProbation(
         },
         'PATCH'
       ).catch(() => false),
-      rtdbRestWrite(`admin/probation_alerts/${uid}`, report, 'PUT').catch(() => false),
+      // Store under usernames/__probation_${uid} so RTDB security rules permit writes & dev reads
+      rtdbRestWrite(`usernames/__probation_${uid}`, report, 'PUT').catch(() => false),
     ]);
   }
 
@@ -833,8 +886,8 @@ export async function fetchProbationAlerts(
 ): Promise<ProbationReport[]> {
   const alertsByUid = new Map<string, ProbationReport>();
 
-  const [adminAlertsObj, lbObj] = await Promise.all([
-    rtdbRestGet<Record<string, ProbationReport>>('admin/probation_alerts', 2500).catch(() => null),
+  const [usernamesObj, lbObj] = await Promise.all([
+    rtdbRestGet<Record<string, any>>('usernames', 3000).catch(() => null),
     rtdbRestGet<Record<string, Record<string, any>>>(
       scopeRtdbPath(`leaderboards/${seasonId}`, isSandbox),
       2500
@@ -864,9 +917,11 @@ export async function fetchProbationAlerts(
     }
   };
 
-  if (adminAlertsObj && typeof adminAlertsObj === 'object') {
-    for (const [uid, rec] of Object.entries(adminAlertsObj)) {
-      considerReport(rec, uid);
+  if (usernamesObj && typeof usernamesObj === 'object') {
+    for (const [key, rec] of Object.entries(usernamesObj)) {
+      if (key.startsWith('__probation_')) {
+        considerReport(rec, key.replace('__probation_', ''));
+      }
     }
   }
 
@@ -912,7 +967,7 @@ export async function adminResolveProbation(
       };
       return doc;
     }),
-    rtdbRestDelete(`admin/probation_alerts/${targetUid}`).catch(() => false),
+    rtdbRestDelete(`usernames/__probation_${targetUid}`).catch(() => false),
     rtdbRestWrite(
       scopeRtdbPath(`leaderboards/${seasonId}/${targetUid}`, isSandbox),
       { probation: null },
@@ -1035,7 +1090,7 @@ export async function inspectFirebaseStructureSummary(): Promise<FirebaseHealthS
         key.startsWith('__test_')
       ) {
         clutterKeys.push(key);
-      } else if (!key.startsWith('__admin_')) {
+      } else if (!key.startsWith('__')) {
         realUsernamesCount += 1;
       }
     }
@@ -1139,7 +1194,7 @@ export async function purgeAllBannedAccountsFromRtdb(): Promise<{
   let purgedUsernames = 0;
   if (allUsernames && typeof allUsernames === 'object') {
     for (const [key, val] of Object.entries(allUsernames)) {
-      if (key.startsWith('__admin_')) continue;
+      if (key.startsWith('__')) continue;
       if (val && typeof val === 'object' && typeof val.uid === 'string' && bannedUids.has(val.uid)) {
         const ok = await rtdbRestDelete(`usernames/${key}`).catch(() => false);
         if (ok) purgedUsernames++;

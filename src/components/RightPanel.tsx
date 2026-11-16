@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CosmeticSlot, EggRarity, GameState } from '../types/game';
 import { getUpgradesForSeason } from '../data/upgrades';
 import { ALL_SKINS, Skin, equipSkin, isSeasonTwoOrLater } from '../data/skins';
 import { QUESTS, getQuestProgress } from '../data/quests';
 import {
   EGG_DEFINITIONS,
+  getEggSellGemValue,
   getPetClickMultiplierBonus,
   getPetCombatDps,
+  getPetSellGemValue,
   getPetSpeciesDefinition,
   getPetUpgradeGemCost,
 } from '../data/petsAndEggs';
@@ -74,8 +76,10 @@ interface RightPanelProps {
   onOpenSkinQualityModal?: () => void;
   onNotify?: (title: string, subtitle: string) => void;
   onHatchEgg?: (rarity: EggRarity) => void;
+  onSellEgg?: (rarity: EggRarity) => void;
   onToggleEquipPet?: (instanceId: string) => void;
   onUpgradePet?: (instanceId: string) => void;
+  onSellPet?: (instanceId: string) => void;
   onBuySkinWithGems?: (skinId: string, gemCost: number) => void;
   onClaimVaultSkinWithToken?: (skinId: string) => void;
   onOpenMysteryChest?: () => void;
@@ -95,8 +99,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onOpenSkinQualityModal,
   onNotify,
   onHatchEgg,
+  onSellEgg,
   onToggleEquipPet,
   onUpgradePet,
+  onSellPet,
   onBuySkinWithGems,
   onClaimVaultSkinWithToken,
   onOpenMysteryChest,
@@ -113,6 +119,14 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   const [skinSubTab, setSkinSubTab] = useState<SkinSubTab>('daily');
   const [selectedCursorDetailId, setSelectedCursorDetailId] = useState<string | null>(null);
   const [busyEventId, setBusyEventId] = useState<string | null>(null);
+  const upgradesListRef = useRef<HTMLDivElement | null>(null);
+  const upgradesScrollTopRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (activeTab === 'upgrades' && upgradesListRef.current) {
+      upgradesListRef.current.scrollTop = upgradesScrollTopRef.current;
+    }
+  }, [activeTab]);
 
   const isSeason2 = isSeasonTwoOrLater(state.currentSeasonId);
   const activeUpgrades = getUpgradesForSeason(state.currentSeasonId);
@@ -405,7 +419,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
       {/* PANEL CONTENT */}
       {/* MAIN PANEL CONTENT */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="flex-1 flex flex-col min-h-0 h-full overflow-hidden">
         {guidedTip && (
           <button
             type="button"
@@ -422,32 +436,37 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </button>
         )}
 
-        {/* ================= UPGRADES (UP TO Vg) ================= */}
-        {activeTab === 'upgrades' && (
-          <div className="flex flex-col h-full">
-            <div className="p-3 border-b border-slate-800/80 flex items-center justify-between gap-2 bg-[#101426]/80">
-              <div className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
-                <Hammer className="w-4 h-4" />
-                <span>{isSeason2 ? 'Upgrades Armory (1 → Vg)' : 'Upgrades'}</span>
-              </div>
-              <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-750">
-                {([1, 10, 'MAX'] as BuyMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setBuyMode(mode)}
-                    className={`px-2 py-0.5 text-[11px] font-black rounded-md transition-all cursor-pointer ${
-                      buyMode === mode
-                        ? 'bg-cyan-500 text-slate-950'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {mode === 'MAX' ? 'MAX' : `${mode}x`}
-                  </button>
-                ))}
-              </div>
+        {/* ================= UPGRADES (UP TO Ctg, KEPT MOUNTED SO SCROLL POSITION PERSISTS) ================= */}
+        <div className={activeTab === 'upgrades' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
+          <div className="p-3 border-b border-slate-800/80 flex items-center justify-between gap-2 bg-[#101426]/80 shrink-0">
+            <div className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+              <Hammer className="w-4 h-4" />
+              <span>{isSeason2 ? 'Upgrades Armory (1 → Ctg)' : 'Upgrades'}</span>
             </div>
+            <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-750">
+              {([1, 10, 'MAX'] as BuyMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setBuyMode(mode)}
+                  className={`px-2 py-0.5 text-[11px] font-black rounded-md transition-all cursor-pointer ${
+                    buyMode === mode
+                      ? 'bg-cyan-500 text-slate-950'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {mode === 'MAX' ? 'MAX' : `${mode}x`}
+                </button>
+              ))}
+            </div>
+          </div>
 
-            <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+          <div
+            ref={upgradesListRef}
+            onScroll={(e) => {
+              upgradesScrollTopRef.current = e.currentTarget.scrollTop;
+            }}
+            className="flex-1 min-h-0 overflow-y-auto p-2.5 pb-24 space-y-2"
+          >
               {activeUpgrades.map((upgrade) => {
                 const currentLevel = state.upgrades[upgrade.id] || 0;
                 const isCookiePopped = justBoughtId === upgrade.id;
@@ -559,11 +578,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               })}
             </div>
           </div>
-        )}
 
         {/* ================= REBIRTH TAB ================= */}
         {activeTab === 'rebirth' && (
-          <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-center">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-24 flex flex-col justify-center">
             <div className="text-center p-5 rounded-3xl bg-slate-900/90 border-2 border-purple-500/40 shadow-xl">
               <div className="w-16 h-16 rounded-2xl bg-purple-600/20 border-2 border-purple-400 p-3 mx-auto mb-3 flex items-center justify-center text-purple-300 shadow-[0_0_30px_rgba(168,85,247,0.4)]">
                 <InfinityIcon className="w-9 h-9" />
@@ -607,7 +625,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
         {/* ================= QUESTS TAB ================= */}
         {activeTab === 'quests' && (
-          <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+          <div className="flex-1 min-h-0 overflow-y-auto p-3.5 pb-24 space-y-4">
             <div className="p-3.5 rounded-2xl bg-gradient-to-r from-fuchsia-950/80 via-purple-950/80 to-slate-900 border-2 border-fuchsia-500/50 shadow-lg flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
                 <Gift className="w-8 h-8 text-fuchsia-300 shrink-0" />
@@ -708,8 +726,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
         {/* ================= PETS TAB (PET SQUAD + EGGS SUB-TAB, NO FEEDING!) ================= */}
         {activeTab === 'pets' && (
-          <div className="flex flex-col h-full">
-            <div className="p-3 border-b border-slate-800/80 flex items-center justify-between gap-2 bg-[#101426]/80">
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="p-3 border-b border-slate-800/80 flex items-center justify-between gap-2 bg-[#101426]/80 shrink-0">
               <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-750">
                 <button
                   onClick={() => setPetSubTab('pets')}
@@ -733,7 +751,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               </span>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-24 space-y-2.5">
               {petSubTab === 'pets' && (() => {
                 const totalSquadDps = pets
                   .filter((p) => equippedPetIds.includes(p.instanceId))
@@ -816,6 +834,21 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                               <ArrowUpCircle className="w-3 h-3" />
                               <span>{`Lv.${pet.level + 1} (${upgCost}G)`}</span>
                             </button>
+                            {onSellPet && (
+                              <button
+                                onClick={() => onSellPet(pet.instanceId)}
+                                disabled={pets.length <= 1}
+                                title={
+                                  pets.length <= 1
+                                    ? 'Keep at least 1 active pet'
+                                    : `Sell for +${getPetSellGemValue(pet)} Gems`
+                                }
+                                className="px-2 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/30 border border-amber-400/45 text-amber-200 disabled:opacity-35 font-black text-[10px] uppercase cursor-pointer flex items-center gap-1"
+                              >
+                                <Gem className="w-3 h-3" />
+                                <span>{`Sell +${getPetSellGemValue(pet)}G`}</span>
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -898,6 +931,16 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                         >
                           Hatch ({egg.hatchGemCost}G)
                         </button>
+                        {onSellEgg && (
+                          <button
+                            onClick={() => onSellEgg(egg.rarity)}
+                            disabled={count <= 0}
+                            className="w-full py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500/30 disabled:opacity-35 border border-amber-400/45 text-amber-200 font-black text-[10px] uppercase cursor-pointer flex items-center justify-center gap-1"
+                          >
+                            <Gem className="w-3 h-3" />
+                            <span>{`Sell (+${getEggSellGemValue(egg.rarity)}G)`}</span>
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -909,8 +952,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
         {/* ================= SKINS SHOP TAB (VAULT + DAILY + CHESTS + GLASSES + OWNED) ================= */}
         {activeTab === 'skins' && (
-          <div className="flex flex-col h-full">
-            <div className="p-2.5 border-b border-slate-800/80 flex items-center justify-between gap-1.5 bg-[#101426]/80 flex-wrap">
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="p-2.5 border-b border-slate-800/80 flex items-center justify-between gap-1.5 bg-[#101426]/80 flex-wrap shrink-0">
               <div className="flex items-center gap-1 bg-slate-900 rounded-xl p-1 border border-slate-800 flex-wrap">
                 {[
                   { id: 'daily' as SkinSubTab, label: 'Matthew Shop' },
@@ -949,7 +992,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               )}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3">
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-24">
               {skinSubTab === 'collection' && (
                 <div className="space-y-3">
                   <div className="text-[11px] font-bold text-slate-400">
@@ -1292,7 +1335,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
         {/* ================= EVENTS TAB (GRAPHICS-FIRST PLAYER SUMMONS + FRIDAY STORM PREVIEW) ================= */}
         {activeTab === 'events' && (
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-24 space-y-3">
             <div className="grid grid-cols-1 gap-2.5">
               {PLAYER_TRIGGERABLE_EVENTS.map((spec) => (
                 <div

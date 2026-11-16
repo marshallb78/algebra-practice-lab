@@ -200,7 +200,7 @@ export function useGameLoop({
 
         return questState;
       });
-    }, 50);
+    }, 125);
 
     return () => clearInterval(interval);
   }, [setState, enabled]);

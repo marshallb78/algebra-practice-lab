@@ -24,7 +24,7 @@ import {
   clampFiniteCoinAmount,
   MAX_SAFE_SEASON_COINS,
 } from './utils/calculations';
-import { formatNumber } from './utils/formatters';
+import { formatCoins, formatNumber } from './utils/formatters';
 import {
   getActiveSeason,
   getEffectiveSeasonInfo,
@@ -65,6 +65,7 @@ import {
   ProbationReport,
   ServerBroadcast,
   checkAccountBanStatus,
+  enforceAutoBan50Cps,
   fetchPlayerSuspicionReports,
   fetchProbationAlerts,
   getCachedServerBroadcast,
@@ -76,12 +77,16 @@ import {
 import {
   ActiveGlobalLiveEvent,
   PlayerEventCostSpec,
+  broadcastMatthewTokenPull,
   fetchActiveGlobalLiveEvent,
+  fetchLatestMatthewTokenBroadcast,
 } from './firebase/liveEvents';
 import {
   ChestLootResult,
   createStarterFrostPup,
   getEggDefinition,
+  getEggSellGemValue,
+  getPetSellGemValue,
   getPetUpgradeGemCost,
   pickWeightedEgg,
   rollChestLoot,
@@ -120,7 +125,7 @@ import { BannedScreenModal } from './components/BannedScreenModal';
 import { DevToolsModal, SandboxTestAction } from './components/DevToolsModal';
 import { soundManager } from './audio/soundManager';
 import { BALANCE } from './data/balance';
-import { X, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, Sparkles, ChevronUp, ChevronDown, ShieldAlert } from 'lucide-react';
 
 interface Toast {
   id: number;
@@ -192,6 +197,7 @@ export function App() {
   const seenProbationKeysRef = useRef<Set<string>>(new Set());
   const [playerReports, setPlayerReports] = useState<PlayerSuspicionReport[]>([]);
   const seenPlayerReportIdsRef = useRef<Set<string>>(new Set());
+  const seenTokenBroadcastIdRef = useRef<string | null>(null);
   const [top3Players, setTop3Players] = useState<LeaderboardEntry[]>([]);
   const [serverBroadcast, setServerBroadcast] = useState<ServerBroadcast | null>(null);
 
@@ -213,6 +219,9 @@ export function App() {
   const offlineCheckedForUidRef = useRef<string | null>(null);
   const lastForegroundCheckAtRef = useRef<number>(0);
   const sessionTokenRef = useRef<string>('');
+  const hydrateProfileRef = useRef<
+    ((uid: string, username: string, notifySync?: boolean) => Promise<void>) | null
+  >(null);
   const frozenIntroSessionTriggeredRef = useRef<boolean>(false);
   const lastCutsceneEventIdRef = useRef<string | null>(null);
   const mondayRolloverTriggeredRef = useRef<boolean>(false);
@@ -294,13 +303,36 @@ export function App() {
 
     setIsProbationActive(true);
     handleNotify(
-      'ACCOUNT UNDER PROBATION',
-      'Your account has been placed under probation and reported for admin review.'
+      'AUTO CLICKER DETECTED',
+      'You have been detected using an auto clicker. Your gameplay is paused for dev review.'
     );
     await reportAccountProbation(uid, username, cps, reason, eff.seasonId, eff.isSandbox);
     if (isVerifiedLiveDevSession(curr.cloudAccount?.uid)) {
       const latest = await fetchProbationAlerts(eff.seasonId, eff.isSandbox).catch(() => []);
       setProbationAlerts(latest);
+    }
+  };
+
+  const handleAutoBan50CpsDetected = async (cps: number) => {
+    const curr = stateRef.current;
+    const uid = curr.cloudAccount?.uid || `local_${curr.cloudAccount?.username || 'player'}`;
+    const username =
+      curr.cloudAccount?.displayUsername || curr.cloudAccount?.username || 'Player';
+    if (isVerifiedLiveDevSession(curr.cloudAccount?.uid)) return;
+    const eff = getEffectiveSeasonInfo(curr.cloudAccount?.uid, false, Date.now());
+    const [banRec] = await Promise.all([
+      enforceAutoBan50Cps(uid, username, cps, eff.seasonId, eff.isSandbox),
+      reportAccountProbation(
+        uid,
+        username,
+        cps,
+        `Auto-banned at ${Math.round(cps)} CPS (>= 50 CPS cutoff)`,
+        eff.seasonId,
+        eff.isSandbox
+      ).catch(() => null),
+    ]);
+    if (banRec) {
+      applyLocalBanReset(banRec);
     }
   };
 
@@ -753,6 +785,7 @@ export function App() {
             equippedSkin: nextEquippedSkin,
             currentSeasonId: eff.seasonId,
             sandboxS2Enabled: resolvedSandboxFlag,
+            activeSessionToken: sessionTokenRef.current || merged.activeSessionToken,
             season2IntroSeen: Boolean(
               checkedPrev.season2IntroSeen ||
                 merged.season2IntroSeen ||
@@ -797,6 +830,7 @@ export function App() {
         finishHydration();
       }
     };
+    hydrateProfileRef.current = hydrateProfileFromCloud;
 
     const unsubscribe = subscribeToAuthChanges(async (profile) => {
       if (!profile) return;
@@ -881,6 +915,17 @@ export function App() {
         eff.isSandbox
       );
       if (foreignNewer) {
+        if (sessionTokenRef.current) {
+          const sessionRes = await verifySingleDeviceSession(
+            curr.cloudAccount.uid,
+            sessionTokenRef.current,
+            eff.isSandbox
+          );
+          if (!sessionRes.valid) {
+            setSessionLockedByOtherDevice(true);
+            return;
+          }
+        }
         await hydrateProfileFromCloud(
           curr.cloudAccount.uid,
           curr.cloudAccount.displayUsername,
@@ -891,7 +936,7 @@ export function App() {
 
     registerForeignCloudUpdateHandler((uid) => {
       if (stateRef.current.cloudAccount?.uid === uid) {
-        pullIfAnotherDeviceUpdated(true).catch(() => {});
+        setSessionLockedByOtherDevice(true);
       }
     });
 
@@ -911,6 +956,26 @@ export function App() {
       document.removeEventListener('visibilitychange', onWindowFocusOrVisible);
     };
   }, []);
+
+  // Lightweight 10-second single-device session verification while tab is visible
+  useEffect(() => {
+    const uid = state.cloudAccount?.uid;
+    if (!uid || activeBanRecord || sessionLockedByOtherDevice) return;
+    const id = setInterval(async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      if (!sessionTokenRef.current || isHydratingCloudRef.current || isReconcilingCloudRef.current) return;
+      const eff = getEffectiveSeasonInfo(
+        uid,
+        sandboxS2EnabledRef.current && isVerifiedLiveDevSession(uid),
+        Date.now()
+      );
+      const res = await verifySingleDeviceSession(uid, sessionTokenRef.current, eff.isSandbox);
+      if (!res.valid) {
+        setSessionLockedByOtherDevice(true);
+      }
+    }, 10000);
+    return () => clearInterval(id);
+  }, [state.cloudAccount?.uid, activeBanRecord, sessionLockedByOtherDevice]);
 
   // Fast 20-second Realtime Database Profile + Leaderboard sync while playing, plus keepalive flush on close/background
   useEffect(() => {
@@ -1033,6 +1098,7 @@ export function App() {
     seasonInfo.isDowntime ||
     isInitialCloudHydrating ||
     Boolean(activeBanRecord) ||
+    isProbationActive ||
     sessionLockedByOtherDevice ||
     showIntroCutscene ||
     showFrozenIntro ||
@@ -1116,7 +1182,7 @@ export function App() {
     });
   }, [isS2Active, isGameplayPaused, petCount, equippedPetCount]);
 
-  // Season 2: Poll global summoned live events every 5s (Click Fast Marathon, Falling Matthews, Boss Raid, Screen Freeze)
+  // Season 2: Poll global summoned live events & Matthew Shop Token pull broadcasts (every 6s while visible)
   useEffect(() => {
     if (!isS2Active || isInitialCloudHydrating || activeBanRecord) {
       setActiveGlobalEvent(null);
@@ -1126,20 +1192,35 @@ export function App() {
     const poll = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       const current = activeGlobalEventRef.current;
-      if (current && current.id.startsWith('preview_') && current.endsAtMs > Date.now()) {
-        return;
-      }
-      const ev = await fetchActiveGlobalLiveEvent(isSandbox);
-      if (!cancelled) {
-        const latest = activeGlobalEventRef.current;
-        if (latest && latest.id.startsWith('preview_') && latest.endsAtMs > Date.now()) {
-          return;
-        }
+      const [ev, tokenBroadcast] = await Promise.all([
+        current && current.id.startsWith('preview_') && current.endsAtMs > Date.now()
+          ? Promise.resolve(current)
+          : fetchActiveGlobalLiveEvent(isSandbox),
+        fetchLatestMatthewTokenBroadcast(isSandbox),
+      ]);
+      if (cancelled) return;
+
+      const latest = activeGlobalEventRef.current;
+      if (!(latest && latest.id.startsWith('preview_') && latest.endsAtMs > Date.now())) {
         setActiveGlobalEvent(ev);
+      }
+
+      if (
+        tokenBroadcast &&
+        seenTokenBroadcastIdRef.current !== tokenBroadcast.id &&
+        tokenBroadcast.uid !== (stateRef.current.cloudAccount?.uid || '')
+      ) {
+        seenTokenBroadcastIdRef.current = tokenBroadcast.id;
+        soundManager.playSkinUnlock();
+        particleEngine.emitMatthewRain(
+          22,
+          stateRef.current.unlockedSkins.map((id) => getSkinById(id).image)
+        );
+        handleNotify('MATTHEW SHOP TOKEN PULLED!', tokenBroadcast.message);
       }
     };
     poll();
-    const id = setInterval(poll, 12000);
+    const id = setInterval(poll, 6000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -1580,6 +1661,16 @@ export function App() {
         return next;
       });
       soundManager.setMusicTrack('s2_event', true);
+      if (loot.foundMatthewShopToken) {
+        const tokenUid = curr.cloudAccount?.uid || 'local_player';
+        const tokenUser =
+          curr.cloudAccount?.displayUsername || curr.cloudAccount?.username || 'A lucky player';
+        broadcastMatthewTokenPull({ uid: tokenUid, username: tokenUser, isSandbox })
+          .then((b) => {
+            seenTokenBroadcastIdRef.current = b.id;
+          })
+          .catch(() => {});
+      }
       setChestCutsceneLoot(loot);
       return;
     }
@@ -1698,6 +1789,66 @@ export function App() {
     soundManager.playBuy();
   };
 
+  const handleSellPet = (instanceId: string) => {
+    const snap = stateRef.current;
+    if ((snap.pets || []).length <= 1) {
+      handleNotify('CANNOT SELL LAST PET', 'You must keep at least 1 active pet in your squad!');
+      return;
+    }
+    const target = (snap.pets || []).find((p) => p.instanceId === instanceId);
+    if (!target) return;
+    const gemRefund = getPetSellGemValue(target);
+    setState((prev) => {
+      if ((prev.pets || []).length <= 1) return prev;
+      const found = prev.pets.find((p) => p.instanceId === instanceId);
+      if (!found) return prev;
+      const refund = getPetSellGemValue(found);
+      const remainingPets = prev.pets.filter((p) => p.instanceId !== instanceId);
+      let nextEquipped = (prev.equippedPetIds || []).filter((id) => id !== instanceId);
+      if (nextEquipped.length === 0 && remainingPets.length > 0) {
+        nextEquipped = [remainingPets[0].instanceId];
+      }
+      const next: GameState = {
+        ...prev,
+        gems: prev.gems + refund,
+        lifetimeGems: prev.lifetimeGems + refund,
+        pets: remainingPets,
+        equippedPetIds: nextEquipped,
+        lastSaveTime: Date.now(),
+      };
+      saveGame(next);
+      return next;
+    });
+    soundManager.playBuy();
+    handleNotify('PET SOLD!', `Sold ${target.name} (Lv.${target.level}) for +${gemRefund} Gems!`);
+  };
+
+  const handleSellEgg = (rarity: EggRarity) => {
+    const snap = stateRef.current;
+    const avail = snap.sealedEggs?.[rarity] || 0;
+    if (avail <= 0) return;
+    const gemRefund = getEggSellGemValue(rarity);
+    setState((prev) => {
+      const count = prev.sealedEggs?.[rarity] || 0;
+      if (count <= 0) return prev;
+      const refund = getEggSellGemValue(rarity);
+      const next: GameState = {
+        ...prev,
+        gems: prev.gems + refund,
+        lifetimeGems: prev.lifetimeGems + refund,
+        sealedEggs: {
+          ...(prev.sealedEggs || {}),
+          [rarity]: count - 1,
+        } as Record<EggRarity, number>,
+        lastSaveTime: Date.now(),
+      };
+      saveGame(next);
+      return next;
+    });
+    soundManager.playBuy();
+    handleNotify('EGG SOLD!', `Sold 1× ${rarity} for +${gemRefund} Gems!`);
+  };
+
   const handleClaimVaultSkinWithToken = (skinId: string) => {
     if (!MATTHEW_VAULT_SKINS.some((s) => s.id === skinId)) return;
     const curr = stateRef.current;
@@ -1807,6 +1958,16 @@ export function App() {
       return next;
     });
 
+    if (loot.foundMatthewShopToken) {
+      const tokenUid = curr.cloudAccount?.uid || 'local_player';
+      const tokenUser =
+        curr.cloudAccount?.displayUsername || curr.cloudAccount?.username || 'A lucky player';
+      broadcastMatthewTokenPull({ uid: tokenUid, username: tokenUser, isSandbox })
+        .then((b) => {
+          seenTokenBroadcastIdRef.current = b.id;
+        })
+        .catch(() => {});
+    }
     setChestCutsceneLoot(loot);
     return loot;
   };
@@ -1918,6 +2079,10 @@ export function App() {
 
   const handleTakeOverSessionHere = async () => {
     const uid = stateRef.current.cloudAccount?.uid;
+    const username =
+      stateRef.current.cloudAccount?.displayUsername ||
+      stateRef.current.cloudAccount?.username ||
+      'Player';
     if (!uid) {
       setSessionLockedByOtherDevice(false);
       return;
@@ -1925,6 +2090,9 @@ export function App() {
     const claimed = await claimSingleDeviceSession(uid, isSandbox).catch(() => '');
     if (claimed) sessionTokenRef.current = claimed;
     setSessionLockedByOtherDevice(false);
+    if (hydrateProfileRef.current) {
+      await hydrateProfileRef.current(uid, username, true).catch(() => {});
+    }
     handleNotify('SESSION CLAIMED', 'Resumed active session on this device.');
   };
 
@@ -1997,6 +2165,31 @@ export function App() {
         ))}
       </div>
 
+      {/* FULL-SCREEN AUTO-CLICKER PROBATION LOCK OVERLAY (STOPS GAMEPLAY UNTIL DEV REVIEWS) */}
+      {isProbationActive && !activeBanRecord && (
+        <div className="fixed inset-0 z-[135] bg-slate-950/96 backdrop-blur-xl flex items-center justify-center p-6">
+          <div className="max-w-md w-full p-6 rounded-3xl bg-slate-900 border-2 border-rose-500/70 shadow-[0_0_50px_rgba(244,63,94,0.35)] text-center space-y-4">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/20 border border-rose-400/50 flex items-center justify-center text-rose-400">
+              <ShieldAlert className="w-8 h-8" />
+            </div>
+            <h2 className="text-xl font-black text-rose-300 uppercase tracking-wide">
+              You have been detected using an auto clicker
+            </h2>
+            <p className="text-xs font-bold text-slate-300 leading-relaxed">
+              Your gameplay has been paused and reported to the developers for review. You cannot earn coins or click while this account is under probation.
+            </p>
+            <div className="pt-2">
+              <button
+                onClick={handleSignOutFromBanScreen}
+                className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-black text-xs uppercase border border-slate-700 cursor-pointer"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* FULL-SCREEN SINGLE-DEVICE SESSION LOCK OVERLAY */}
       {sessionLockedByOtherDevice && !activeBanRecord && (
         <div className="fixed inset-0 z-[130] bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-6">
@@ -2031,12 +2224,16 @@ export function App() {
           event={activeGlobalEvent}
           currentUid={state.cloudAccount?.uid || 'local_tester'}
           currentUsername={activeUsername || 'Player'}
-          currentCoins={state.coins}
+          currentCps={calculateCPS(state, { fridayBonusActive: fridayBonus, stormWaveMultiplier })}
+          currentClickPower={
+            calculateClickPower(state, { fridayBonusActive: fridayBonus, stormWaveMultiplier })
+              .totalPower
+          }
           isSandbox={isSandbox}
           hasFireCursor={Boolean(equippedCursor?.freezeImmune)}
           onAwardCoins={(amount, reason) => {
             handleEarnCoins(amount, false, false);
-            handleNotify('LIVE EVENT REWARD!', `${reason} (+${formatNumber(amount)} MC)`);
+            handleNotify('LIVE EVENT REWARD!', `${reason} (+${formatCoins(amount)} MC)`);
           }}
           onAwardGems={(amount) => {
             setState((prev) => {
@@ -2061,6 +2258,7 @@ export function App() {
           onOpenStormShop={() => setShowStormShop(true)}
           onOpenDevTools={() => setShowDevToolsModal(true)}
           onCheatProbationDetected={handleCheatProbationDetected}
+          onAutoBan50CpsDetected={handleAutoBan50CpsDetected}
           probationAlertCount={probationAlerts.length}
           isProbationActive={isProbationActive}
           top3Players={top3Players}
@@ -2105,8 +2303,10 @@ export function App() {
             onOpenSkinQualityModal={() => setShowSkinQualityModal(true)}
             onNotify={handleNotify}
             onHatchEgg={handleHatchEgg}
+            onSellEgg={handleSellEgg}
             onToggleEquipPet={handleToggleEquipPet}
             onUpgradePet={handleUpgradePet}
+            onSellPet={handleSellPet}
             onBuySkinWithGems={handleBuySkinWithGems}
             onClaimVaultSkinWithToken={handleClaimVaultSkinWithToken}
             onOpenMysteryChest={handleOpenMysteryChest}
@@ -2313,8 +2513,10 @@ export function App() {
           state={state}
           onClose={() => setShowPetsModal(false)}
           onHatchEgg={handleHatchEgg}
+          onSellEgg={handleSellEgg}
           onToggleEquipPet={handleToggleEquipPet}
           onUpgradePet={handleUpgradePet}
+          onSellPet={handleSellPet}
         />
       )}
 

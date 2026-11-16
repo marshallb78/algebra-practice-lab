@@ -174,6 +174,7 @@ function buildUserCloudPayload(
     uid,
     username,
     activeSessionId: TAB_SESSION_ID,
+    activeSessionToken: state.activeSessionToken || TAB_SESSION_ID,
     unlockedSkins: state.unlockedSkins,
     equippedSkin: state.equippedSkin,
     gems: state.gems,

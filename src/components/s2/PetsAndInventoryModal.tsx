@@ -5,8 +5,10 @@ import { SEASON_2_CONFIG } from '../../config/gameConfig';
 import {
   EGG_DEFINITIONS,
   PET_SPECIES_CATALOG,
+  getEggSellGemValue,
   getPetClickMultiplierBonus,
   getPetCombatDps,
+  getPetSellGemValue,
   getPetSpeciesDefinition,
   getPetUpgradeGemCost,
 } from '../../data/petsAndEggs';
@@ -16,16 +18,20 @@ interface PetsAndInventoryModalProps {
   state: GameState;
   onClose: () => void;
   onHatchEgg: (rarity: EggRarity) => void;
+  onSellEgg?: (rarity: EggRarity) => void;
   onToggleEquipPet: (instanceId: string) => void;
   onUpgradePet: (instanceId: string) => void;
+  onSellPet?: (instanceId: string) => void;
 }
 
 export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
   state,
   onClose,
   onHatchEgg,
+  onSellEgg,
   onToggleEquipPet,
   onUpgradePet,
+  onSellPet,
 }) => {
   const [tab, setTab] = useState<'pets' | 'eggs'>('pets');
   const pets = state.pets || [];
@@ -120,7 +126,7 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto pr-1 pb-4">
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-16">
         {tab === 'pets' && (
           <div className="space-y-4">
             {pets.length === 0 ? (
@@ -319,6 +325,22 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
                             <ArrowUpCircle className="w-3.5 h-3.5" />
                             <span>{`Lv.${pet.level + 1} (${upgCost}G)`}</span>
                           </button>
+
+                          {onSellPet && (
+                            <button
+                              onClick={() => onSellPet(pet.instanceId)}
+                              disabled={pets.length <= 1}
+                              title={
+                                pets.length <= 1
+                                  ? 'Keep at least 1 active pet'
+                                  : `Sell for +${getPetSellGemValue(pet)} Gems`
+                              }
+                              className="col-span-2 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/30 disabled:opacity-35 border border-amber-400/45 text-amber-200 font-black text-xs uppercase cursor-pointer transition flex items-center justify-center gap-1"
+                            >
+                              <Gem className="w-3.5 h-3.5" />
+                              <span>{`Sell Pet (+${getPetSellGemValue(pet)} Gems)`}</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -377,6 +399,16 @@ export const PetsAndInventoryModal: React.FC<PetsAndInventoryModalProps> = ({
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Hatch ({egg.hatchGemCost}G)</span>
                   </button>
+                  {onSellEgg && (
+                    <button
+                      onClick={() => onSellEgg(egg.rarity)}
+                      disabled={count <= 0}
+                      className="w-full py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/30 disabled:opacity-35 border border-amber-400/45 text-amber-200 font-black text-xs uppercase cursor-pointer transition flex items-center justify-center gap-1"
+                    >
+                      <Gem className="w-3.5 h-3.5" />
+                      <span>{`Sell (+${getEggSellGemValue(egg.rarity)}G)`}</span>
+                    </button>
+                  )}
                 </div>
               );
             })}

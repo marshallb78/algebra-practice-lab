@@ -1,4 +1,5 @@
 import {
+  getFirebaseServices,
   rtdbRestGet,
   rtdbRestWrite,
   rtdbRestWriteKeepalive,
@@ -9,10 +10,14 @@ import { GameState, SeasonWinnerBadge } from '../types/game';
 import { SEASON_2_CONFIG } from '../config/gameConfig';
 import { getActiveSeason } from '../utils/scheduleEngine';
 import { getAscensionMultiplier } from '../data/prestige';
+import { AUTOBAN_CPS_CUTOFF } from '../utils/antiAutoclicker';
 import {
+  OFFICIAL_BAN_MESSAGE,
+  adminBanPlayer,
   getCachedBanRecord,
   getCachedResetRecord,
   isDevAdminAccount,
+  loadLocalProbationState,
   refreshCloudBans,
 } from './moderation';
 
@@ -167,6 +172,7 @@ export function buildLeaderboardPayload(
       ? state.unlockedSkins
       : ['classic_matthew'];
   const playtimeSeconds = Math.floor(state.totalPlaytimeSeconds || 0);
+  const activeProbation = loadLocalProbationState(uid);
 
   return {
     uid,
@@ -192,6 +198,7 @@ export function buildLeaderboardPayload(
     clanName: state.clanName || null,
     chestsOpened: Math.floor(state.chestsOpened || 0),
     zombiesDefeated: Math.floor(state.zombiesDefeated || 0),
+    ...(activeProbation ? { probation: activeProbation } : {}),
     cloudAdjustmentAtMs: state.appliedCloudAdjustmentAtMs || 0,
     updatedAtMs: nowMs,
     isReset: false,
@@ -322,6 +329,24 @@ export async function fetchWorldwideLeaderboard(
           rtdbEntry.uid === LIAM_S2_REBALANCE_UID &&
           (rtdbEntry.cloudAdjustmentAtMs || 0) < LIAM_S2_REBALANCE_REVISION_MS
         ) {
+          mergedByUid.delete(rtdbEntry.uid);
+          continue;
+        }
+
+        // Auto-ban & hide any non-dev account reaching >= 50 CPS
+        if (
+          (rtdbEntry.highestCps || 0) >= AUTOBAN_CPS_CUTOFF &&
+          !isDevAdminAccount(rtdbEntry.uid, rtdbEntry.username)
+        ) {
+          const viewerUid = getFirebaseServices()?.auth?.currentUser?.uid;
+          if (isDevAdminAccount(viewerUid)) {
+            adminBanPlayer(
+              rtdbEntry.uid,
+              rtdbEntry.username,
+              OFFICIAL_BAN_MESSAGE,
+              'banned'
+            ).catch(() => false);
+          }
           mergedByUid.delete(rtdbEntry.uid);
           continue;
         }

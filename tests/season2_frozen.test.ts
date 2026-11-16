@@ -19,14 +19,20 @@ import {
   MATTHEW_VAULT_SKINS,
   getDailyItemShopRotation,
 } from '../src/data/season2Skins';
-import { AntiAutoclickerGuard } from '../src/utils/antiAutoclicker';
+import {
+  AUTOBAN_CPS_CUTOFF,
+  AUTOCLICKER_CPS_CUTOFF,
+  AntiAutoclickerGuard,
+} from '../src/utils/antiAutoclicker';
 import {
   EGG_DEFINITIONS,
   PET_SPECIES_CATALOG,
   createStarterFrostPup,
+  getEggSellGemValue,
   getPetAnimationFrames,
   getPetClickMultiplierBonus,
   getPetCombatDps,
+  getPetSellGemValue,
   getPetSpeciesDefinition,
   getPetUpgradeGemCost,
   normalizeEggRarity,
@@ -237,7 +243,10 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(rolledDev.unlockedSkins).toContain('liam_matthew');
   });
 
-  it('AntiAutoclickerGuard spares fast jittering humans while rejecting constant-interval macros & untrusted scripts', () => {
+  it('AntiAutoclickerGuard spares fast jittering humans while rejecting constant-interval macros, untrusted scripts, and 50+ CPS auto-bans', () => {
+    expect(AUTOCLICKER_CPS_CUTOFF).toBe(25);
+    expect(AUTOBAN_CPS_CUTOFF).toBe(50);
+
     const humanGuard = new AntiAutoclickerGuard();
     // Simulate 25 natural human butterfly/jitter clicks (~12-14 CPS with natural 50..115ms variance)
     let t = 10000;
@@ -256,21 +265,32 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(untrusted.accepted).toBe(false);
     expect(untrusted.reason).toBe('untrusted_event');
 
-    // Constant 50.0ms robotic autoclicker across 24 clicks flags probation for admin review
+    // Constant 35.0ms (~28.5 CPS) robotic autoclicker across 28 clicks flags probation for admin review
     let bt = 30000;
     let botRejected = 0;
     let flaggedProbation = false;
-    for (let i = 0; i < 24; i++) {
-      bt += 50;
+    for (let i = 0; i < 28; i++) {
+      bt += 35;
       const r = botGuard.evaluateClick({ timestampMs: bt, isTrusted: true });
       if (!r.accepted) botRejected += 1;
       if (r.shouldFlagProbation) flaggedProbation = true;
     }
     expect(botRejected).toBeGreaterThan(0);
     expect(flaggedProbation).toBe(true);
+
+    // Hyper-speed 15ms (~66 CPS) autoclicker triggers 50+ CPS auto-ban
+    const hyperGuard = new AntiAutoclickerGuard();
+    let ht = 50000;
+    let autoBanned = false;
+    for (let i = 0; i < 55; i++) {
+      ht += 15;
+      const r = hyperGuard.evaluateClick({ timestampMs: ht, isTrusted: true });
+      if (r.shouldAutoBan) autoBanned = true;
+    }
+    expect(autoBanned).toBe(true);
   });
 
-  it('keeps Matthew Shop Token ultra-rare (~0.85%), applies pet level scaling, and ignores legacy hunger', () => {
+  it('keeps Matthew Shop Token ultra-rare (~0.85%), applies pet level scaling, supports gem selling, and ignores legacy hunger', () => {
     let tokenWins = 0;
     // Uniform grid sampling across 1000 chest rolls should yield ~8-9 tokens (~0.85%), never 100%
     for (let i = 0; i < 1000; i++) {
@@ -280,6 +300,9 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(tokenWins).toBeGreaterThan(0);
     expect(tokenWins).toBeLessThan(20);
 
+    expect(getEggSellGemValue('Common Egg')).toBe(2);
+    expect(getEggSellGemValue('Mythic Egg')).toBe(51);
+
     const petLvl1 = createStarterFrostPup();
     const petLvl5Full = { ...petLvl1, level: 5, hunger: 100 };
     const petLvl5NoFeed = { ...petLvl1, level: 5, hunger: 0 };
@@ -288,6 +311,7 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       getPetClickMultiplierBonus(petLvl1)
     );
     expect(getPetCombatDps(petLvl5Full)).toBeGreaterThan(getPetCombatDps(petLvl1));
+    expect(getPetSellGemValue(petLvl5Full)).toBeGreaterThan(getPetSellGemValue(petLvl1));
     // Pets never require feeding — 100% power regardless of legacy hunger field
     expect(getPetCombatDps(petLvl5NoFeed)).toBe(getPetCombatDps(petLvl5Full));
     expect(getPetClickMultiplierBonus(petLvl5NoFeed)).toBe(
@@ -295,7 +319,7 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     );
   });
 
-  it('formats UDc..Vg suffixes accurately, scales S2 upgrades to Vg with unique images, and tracks chests & monthly meta-quest', async () => {
+  it('formats UDc..Ctg suffixes accurately, scales S2 upgrades to Ctg with 96 icons, and tracks chests & monthly meta-quest', async () => {
     expect(formatCoins(1e36)).toContain('UDc');
     expect(formatCoins(1e39)).toContain('Ddc');
     expect(formatCoins(1e42)).toContain('Tdc');
@@ -306,11 +330,21 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(formatCoins(1e57)).toContain('Ocdc');
     expect(formatCoins(1e60)).toContain('Nmdc');
     expect(formatCoins(1e63)).toContain('Vg');
+    expect(formatCoins(1e66)).toContain('UVg');
+    expect(formatCoins(1e69)).toContain('DVg');
+    expect(formatCoins(1e93)).toContain('Tg');
+    expect(formatCoins(1e123)).toContain('QAg');
+    expect(formatCoins(1e153)).toContain('Qqg');
+    expect(formatCoins(1e183)).toContain('Sxg');
+    expect(formatCoins(1e213)).toContain('Stg');
+    expect(formatCoins(1e243)).toContain('Og');
+    expect(formatCoins(1e273)).toContain('Ng');
+    expect(formatCoins(1e303)).toContain('Ctg');
 
-    expect(SEASON_2_UPGRADES.length).toBe(96);
-    expect(SEASON_2_UPGRADES[SEASON_2_UPGRADES.length - 1].baseCost).toBeGreaterThanOrEqual(1e63);
+    expect(SEASON_2_UPGRADES.length).toBe(176);
+    expect(SEASON_2_UPGRADES[SEASON_2_UPGRADES.length - 1].baseCost).toBeGreaterThanOrEqual(1e303);
     const uniqueImgs = new Set(SEASON_2_UPGRADES.map((u) => u.iconImage));
-    expect(uniqueImgs.size).toBe(SEASON_2_UPGRADES.length);
+    expect(uniqueImgs.size).toBe(96);
     for (const img of uniqueImgs) {
       expect(img).toMatch(/^\.\/images\/s2\/upgrades\/up_\d{2}\.png$/);
     }
@@ -464,8 +498,8 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(nextSeason.zombieHitsTaken).toBe(0);
   });
 
-  it('maps all 96 Season 2 upgrades to unique icons and preserves active Matthew Shop Token', () => {
-    expect(SEASON_2_UPGRADES.length).toBe(96);
+  it('maps all 176 Season 2 upgrades across 96 unique icons and preserves active Matthew Shop Token', () => {
+    expect(SEASON_2_UPGRADES.length).toBe(176);
     expect(SEASON_2_UPGRADES[0].id).toBe('s2_snowball_pack');
     const uniqueImages = new Set(SEASON_2_UPGRADES.map((u) => u.iconImage));
     expect(uniqueImages.size).toBe(96);
@@ -975,9 +1009,9 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     });
     expect(afterProgress.state.lifetimeCoins).toBe(9e6);
 
-    // Bulk upgrade math never returns Infinity/NaN on huge coin amounts and enforces 1 UVg safety cap
-    const maxBuy = getMaxAffordableUpgrade(25, 1.2, 0, 1e70);
+    // Bulk upgrade math never returns Infinity/NaN on huge coin amounts and enforces Ctg safety cap
+    const maxBuy = getMaxAffordableUpgrade(25, 1.2, 0, 1e310);
     expect(Number.isFinite(maxBuy.totalCost)).toBe(true);
-    expect(maxBuy.totalCost).toBeLessThanOrEqual(1e66);
+    expect(maxBuy.totalCost).toBeLessThanOrEqual(9.99e305);
   });
 });
