@@ -134,8 +134,8 @@ function formatNiceCost(raw: number): number {
  */
 const BASE_SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => {
   const baseCost = idx === TOTAL_STEPS ? END_COST : formatNiceCost(START_COST * Math.pow(STEP_RATIO, idx));
-  // Smooth earned ROI curve scaling cleanly up to Vigintillion
-  const powerAnchor = Math.max(1, Math.round(baseCost / (210 + idx * 14)));
+  // Steadily harder ROI curve scaling cleanly up to Vigintillion
+  const powerAnchor = Math.max(1, Math.round(baseCost / (290 + idx * 20)));
   const iconFallback =
     spec.focus === 'click' ? 'Sword' : spec.focus === 'cps' ? 'Zap' : 'Snowflake';
 
@@ -146,7 +146,7 @@ const BASE_SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => {
     icon: iconFallback,
     iconImage: `./images/s2/upgrades/up_${spec.iconNum}.png`,
     baseCost,
-    costMultiplier: Number((1.21 + Math.min(0.14, idx * 0.0015)).toFixed(3)),
+    costMultiplier: Number((1.23 + Math.min(0.16, idx * 0.0018)).toFixed(3)),
     baseCps:
       spec.focus === 'click'
         ? 0
@@ -198,7 +198,7 @@ const VG_BRIDGE_SPECS: readonly {
 ];
 
 const VG_BRIDGE_UPGRADES: Upgrade[] = VG_BRIDGE_SPECS.map((spec, idx) => {
-  const powerAnchor = spec.baseCost / 140;
+  const powerAnchor = spec.baseCost / 220;
   return {
     id: spec.id,
     name: spec.name,
@@ -206,7 +206,7 @@ const VG_BRIDGE_UPGRADES: Upgrade[] = VG_BRIDGE_SPECS.map((spec, idx) => {
     icon: spec.focus === 'click' ? 'Sword' : spec.focus === 'cps' ? 'Zap' : 'Snowflake',
     iconImage: `./images/s2/upgrades/up_${spec.iconNum}.png`,
     baseCost: spec.baseCost,
-    costMultiplier: 1.22,
+    costMultiplier: 1.25,
     baseCps: spec.focus === 'click' ? 0 : spec.focus === 'cps' ? powerAnchor : powerAnchor * 0.7,
     baseClickPower:
       spec.focus === 'cps' ? 0 : spec.focus === 'click' ? powerAnchor * 1.15 : powerAnchor * 0.45,
@@ -315,7 +315,7 @@ const POST_VG_UPGRADES: Upgrade[] = POST_VG_TIERS.flatMap(([suffix, fullName], t
   return POST_VG_STEP_TEMPLATES.map((step, subIdx) => {
     const globalIdx = S2_UPGRADE_SPECS.length + VG_BRIDGE_SPECS.length + tierIdx * 4 + subIdx;
     const baseCost = Number(`${step.mantissa}e+${exp}`);
-    const powerAnchor = baseCost / (140 + tierIdx * 2);
+    const powerAnchor = baseCost / (220 + tierIdx * 3);
     const iconNum = String((globalIdx % 96) + 1).padStart(2, '0');
     const iconFallback =
       step.focus === 'click' ? 'Sword' : step.focus === 'cps' ? 'Zap' : 'Snowflake';
@@ -327,7 +327,7 @@ const POST_VG_UPGRADES: Upgrade[] = POST_VG_TIERS.flatMap(([suffix, fullName], t
       icon: iconFallback,
       iconImage: `./images/s2/upgrades/up_${iconNum}.png`,
       baseCost,
-      costMultiplier: 1.22,
+      costMultiplier: 1.25,
       baseCps: step.focus === 'click' ? 0 : step.focus === 'cps' ? powerAnchor : powerAnchor * 0.7,
       baseClickPower:
         step.focus === 'cps' ? 0 : step.focus === 'click' ? powerAnchor * 1.15 : powerAnchor * 0.45,

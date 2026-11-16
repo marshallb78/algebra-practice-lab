@@ -39,7 +39,7 @@ import {
   TEST_ISOLATION_CONFIG,
   isSandboxSeason2Context,
 } from './config/gameConfig';
-import { getFirebaseServices } from './firebase/config';
+import { getFirebaseServices, getServerNowMs, syncServerClockOffset } from './firebase/config';
 import {
   claimSingleDeviceSession,
   logoutPlayer,
@@ -66,6 +66,8 @@ import {
   PlayerSuspicionReport,
   ProbationReport,
   ServerBroadcast,
+  adminPublishGlobalEvent,
+  adminPublishGoldenSwarm,
   checkAccountBanStatus,
   enforceAutoBan50Cps,
   fetchPlayerSuspicionReports,
@@ -690,6 +692,7 @@ export function App() {
         const claimedToken = await claimSingleDeviceSession(uid, targetSandbox).catch(() => '');
         if (claimedToken) sessionTokenRef.current = claimedToken;
         setSessionLockedByOtherDevice(false);
+        syncServerClockOffset(uid).catch(() => {});
 
         const liveInSandbox =
           targetSandbox &&
@@ -1144,7 +1147,7 @@ export function App() {
       showFrozenIntro ||
       activeBanRecord ||
       !activeGlobalEvent ||
-      activeGlobalEvent.endsAtMs <= nowMs
+      activeGlobalEvent.endsAtMs <= getServerNowMs()
     ) {
       return;
     }
@@ -1240,7 +1243,7 @@ export function App() {
       }
     };
     poll();
-    const id = setInterval(poll, 6000);
+    const id = setInterval(poll, 4000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -1567,8 +1570,10 @@ export function App() {
       username,
       isSandbox,
       broadcastToAll: true,
+      excludeSummoner: false,
     });
     if (res.ok && res.event) {
+      await adminPublishGlobalEvent(res.event).catch(() => false);
       lastCutsceneEventIdRef.current = '';
       setShowDevToolsModal(false);
       setActiveGlobalEvent(res.event);
@@ -1580,7 +1585,10 @@ export function App() {
   const handleDevStopGlobalEvent = async () => {
     const currUid = stateRef.current.cloudAccount?.uid;
     if (!isVerifiedLiveDevSession(currUid)) return;
-    await clearGlobalLiveEvent(isSandbox, true);
+    await Promise.all([
+      clearGlobalLiveEvent(isSandbox, true),
+      adminPublishGlobalEvent(null).catch(() => false),
+    ]);
     setActiveGlobalEvent(null);
     setPendingEventCutscene(null);
     handleNotify('GLOBAL EVENT STOPPED', 'Cleared the active global event across all screens.');
@@ -1600,6 +1608,7 @@ export function App() {
       isSandbox,
       broadcastToAll: true,
     });
+    await adminPublishGoldenSwarm(b).catch(() => false);
     seenGoldenSwarmIdRef.current = b.id;
     setGoldenSwarmTrigger({ id: b.id, count: b.count });
     setShowDevToolsModal(false);

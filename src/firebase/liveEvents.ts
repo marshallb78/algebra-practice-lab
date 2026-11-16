@@ -1,4 +1,10 @@
-import { rtdbRestDelete, rtdbRestGet, rtdbRestWrite, scopeRtdbPath } from './config';
+import {
+  getServerNowMs,
+  rtdbRestDelete,
+  rtdbRestGet,
+  rtdbRestWrite,
+  scopeRtdbPath,
+} from './config';
 
 export type GlobalEventType =
   | 'click_marathon'
@@ -9,6 +15,7 @@ export type GlobalEventType =
 
 export interface ActiveGlobalLiveEvent {
   id: string;
+  uid?: string;
   type: GlobalEventType;
   summonedByUid: string;
   summonedByUsername: string;
@@ -126,25 +133,31 @@ export interface GlobalGoldenSwarmBroadcast {
   expiresAtMs: number;
 }
 
+const DEV_ADMIN_EVENT_DOC_PATH = 'usernames/__admin_89nsfff2YtaEVcNTHUBDq22V4FW2';
+
 export async function summonGlobalLiveEvent(params: {
   spec: PlayerEventCostSpec;
   uid: string;
   username: string;
   isSandbox?: boolean;
   broadcastToAll?: boolean;
+  excludeSummoner?: boolean;
 }): Promise<{ ok: boolean; event?: ActiveGlobalLiveEvent }> {
-  const now = Date.now();
+  const now = getServerNowMs();
   const isSbx = Boolean(params.isSandbox);
+  const effectiveExclude =
+    params.excludeSummoner !== undefined ? params.excludeSummoner : params.spec.excludeSummoner;
   const bannerMap: Record<GlobalEventType, string> = {
     click_marathon: `${params.username} Summoned a Click Event! (60s Marathon)`,
     falling_matthews: `${params.username} Summoned a Click Event! (Falling Matthews)`,
     golden_rain: `${params.username} Summoned a Click Event! (100 Golden Matthews)`,
-    zombie_boss_raid: `${params.username} Unleashed a Zombie Boss Raid on Everyone Else!`,
-    screen_freeze: `${params.username} Froze Everyone Else's Screen (${params.spec.durationSeconds}s)!`,
+    zombie_boss_raid: `${params.username} Unleashed a Zombie Boss Raid!`,
+    screen_freeze: `${params.username} Froze Everyone's Screen (${params.spec.durationSeconds}s)!`,
   };
 
   const event: ActiveGlobalLiveEvent = {
     id: `gevt_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    uid: params.uid,
     type: params.spec.type,
     summonedByUid: params.uid,
     summonedByUsername: params.username,
@@ -154,7 +167,7 @@ export async function summonGlobalLiveEvent(params: {
     endsAtMs: now + (params.spec.durationSeconds + 4.5) * 1000,
     durationSeconds: params.spec.durationSeconds,
     countOrTarget: params.spec.type === 'golden_rain' ? 100 : undefined,
-    excludeSummoner: params.spec.excludeSummoner,
+    excludeSummoner: effectiveExclude,
   };
 
   const scopes = params.broadcastToAll ? [false, true] : [isSbx];
@@ -168,7 +181,7 @@ export async function summonGlobalLiveEvent(params: {
     }
   }
 
-  // Write under `usernames/__global_live_event` so Firebase RTDB security rules allow all signed-in players to broadcast and read
+  // Write under `usernames/__global_live_event` so Firebase RTDB security rules allow signed-in players to broadcast and read
   await Promise.all(
     scopes.map((sc) =>
       rtdbRestWrite(scopeRtdbPath('usernames/__global_live_event', sc), event, 'PUT').catch(
@@ -207,7 +220,7 @@ export async function broadcastGlobalGoldenSwarm(params: {
   isSandbox?: boolean;
   broadcastToAll?: boolean;
 }): Promise<GlobalGoldenSwarmBroadcast> {
-  const now = Date.now();
+  const now = getServerNowMs();
   const isSbx = Boolean(params.isSandbox);
   const count = Math.min(24, Math.max(8, Math.floor(params.count ?? 18)));
   const broadcast: GlobalGoldenSwarmBroadcast = {
@@ -217,7 +230,7 @@ export async function broadcastGlobalGoldenSwarm(params: {
     count,
     message: `${params.username || 'Developer'} spawned ${count} Flying Golden Matthews across every screen!`,
     timestampMs: now,
-    expiresAtMs: now + 60_000,
+    expiresAtMs: now + 90_000,
   };
 
   const scopes = params.broadcastToAll ? [false, true] : [isSbx];
@@ -243,14 +256,25 @@ export async function broadcastGlobalGoldenSwarm(params: {
 export async function fetchLatestGlobalGoldenSwarm(
   isSandbox: boolean = false
 ): Promise<GlobalGoldenSwarmBroadcast | null> {
-  const now = Date.now();
+  const now = getServerNowMs();
   try {
-    const data = await rtdbRestGet<GlobalGoldenSwarmBroadcast>(
-      scopeRtdbPath('usernames/__golden_swarm', isSandbox),
-      2500
+    const [directSwarm, adminDoc] = await Promise.all([
+      rtdbRestGet<GlobalGoldenSwarmBroadcast>(
+        scopeRtdbPath('usernames/__golden_swarm', isSandbox),
+        2500
+      ).catch(() => null),
+      rtdbRestGet<{ goldenSwarm?: GlobalGoldenSwarmBroadcast | null }>(
+        DEV_ADMIN_EVENT_DOC_PATH,
+        2500
+      ).catch(() => null),
+    ]);
+    const candidates = [directSwarm, adminDoc?.goldenSwarm || null].filter(
+      (s): s is GlobalGoldenSwarmBroadcast =>
+        Boolean(s && s.id && s.expiresAtMs && now <= s.expiresAtMs)
     );
-    if (data && data.id && data.expiresAtMs && now <= data.expiresAtMs) {
-      return data;
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
+      return candidates[0];
     }
   } catch {
     // Fallback below
@@ -274,14 +298,25 @@ export async function fetchLatestGlobalGoldenSwarm(
 export async function fetchActiveGlobalLiveEvent(
   isSandbox: boolean = false
 ): Promise<ActiveGlobalLiveEvent | null> {
-  const now = Date.now();
+  const now = getServerNowMs();
   try {
-    const data = await rtdbRestGet<ActiveGlobalLiveEvent>(
-      scopeRtdbPath('usernames/__global_live_event', isSandbox),
-      3000
+    const [directEvent, adminDoc] = await Promise.all([
+      rtdbRestGet<ActiveGlobalLiveEvent>(
+        scopeRtdbPath('usernames/__global_live_event', isSandbox),
+        3000
+      ).catch(() => null),
+      rtdbRestGet<{ activeGlobalEvent?: ActiveGlobalLiveEvent | null }>(
+        DEV_ADMIN_EVENT_DOC_PATH,
+        3000
+      ).catch(() => null),
+    ]);
+    const candidates = [directEvent, adminDoc?.activeGlobalEvent || null].filter(
+      (ev): ev is ActiveGlobalLiveEvent =>
+        Boolean(ev && ev.id && ev.endsAtMs && now <= ev.endsAtMs + 15_000)
     );
-    if (data && data.id && data.endsAtMs && now <= data.endsAtMs + 6000) {
-      return data;
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => (b.startedAtMs || 0) - (a.startedAtMs || 0));
+      return candidates[0];
     }
   } catch {
     // Fall back to local cache below
@@ -291,7 +326,7 @@ export async function fetchActiveGlobalLiveEvent(
       const saved = localStorage.getItem(getLocalEventKey(isSandbox));
       if (saved) {
         const parsed = JSON.parse(saved) as ActiveGlobalLiveEvent;
-        if (parsed && parsed.id && parsed.endsAtMs && now <= parsed.endsAtMs + 6000) {
+        if (parsed && parsed.id && parsed.endsAtMs && now <= parsed.endsAtMs + 15_000) {
           return parsed;
         }
       }

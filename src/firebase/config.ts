@@ -27,6 +27,44 @@ let idTokenListenerAttached = false;
 
 let writeCooldownUntilMs = 0;
 const WRITE_COOLDOWN_DURATION_MS = 5 * 60 * 1000;
+let serverClockOffsetMs = 0;
+
+export function getServerNowMs(): number {
+  return Date.now() + serverClockOffsetMs;
+}
+
+export async function syncServerClockOffset(uid?: string | null): Promise<number> {
+  if (!uid || typeof fetch === 'undefined') return serverClockOffsetMs;
+  const token = await getAuthIdToken(1800);
+  if (!token) return serverClockOffsetMs;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
+  try {
+    const t0 = Date.now();
+    const res = await fetch(
+      `${RTDB_REST_BASE}/users/${encodeURIComponent(uid)}/_clock.json?auth=${encodeURIComponent(token)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ '.sv': 'timestamp' }),
+        signal: controller.signal,
+      }
+    );
+    if (res.ok) {
+      const serverTs = await res.json();
+      const t1 = Date.now();
+      if (typeof serverTs === 'number' && Number.isFinite(serverTs)) {
+        const midpoint = (t0 + t1) / 2;
+        serverClockOffsetMs = Math.round(serverTs - midpoint);
+      }
+    }
+  } catch {
+    // keep previous offset on transient failure
+  } finally {
+    clearTimeout(timer);
+  }
+  return serverClockOffsetMs;
+}
 
 export function isCloudWriteCoolingDown(): boolean {
   return Date.now() < writeCooldownUntilMs;

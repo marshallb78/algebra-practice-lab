@@ -1,5 +1,6 @@
 import { getFirebaseServices, rtdbRestGet, rtdbRestWrite, rtdbRestDelete, scopeRtdbPath } from './config';
 import { getActiveSeason } from '../utils/scheduleEngine';
+import type { ActiveGlobalLiveEvent, GlobalGoldenSwarmBroadcast } from './liveEvents';
 
 export const OFFICIAL_BAN_MESSAGE =
   'You have been banned because of suspicious behavior including cheating, using auto clickers, or hacking.';
@@ -63,6 +64,8 @@ interface AdminModerationDoc {
   resetsByUid?: Record<string, ResetRecord>;
   broadcast?: ServerBroadcast | null;
   probationResolutionsByUid?: Record<string, ProbationResolution>;
+  activeGlobalEvent?: ActiveGlobalLiveEvent | null;
+  goldenSwarm?: GlobalGoldenSwarmBroadcast | null;
 }
 
 /**
@@ -477,6 +480,8 @@ async function updateAdminModerationDoc(
       ...(existing?.resetsByUid || {}),
     },
     broadcast: existing?.broadcast || cachedBroadcast || null,
+    activeGlobalEvent: existing?.activeGlobalEvent ?? null,
+    goldenSwarm: existing?.goldenSwarm ?? null,
     probationResolutionsByUid: {
       ...cachedProbationResolutionsByUid,
       ...(existing?.probationResolutionsByUid || {}),
@@ -728,6 +733,24 @@ export async function adminSetServerBroadcast(
   cachedBroadcast = broadcast;
   return updateAdminModerationDoc((doc) => {
     doc.broadcast = broadcast;
+    return doc;
+  });
+}
+
+export async function adminPublishGlobalEvent(
+  event: ActiveGlobalLiveEvent | null
+): Promise<boolean> {
+  return updateAdminModerationDoc((doc) => {
+    doc.activeGlobalEvent = event;
+    return doc;
+  });
+}
+
+export async function adminPublishGoldenSwarm(
+  swarm: GlobalGoldenSwarmBroadcast | null
+): Promise<boolean> {
+  return updateAdminModerationDoc((doc) => {
+    doc.goldenSwarm = swarm;
     return doc;
   });
 }

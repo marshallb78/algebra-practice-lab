@@ -50,6 +50,7 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
   const swarmItemsRef = useRef(swarmItems);
   swarmItemsRef.current = swarmItems;
   const lastSwarmTriggerIdRef = useRef<string | null>(null);
+  const pendingSwarmRef = useRef<{ id: string; count: number } | null>(null);
   const isPausedRef = useRef(isPaused);
   isPausedRef.current = isPaused;
   const isSeason2Ref = useRef(isSeasonTwoOrLater(state.currentSeasonId));
@@ -100,10 +101,15 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     return () => window.clearTimeout(timer);
   }, [isActive, isPaused]);
 
-  // Dev-triggered server-wide Flying Golden Matthew Swarm
+  // Dev-triggered server-wide Flying Golden Matthew Swarm (defers cleanly if paused by cutscene/modal)
   useEffect(() => {
     if (!swarmTrigger?.id || lastSwarmTriggerIdRef.current === swarmTrigger.id) return;
+    if (isPaused) {
+      pendingSwarmRef.current = swarmTrigger;
+      return;
+    }
     lastSwarmTriggerIdRef.current = swarmTrigger.id;
+    pendingSwarmRef.current = null;
 
     const total = Math.min(24, Math.max(8, swarmTrigger.count || 18));
     const winW = typeof window !== 'undefined' ? window.innerWidth : 1280;
@@ -125,7 +131,7 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     swarmItemsRef.current = spawned;
     setSwarmItems(spawned);
     soundManager.playGoldenSpawn();
-  }, [swarmTrigger?.id, swarmTrigger?.count]);
+  }, [swarmTrigger?.id, swarmTrigger?.count, isPaused]);
 
   // Smooth edge-to-edge flight animation (despawns ONLY when exiting opposite screen edge or caught)
   const hasSwarmActive = swarmItems.length > 0;
@@ -199,7 +205,7 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     const cps = calculateCPS(state);
     const { totalPower } = calculateClickPower(state);
     const productionBounty = clampFiniteCoinAmount(
-      Math.floor(cps * 35 + totalPower * 80),
+      Math.floor(cps * 24 + totalPower * 55),
       MAX_SAFE_SEASON_COINS
     );
     return Math.max(BALANCE.goldenEvent.minBountyFloor, productionBounty);

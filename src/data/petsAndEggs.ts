@@ -410,7 +410,7 @@ export function getPetHungerEffectiveness(_hunger: number): number {
 export function getPetClickMultiplierBonus(pet: PetInstance): number {
   const spec = getPetSpeciesDefinition(pet.speciesId, pet.rarity);
   const lvl = Math.max(1, pet.level || 1);
-  const levelScale = 1 + (lvl - 1) * 0.35 + Math.max(0, lvl - 5) * 0.12;
+  const levelScale = 1 + (lvl - 1) * 0.28 + Math.max(0, lvl - 5) * 0.1;
   return Number((spec.baseMultiplierBonus * levelScale).toFixed(2));
 }
 

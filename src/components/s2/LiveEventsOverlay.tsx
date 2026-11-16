@@ -10,6 +10,7 @@ import {
   summonGlobalLiveEvent,
 } from '../../firebase/liveEvents';
 import { SEASON_2_LIVE_EVENT_SKINS } from '../../data/season2Skins';
+import { getServerNowMs } from '../../firebase/config';
 import { formatCoins, formatNumber } from '../../utils/formatters';
 
 interface LiveEventsModalProps {
@@ -217,7 +218,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
   // Countdown + Marathon end settlement
   useEffect(() => {
     const t = setInterval(() => {
-      const rem = Math.max(0, Math.ceil((event.endsAtMs - Date.now()) / 1000));
+      const rem = Math.max(0, Math.ceil((event.endsAtMs - getServerNowMs()) / 1000));
       setSecondsLeft(rem);
 
       if (rem <= 0 && settledRef.current !== event.id && event.type === 'click_marathon') {
@@ -267,7 +268,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
     );
 
     const t = setInterval(() => {
-      if (Date.now() > event.endsAtMs) return;
+      if (getServerNowMs() > event.endsAtMs) return;
       setFallingItems((prev) => {
         const moved = prev
           .map((item) => {
@@ -349,7 +350,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
     }
   };
 
-  if (Date.now() > event.endsAtMs + 2000) return null;
+  if (getServerNowMs() > event.endsAtMs + 2000) return null;
 
   const elapsedSec = Math.max(1, (Date.now() - marathonStartMs) / 1000);
   const marathonCps = (marathonClicks / elapsedSec).toFixed(1);
