@@ -229,6 +229,14 @@ export function performSeasonalRollover(
     highestCps: state.highestCps || 0,
 
     currentSeasonId: newSeasonId,
+    eventStats: {
+      eventId: MATTHEW_STORM_CONFIG.eventId,
+      activeSeconds: 0,
+      gemsEarned: 0,
+      giantMatthewsClicked: 0,
+      giantMatthewRewardsCoins: 0,
+      stormSkinsPurchased: [],
+    },
     seasonHistory: [
       ...(state.seasonHistory || []),
       {
@@ -640,6 +648,10 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
       typeof parsed.lastOwnerUid === 'string'
         ? parsed.lastOwnerUid
         : parsed.cloudAccount?.uid || null,
+    appliedCloudAdjustmentAtMs:
+      typeof parsed.appliedCloudAdjustmentAtMs === 'number' && !isNaN(parsed.appliedCloudAdjustmentAtMs)
+        ? parsed.appliedCloudAdjustmentAtMs
+        : undefined,
     cloudAccount: parsed.cloudAccount && typeof parsed.cloudAccount === 'object' ? parsed.cloudAccount : null,
     settings,
   };

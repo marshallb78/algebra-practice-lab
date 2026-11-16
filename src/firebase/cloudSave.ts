@@ -29,6 +29,13 @@ import {
   isSandboxSeason2Context,
 } from '../config/gameConfig';
 import {
+  LIAM_S2_ADJUSTED_COINS,
+  LIAM_S2_ADJUSTED_LIFETIME_COINS,
+  LIAM_S2_ADJUSTED_QUESTS,
+  LIAM_S2_ADJUSTED_SHARDS,
+  LIAM_S2_ADJUSTED_UPGRADES,
+  LIAM_S2_REBALANCE_REVISION_MS,
+  LIAM_S2_REBALANCE_UID,
   SEASON_1_CHAMPION_USERNAME,
   updateLeaderboardEntry,
   updateLeaderboardEntryKeepalive,
@@ -202,6 +209,7 @@ function buildUserCloudPayload(
     clanId: state.clanId || null,
     clanName: state.clanName || null,
     settings: state.settings,
+    cloudAdjustmentAtMs: state.appliedCloudAdjustmentAtMs || 0,
     resetAtMs: null,
     updatedAtMs: nowMs,
     seasons: {
@@ -272,6 +280,30 @@ export function reconcileCloudAndLocalState(params: {
 
   const rtdbSeason = rtdbUser?.seasons?.[activeSeasonId] || null;
 
+  const localAppliedAdjustmentAtMs = Math.max(
+    0,
+    typeof localState.appliedCloudAdjustmentAtMs === 'number'
+      ? localState.appliedCloudAdjustmentAtMs
+      : 0
+  );
+  const cloudAdjustmentAtMs = Math.max(
+    typeof rtdbUser?.cloudAdjustmentAtMs === 'number' ? rtdbUser.cloudAdjustmentAtMs : 0,
+    typeof rtdbLb?.cloudAdjustmentAtMs === 'number' ? rtdbLb.cloudAdjustmentAtMs : 0
+  );
+  const isCloudAdjustmentPending =
+    cloudAdjustmentAtMs > 0 && cloudAdjustmentAtMs > localAppliedAdjustmentAtMs;
+  const needsLiamS2Rebalance =
+    uid === LIAM_S2_REBALANCE_UID &&
+    activeSeasonId === 'season_2' &&
+    !wasExplicitlyReset &&
+    localAppliedAdjustmentAtMs < LIAM_S2_REBALANCE_REVISION_MS &&
+    cloudAdjustmentAtMs < LIAM_S2_REBALANCE_REVISION_MS &&
+    Math.max(
+      localState.lifetimeCoins || 0,
+      typeof rtdbSeason?.lifetimeCoins === 'number' ? rtdbSeason.lifetimeCoins : 0,
+      typeof rtdbLb?.lifetimeCoins === 'number' ? rtdbLb.lifetimeCoins : 0
+    ) > 1e25;
+
   // Prefer RTDB sources whenever any RTDB record exists; only fall back to legacy Firestore otherwise
   const sources: Record<string, any>[] =
     rtdbUser || rtdbLb
@@ -285,13 +317,14 @@ export function reconcileCloudAndLocalState(params: {
     saveTs: 0,
   };
 
-  let maxCareerPlaytime = localState.totalPlaytimeSeconds || 0;
-  let maxCareerClicks = Math.max(localState.lifetimeAllSeasonsClicks || 0, localState.clicks || 0);
-  let maxCareerHighestCps = localState.highestCps || 0;
-  let maxCareerCoins = Math.max(
-    localState.lifetimeAllSeasonsCoins || 0,
-    localState.lifetimeCoins || 0
-  );
+  let maxCareerPlaytime = isCloudAdjustmentPending ? 0 : localState.totalPlaytimeSeconds || 0;
+  let maxCareerClicks = isCloudAdjustmentPending
+    ? 0
+    : Math.max(localState.lifetimeAllSeasonsClicks || 0, localState.clicks || 0);
+  let maxCareerHighestCps = isCloudAdjustmentPending ? 0 : localState.highestCps || 0;
+  let maxCareerCoins = isCloudAdjustmentPending
+    ? 0
+    : Math.max(localState.lifetimeAllSeasonsCoins || 0, localState.lifetimeCoins || 0);
 
   const allSkins = new Set<string>(['classic_matthew', ...(localState.unlockedSkins || [])]);
   if (uid === MARSHALL_RECOVERY_UID && !wasExplicitlyReset) {
@@ -300,7 +333,9 @@ export function reconcileCloudAndLocalState(params: {
     });
   }
   const allPermAch = new Set<string>(localState.permanentAchievements || []);
-  const allClaimedQuests = new Set<string>(localState.claimedQuests || []);
+  const allClaimedQuests = new Set<string>(
+    isCloudAdjustmentPending ? [] : localState.claimedQuests || []
+  );
   const allUnlockedAchievements = new Set<string>(localState.unlockedAchievements || []);
   const allUnlockedRealms = new Set<string>(localState.unlockedRealms || ['earth']);
 
@@ -487,6 +522,7 @@ export function reconcileCloudAndLocalState(params: {
   const isFreshSeasonRollover = !localInActiveSeason && bestCloudSnapshot.lifetimeCoins < 0;
 
   const useCloudBase =
+    isCloudAdjustmentPending ||
     isFreshSeasonRollover ||
     forceCloudAfterReset ||
     (bestCloudSnapshot.lifetimeCoins >= 0 &&
@@ -542,6 +578,12 @@ export function reconcileCloudAndLocalState(params: {
 
   const mergedPrestigeCount = forceSeasonalZero
     ? 0
+    : isCloudAdjustmentPending
+    ? typeof authoritativeSeason.prestigeCount === 'number'
+      ? authoritativeSeason.prestigeCount
+      : typeof authoritativeSeason.rebirthCount === 'number'
+      ? authoritativeSeason.rebirthCount
+      : cloudMaxPrestigeCount
     : Math.max(
         typeof authoritativeSeason.prestigeCount === 'number'
           ? authoritativeSeason.prestigeCount
@@ -554,6 +596,10 @@ export function reconcileCloudAndLocalState(params: {
 
   const mergedPrestigeShards = forceSeasonalZero
     ? 0
+    : isCloudAdjustmentPending
+    ? typeof authoritativeSeason.prestigeShards === 'number'
+      ? authoritativeSeason.prestigeShards
+      : cloudMaxPrestigeShards
     : Math.max(
         typeof authoritativeSeason.prestigeShards === 'number'
           ? authoritativeSeason.prestigeShards
@@ -564,6 +610,10 @@ export function reconcileCloudAndLocalState(params: {
 
   const mergedLifetimePrestigeShards = forceSeasonalZero
     ? 0
+    : isCloudAdjustmentPending
+    ? typeof authoritativeSeason.lifetimePrestigeShards === 'number'
+      ? authoritativeSeason.lifetimePrestigeShards
+      : mergedPrestigeShards
     : Math.max(
         typeof authoritativeSeason.lifetimePrestigeShards === 'number'
           ? authoritativeSeason.lifetimePrestigeShards
@@ -574,6 +624,10 @@ export function reconcileCloudAndLocalState(params: {
 
   const mergedClicks = forceSeasonalZero
     ? 0
+    : isCloudAdjustmentPending
+    ? typeof authoritativeSeason.clicks === 'number'
+      ? authoritativeSeason.clicks
+      : cloudMaxClicks
     : Math.max(
         typeof authoritativeSeason.clicks === 'number' ? authoritativeSeason.clicks : 0,
         cloudMaxClicks,
@@ -582,6 +636,15 @@ export function reconcileCloudAndLocalState(params: {
 
   const mergedLifetimeCoins = forceSeasonalZero
     ? 0
+    : isCloudAdjustmentPending
+    ? Math.max(
+        typeof authoritativeSeason.lifetimeCoins === 'number'
+          ? authoritativeSeason.lifetimeCoins
+          : 0,
+        typeof authoritativeSeason.seasonalScore === 'number'
+          ? authoritativeSeason.seasonalScore
+          : 0
+      )
     : Math.max(
         typeof authoritativeSeason.lifetimeCoins === 'number'
           ? authoritativeSeason.lifetimeCoins
@@ -594,6 +657,13 @@ export function reconcileCloudAndLocalState(params: {
 
   const mergedSeasonalScore = forceSeasonalZero
     ? 0
+    : isCloudAdjustmentPending
+    ? Math.max(
+        typeof authoritativeSeason.seasonalScore === 'number'
+          ? authoritativeSeason.seasonalScore
+          : 0,
+        Math.floor(mergedLifetimeCoins)
+      )
     : Math.max(
         typeof authoritativeSeason.seasonalScore === 'number'
           ? authoritativeSeason.seasonalScore
@@ -728,10 +798,42 @@ export function reconcileCloudAndLocalState(params: {
     recoveredFromCareerLoss = true;
   }
 
+  if (needsLiamS2Rebalance) {
+    const historyMax = (
+      Array.isArray(rtdbUser?.seasonHistory)
+        ? rtdbUser.seasonHistory
+        : localState.seasonHistory || []
+    ).reduce((acc: number, s: any) => Math.max(acc, Number(s?.finalScore) || 0), 0);
+    reconciled = sanitizeAndValidateGameState({
+      ...reconciled,
+      coins: LIAM_S2_ADJUSTED_COINS,
+      lifetimeCoins: LIAM_S2_ADJUSTED_LIFETIME_COINS,
+      seasonalScore: LIAM_S2_ADJUSTED_LIFETIME_COINS,
+      prestigeCount: Math.max(2, reconciled.prestigeCount || 0),
+      prestigeShards: LIAM_S2_ADJUSTED_SHARDS,
+      lifetimePrestigeShards: LIAM_S2_ADJUSTED_SHARDS,
+      upgrades: LIAM_S2_ADJUSTED_UPGRADES,
+      claimedQuests: LIAM_S2_ADJUSTED_QUESTS,
+      zombiesStolenCoins: 0,
+      lifetimeAllSeasonsCoins: Math.max(historyMax, LIAM_S2_ADJUSTED_LIFETIME_COINS),
+      appliedCloudAdjustmentAtMs: LIAM_S2_REBALANCE_REVISION_MS,
+      lastOwnerUid: uid,
+      lastSaveTime: nowMs,
+    });
+  }
+
   reconciled = {
     ...reconciled,
+    appliedCloudAdjustmentAtMs: needsLiamS2Rebalance
+      ? LIAM_S2_REBALANCE_REVISION_MS
+      : Math.max(localAppliedAdjustmentAtMs, cloudAdjustmentAtMs) || undefined,
     lastOwnerUid: uid,
-    lastSaveTime: recoveredFromCareerLoss ? nowMs : effectiveLastSaveTime,
+    lastSaveTime:
+      recoveredFromCareerLoss || needsLiamS2Rebalance
+        ? nowMs
+        : isCloudAdjustmentPending
+        ? Math.max(nowMs, effectiveLastSaveTime)
+        : effectiveLastSaveTime,
   };
 
   // Only push back up if local state contributed newer gains, missing skins, claim dates, removed unauthorized champion skin, or recovered Marshallb78's score;
@@ -750,6 +852,7 @@ export function reconcileCloudAndLocalState(params: {
     (Array.from(cloudSkinSet).some((id) => isSeason2OnlySkinId(id)) ||
       (typeof rtdbUser?.equippedSkin === 'string' && isSeason2OnlySkinId(rtdbUser.equippedSkin)));
   const shouldPushToCloud =
+    needsLiamS2Rebalance ||
     recoveredFromCareerLoss ||
     hadUnauthorizedChampionInCloud ||
     hadLeakedSeason2InCloud ||
@@ -760,7 +863,8 @@ export function reconcileCloudAndLocalState(params: {
 
   return {
     state: reconciled,
-    shouldPushToCloud: !forceCloudAfterReset && shouldPushToCloud,
+    shouldPushToCloud:
+      !forceCloudAfterReset && (!isCloudAdjustmentPending || needsLiamS2Rebalance) && shouldPushToCloud,
     recoveredFromCareerLoss,
   };
 }

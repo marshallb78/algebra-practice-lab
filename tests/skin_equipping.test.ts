@@ -22,7 +22,7 @@ describe('Automatic Skin Equipping, Locked Skin Enforcement & Fast-Click Animati
   const storageMap = new Map<string, string>();
 
   beforeEach(() => {
-    state = getDefaultGameState();
+    state = { ...getDefaultGameState(), currentSeasonId: 'season_1' };
     storageMap.clear();
 
     const localStorageMock = {

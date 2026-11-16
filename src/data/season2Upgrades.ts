@@ -134,8 +134,8 @@ function formatNiceCost(raw: number): number {
  */
 export const SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => {
   const baseCost = idx === TOTAL_STEPS ? END_COST : formatNiceCost(START_COST * Math.pow(STEP_RATIO, idx));
-  // Balanced ROI curve (~80s-560s base payback) so Season 2 progression feels earned
-  const powerAnchor = Math.max(1, Math.round(baseCost / (80 + idx * 4.8)));
+  // Balanced ROI curve (~180s-1510s base payback) so Season 2 progression feels earned
+  const powerAnchor = Math.max(1, Math.round(baseCost / (180 + idx * 14)));
   const iconFallback =
     spec.focus === 'click' ? 'Sword' : spec.focus === 'cps' ? 'Zap' : 'Snowflake';
 
@@ -146,7 +146,7 @@ export const SEASON_2_UPGRADES: Upgrade[] = S2_UPGRADE_SPECS.map((spec, idx) => 
     icon: iconFallback,
     iconImage: `./images/s2/upgrades/up_${spec.iconNum}.png`,
     baseCost,
-    costMultiplier: Number((1.17 + Math.min(0.15, idx * 0.0015)).toFixed(3)),
+    costMultiplier: Number((1.2 + Math.min(0.18, idx * 0.002)).toFixed(3)),
     baseCps:
       spec.focus === 'click'
         ? 0

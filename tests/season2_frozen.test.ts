@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   getDefaultGameState,
   saveGame,
@@ -47,6 +47,10 @@ import {
 import { CRATE_DEFINITIONS, rollCrateReward } from '../src/data/crates';
 import { calculateClickPower, calculateCPS } from '../src/utils/calculations';
 import {
+  LIAM_S2_ADJUSTED_LIFETIME_COINS,
+  LIAM_S2_ADJUSTED_SHARDS,
+  LIAM_S2_REBALANCE_REVISION_MS,
+  LIAM_S2_REBALANCE_UID,
   buildLeaderboardPayload,
   isExcludedFromLeaderboard,
 } from '../src/firebase/leaderboard';
@@ -109,6 +113,8 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
   it('keeps dev sandbox isolated from Season 1 save, removes gay_matthew, and includes liam_matthew placeholder', () => {
     const store: Record<string, string> = {};
     const prevWin = (globalThis as any).window;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.UTC(2026, 10, 14, 17, 0, 0)));
     (globalThis as any).window = {
       localStorage: {
         getItem: (k: string) => (k in store ? store[k] : null),
@@ -145,6 +151,7 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       const reloaded = loadSandboxGame();
       expect(reloaded.coins).toBe(0);
     } finally {
+      vi.useRealTimers();
       (globalThis as any).window = prevWin;
     }
 
@@ -795,5 +802,155 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     });
     expect(postLaunchReconciled.state.unlockedSkins).toContain(s2SkinId);
     expect(postLaunchReconciled.state.equippedSkin).toBe(s2SkinId);
+  });
+
+  it('formats 10^66+ cleanly without showing Infinity and enforces cloudAdjustmentAtMs rebalancing over stale local saves', () => {
+    expect(formatCoins(5.0427e68)).toBe('504.3UVg');
+    expect(formatCoins(5.0427e68)).not.toContain('Infinity');
+
+    const chestQuest = QUESTS.find((q) => q.id === 'season_chests_20');
+    expect(chestQuest?.rewardCoins).toBeLessThanOrEqual(1e8);
+
+    const adjTs = LIAM_S2_REBALANCE_REVISION_MS + 60_000;
+    const inflatedLocal = {
+      ...getDefaultGameState(),
+      currentSeasonId: 'season_2',
+      lastOwnerUid: 'UF3esYX32lhJJThQMMXmXQ7TJof1',
+      coins: 6.7e67,
+      lifetimeCoins: 5.04e68,
+      seasonalScore: 5.04e68,
+      prestigeShards: 305,
+      lifetimePrestigeShards: 305,
+      prestigeCount: 2,
+      claimedQuests: ['season_chests_20', 'season_coins_udc', 'season_coins_vg'],
+      lastSaveTime: adjTs - 300_000,
+    };
+
+    const adjusted = reconcileCloudAndLocalState({
+      uid: 'UF3esYX32lhJJThQMMXmXQ7TJof1',
+      username: 'liamkd3',
+      localState: inflatedLocal,
+      rtdbUser: {
+        uid: 'UF3esYX32lhJJThQMMXmXQ7TJof1',
+        username: 'liamkd3',
+        cloudAdjustmentAtMs: adjTs,
+        lifetimeAllSeasonsCoins: 2.2e41,
+        seasons: {
+          season_2: {
+            seasonId: 'season_2',
+            coins: 2.5e13,
+            lifetimeCoins: 1.5e14,
+            seasonalScore: 1.5e14,
+            prestigeCount: 2,
+            prestigeShards: 36,
+            lifetimePrestigeShards: 36,
+            claimedQuests: ['season_chests_20'],
+            upgrades: { s2_snowball_pack: 15, s2_thermal_mittens: 10 },
+            lastSaveTime: adjTs,
+          },
+        },
+      },
+      rtdbLb: {
+        uid: 'UF3esYX32lhJJThQMMXmXQ7TJof1',
+        username: 'liamkd3',
+        cloudAdjustmentAtMs: adjTs,
+        lifetimeCoins: 1.5e14,
+        seasonalScore: 1.5e14,
+        coins: 2.5e13,
+        prestigeShards: 36,
+        rebirthCount: 2,
+      },
+      wasExplicitlyReset: false,
+      resetAtMs: 0,
+      activeSeasonId: 'season_2',
+      nowMs: adjTs + 5000,
+    });
+
+    expect(adjusted.state.lifetimeCoins).toBe(1.5e14);
+    expect(adjusted.state.coins).toBe(2.5e13);
+    expect(adjusted.state.prestigeShards).toBe(36);
+    expect(adjusted.state.claimedQuests).not.toContain('season_coins_vg');
+    expect(adjusted.state.appliedCloudAdjustmentAtMs).toBe(adjTs);
+    expect(adjusted.shouldPushToCloud).toBe(false);
+
+    // Also verifies one-time automatic rebalance for liamkd3 pre-patch 5.04e68 save
+    const autoRebalance = reconcileCloudAndLocalState({
+      uid: LIAM_S2_REBALANCE_UID,
+      username: 'liamkd3',
+      localState: {
+        ...getDefaultGameState(),
+        currentSeasonId: 'season_2',
+        lastOwnerUid: LIAM_S2_REBALANCE_UID,
+        coins: 6.73e67,
+        lifetimeCoins: 5.04e68,
+        seasonalScore: 5.04e68,
+        prestigeCount: 2,
+        prestigeShards: 305,
+        lifetimePrestigeShards: 305,
+        unlockedSkins: ['classic_matthew', 'champion_matthew', 'liam_matthew'],
+        equippedSkin: 'champion_matthew',
+        claimedQuests: ['season_chests_20', 'season_coins_udc', 'season_coins_vg'],
+      },
+      rtdbUser: {
+        uid: LIAM_S2_REBALANCE_UID,
+        username: 'liamkd3',
+        unlockedSkins: ['classic_matthew', 'champion_matthew', 'liam_matthew'],
+        equippedSkin: 'champion_matthew',
+        seasons: {
+          season_2: {
+            seasonId: 'season_2',
+            coins: 6.73e67,
+            lifetimeCoins: 5.04e68,
+            seasonalScore: 5.04e68,
+            prestigeCount: 2,
+            prestigeShards: 305,
+            lifetimePrestigeShards: 305,
+          },
+        },
+      },
+      rtdbLb: null,
+      wasExplicitlyReset: false,
+      resetAtMs: 0,
+      activeSeasonId: 'season_2',
+    });
+    expect(autoRebalance.state.lifetimeCoins).toBe(LIAM_S2_ADJUSTED_LIFETIME_COINS);
+    expect(autoRebalance.state.prestigeShards).toBe(LIAM_S2_ADJUSTED_SHARDS);
+    expect(autoRebalance.state.prestigeCount).toBe(2);
+    expect(autoRebalance.state.unlockedSkins).toContain('champion_matthew');
+    expect(autoRebalance.state.claimedQuests).not.toContain('season_coins_vg');
+    expect(autoRebalance.state.appliedCloudAdjustmentAtMs).toBe(LIAM_S2_REBALANCE_REVISION_MS);
+    expect(autoRebalance.shouldPushToCloud).toBe(true);
+
+    // Subsequent legitimate gains above 1.5e14 after rebalance are preserved
+    const afterProgress = reconcileCloudAndLocalState({
+      uid: LIAM_S2_REBALANCE_UID,
+      username: 'liamkd3',
+      localState: {
+        ...autoRebalance.state,
+        lifetimeCoins: 9e15,
+        seasonalScore: 9e15,
+        coins: 4e15,
+      },
+      rtdbUser: {
+        uid: LIAM_S2_REBALANCE_UID,
+        username: 'liamkd3',
+        cloudAdjustmentAtMs: LIAM_S2_REBALANCE_REVISION_MS,
+        seasons: {
+          season_2: {
+            seasonId: 'season_2',
+            lifetimeCoins: LIAM_S2_ADJUSTED_LIFETIME_COINS,
+            seasonalScore: LIAM_S2_ADJUSTED_LIFETIME_COINS,
+            coins: 2.5e13,
+            prestigeCount: 2,
+            prestigeShards: LIAM_S2_ADJUSTED_SHARDS,
+          },
+        },
+      },
+      rtdbLb: null,
+      wasExplicitlyReset: false,
+      resetAtMs: 0,
+      activeSeasonId: 'season_2',
+    });
+    expect(afterProgress.state.lifetimeCoins).toBe(9e15);
   });
 });

@@ -63,7 +63,7 @@ export const QUESTS: Quest[] = [
     type: 'clicks',
     target: 250000,
     rewardGems: 60,
-    rewardCoins: 25000000,
+    rewardCoins: 5000000,
   },
   {
     id: 'season_crits_25k',
@@ -73,7 +73,7 @@ export const QUESTS: Quest[] = [
     type: 'crit_clicks',
     target: 25000,
     rewardGems: 75,
-    rewardCoins: 5e9,
+    rewardCoins: 25000000,
   },
   {
     id: 'season_upgrades_1200',
@@ -83,7 +83,7 @@ export const QUESTS: Quest[] = [
     type: 'upgrades',
     target: 1200,
     rewardGems: 90,
-    rewardCoins: 1e14,
+    rewardCoins: 150000000,
   },
   {
     id: 'season_zombies_300',
@@ -93,7 +93,7 @@ export const QUESTS: Quest[] = [
     type: 'zombies_defeated',
     target: 300,
     rewardGems: 110,
-    rewardCoins: 5e11,
+    rewardCoins: 50000000,
   },
   {
     id: 'season_chests_20',
@@ -103,7 +103,7 @@ export const QUESTS: Quest[] = [
     type: 'chests_opened',
     target: 20,
     rewardGems: 140,
-    rewardCoins: 1e18,
+    rewardCoins: 10000000,
   },
   {
     id: 'season_rebirth_40',
@@ -113,7 +113,7 @@ export const QUESTS: Quest[] = [
     type: 'rebirth',
     target: 40,
     rewardGems: 160,
-    rewardCoins: 1e26,
+    rewardCoins: 1e12,
   },
   {
     id: 'season_coins_udc',

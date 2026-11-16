@@ -361,6 +361,7 @@ export interface GameState {
   discoveredEasterEggs: string[];
   lastBetaWipeId?: string | null;
   lastOwnerUid?: string | null;
+  appliedCloudAdjustmentAtMs?: number;
   cloudAccount?: {
     uid: string;
     username: string;

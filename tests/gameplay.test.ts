@@ -103,47 +103,48 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       expect(maxInfo.totalCost).toBeLessThanOrEqual(coins);
     });
 
-    it('scales click power and CPS with balanced Ascension Multiplier (+0.055 per step), disables fast-click combo bonus, and applies Friday 4x Live Event', () => {
+    it('scales click power and CPS with balanced Ascension Multiplier (+0.04 per step), disables fast-click combo bonus, and applies Friday 4x Live Event', () => {
+      state.currentSeasonId = 'season_1';
       state.upgrades['finger_exercise'] = 10; // base click = 1 + 10*0.5 = 6, base CPS = 10*0.2 = 2
       state.upgrades['energy_coffee'] = 10; // base CPS = 2 + 10*0.5 = 7, +10*1.5 = 15 click power -> total base click = 21
-      state.prestigeShards = 12; // Ascension Multiplier = 1 + 12 * 0.055 = 1.66x
+      state.prestigeShards = 12; // Ascension Multiplier = 1 + 12 * 0.04 = 1.48x
       state.combo = 30; // Fast-clicking combo bonus is disabled -> must stay 1.0x
 
       const normalClick = calculateClickPower(state);
       const normalCps = calculateCPS(state);
       expect(normalClick.comboMultiplier).toBe(1.0);
-      expect(normalClick.ascensionMultiplier).toBeCloseTo(1.66);
-      expect(normalClick.totalPower).toBeCloseTo(34.86); // 21 * 1.66x
-      expect(normalCps).toBeCloseTo(11.62); // 7 * 1.66x
+      expect(normalClick.ascensionMultiplier).toBeCloseTo(1.48);
+      expect(normalClick.totalPower).toBeCloseTo(31.08); // 21 * 1.48x
+      expect(normalCps).toBeCloseTo(10.36); // 7 * 1.48x
 
       // Friday All-Day Live Event = 4x multiplier
       const liveOpts = { fridayBonusActive: false, stormWaveMultiplier: 4 };
       const boostedClick = calculateClickPower(state, liveOpts);
       const boostedCps = calculateCPS(state, liveOpts);
 
-      expect(boostedClick.totalPower).toBeCloseTo(139.44); // 34.86 * 4
-      expect(boostedCps).toBeCloseTo(46.48); // 11.62 * 4
+      expect(boostedClick.totalPower).toBeCloseTo(124.32); // 31.08 * 4
+      expect(boostedCps).toBeCloseTo(41.44); // 10.36 * 4
 
       const giantReward = calculateGiantMatthewClickReward(state, liveOpts);
       expect(giantReward).toBeGreaterThan(boostedClick.totalPower);
     });
   });
 
-  describe('Rebirth (Balanced Ascension Multiplier: +0.055 per step, ~3x at 37 shards)', () => {
+  describe('Rebirth (Balanced Ascension Multiplier: +0.04 per step, ~2.48x at 37 shards)', () => {
     it('returns 0 bonus if lifetime coins are below requirement (250K)', () => {
       expect(calculatePrestigeShards(50000)).toBe(0);
       expect(getAscensionMultiplier(0)).toBe(1);
     });
 
-    it('calculates Ascension Multiplier bonus in +0.055 steps starting at 250K (~3.04x where 0.6 was ~23x)', () => {
+    it('calculates Ascension Multiplier bonus in +0.04 steps starting at 250K', () => {
       expect(calculatePrestigeShards(250000)).toBe(1);
-      expect(calculatePrestigeShards(2500000)).toBe(6);
-      expect(getAscensionMultiplier(1)).toBe(1.05);
-      expect(getAscensionMultiplier(2)).toBe(1.11);
-      expect(getAscensionMultiplier(37)).toBeCloseTo(3.04, 2);
+      expect(calculatePrestigeShards(2500000)).toBe(5);
+      expect(getAscensionMultiplier(1)).toBe(1.04);
+      expect(getAscensionMultiplier(2)).toBe(1.08);
+      expect(getAscensionMultiplier(37)).toBeCloseTo(2.48, 2);
       const qaShards = calculatePrestigeShards(1e15);
-      expect(getAscensionMultiplier(qaShards)).toBeLessThan(4.5);
-      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(3.0);
+      expect(getAscensionMultiplier(qaShards)).toBeLessThan(3.0);
+      expect(getAscensionMultiplier(qaShards)).toBeGreaterThan(2.0);
     });
   });
 
@@ -184,6 +185,7 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
 
   describe('Uncapped Offline Earnings & Zero Offline Gems', () => {
     it('calculates uncapped offline coins even past 24 hours and awards 0 gems', () => {
+      state.currentSeasonId = 'season_1';
       state.upgrades['autoclicker_bot'] = 10;
       state.lastSaveTime = Date.now() - 3600 * 24 * 1000;
       const nowSec = Math.floor(Date.now() / 1000);
@@ -508,7 +510,7 @@ describe('Matthew Clicker Weekly Seasons & Live Event Gameplay Tests', () => {
       const liamChamp = reconcileCloudAndLocalState({
         uid: 'liamkd3_uid',
         username: 'liamkd3',
-        localState: getDefaultGameState(),
+        localState: { ...getDefaultGameState(), currentSeasonId: 'season_1' },
         rtdbUser: {
           uid: 'liamkd3_uid',
           username: 'liamkd3',

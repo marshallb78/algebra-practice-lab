@@ -25,7 +25,16 @@ const SUFFIXES = [
   'Ocdc',
   'Nmdc',
   'Vg',
-  'Infinity',
+  'UVg',
+  'DVg',
+  'TVg',
+  'QaVg',
+  'QiVg',
+  'SxVg',
+  'SpVg',
+  'OcVg',
+  'NoVg',
+  'Tg',
 ];
 
 export function formatCoins(val: number, precision: number = 1): string {
