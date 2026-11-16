@@ -1,5 +1,5 @@
 import { GameState, RealmId, PetInstance, EggRarity, FoodId } from '../types/game';
-import { calculateCPS } from './calculations';
+import { calculateCPS, clampFiniteCoinAmount, MAX_SAFE_SEASON_COINS } from './calculations';
 import { isValidSkinId, isSeason2OnlySkinId, checkAndApplyMilestoneUnlocks } from '../data/skins';
 import {
   createEmptySealedEggs,
@@ -319,16 +319,20 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
   }
 
   // 1. Sanitize raw numeric and object stats safely
-  const coins = Math.max(0, typeof parsed.coins === 'number' && !isNaN(parsed.coins) ? parsed.coins : def.coins);
-  const lifetimeCoins = Math.max(
-    0,
-    typeof parsed.lifetimeCoins === 'number' && !isNaN(parsed.lifetimeCoins)
-      ? parsed.lifetimeCoins
-      : Math.max(coins, def.lifetimeCoins)
+  const coins = clampFiniteCoinAmount(
+    typeof parsed.coins === 'number' ? parsed.coins : def.coins,
+    MAX_SAFE_SEASON_COINS
   );
-  const seasonalScore = Math.max(
-    Math.floor(lifetimeCoins),
-    typeof parsed.seasonalScore === 'number' && !isNaN(parsed.seasonalScore) ? Math.floor(parsed.seasonalScore) : 0
+  const lifetimeCoins = clampFiniteCoinAmount(
+    typeof parsed.lifetimeCoins === 'number' ? parsed.lifetimeCoins : Math.max(coins, def.lifetimeCoins),
+    MAX_SAFE_SEASON_COINS
+  );
+  const seasonalScore = clampFiniteCoinAmount(
+    Math.max(
+      Math.floor(lifetimeCoins),
+      typeof parsed.seasonalScore === 'number' ? Math.floor(parsed.seasonalScore) : 0
+    ),
+    MAX_SAFE_SEASON_COINS
   );
   const clicks = Math.max(0, typeof parsed.clicks === 'number' && !isNaN(parsed.clicks) ? parsed.clicks : def.clicks);
   const criticalClicks = Math.max(

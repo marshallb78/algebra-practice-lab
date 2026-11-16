@@ -23,17 +23,15 @@ import {
   isValidSkinId,
 } from '../data/skins';
 import {
+  MATTHEW_STORM_CONFIG,
   GEM_ECONOMY_CONFIG,
   SEASON_2_CONFIG,
   TEST_ISOLATION_CONFIG,
   isSandboxSeason2Context,
 } from '../config/gameConfig';
+import { createEmptySealedEggs } from '../data/petsAndEggs';
+import { STARTER_CURSOR_ID } from '../data/cursors';
 import {
-  LIAM_S2_ADJUSTED_COINS,
-  LIAM_S2_ADJUSTED_LIFETIME_COINS,
-  LIAM_S2_ADJUSTED_QUESTS,
-  LIAM_S2_ADJUSTED_SHARDS,
-  LIAM_S2_ADJUSTED_UPGRADES,
   LIAM_S2_REBALANCE_REVISION_MS,
   LIAM_S2_REBALANCE_UID,
   SEASON_1_CHAMPION_USERNAME,
@@ -259,6 +257,7 @@ export function reconcileCloudAndLocalState(params: {
   state: GameState;
   shouldPushToCloud: boolean;
   recoveredFromCareerLoss: boolean;
+  season2ResetApplied?: boolean;
 } {
   const {
     uid,
@@ -292,17 +291,12 @@ export function reconcileCloudAndLocalState(params: {
   );
   const isCloudAdjustmentPending =
     cloudAdjustmentAtMs > 0 && cloudAdjustmentAtMs > localAppliedAdjustmentAtMs;
-  const needsLiamS2Rebalance =
+  const needsLiamS2Reset =
     uid === LIAM_S2_REBALANCE_UID &&
     activeSeasonId === 'season_2' &&
     !wasExplicitlyReset &&
     localAppliedAdjustmentAtMs < LIAM_S2_REBALANCE_REVISION_MS &&
-    cloudAdjustmentAtMs < LIAM_S2_REBALANCE_REVISION_MS &&
-    Math.max(
-      localState.lifetimeCoins || 0,
-      typeof rtdbSeason?.lifetimeCoins === 'number' ? rtdbSeason.lifetimeCoins : 0,
-      typeof rtdbLb?.lifetimeCoins === 'number' ? rtdbLb.lifetimeCoins : 0
-    ) > 1e25;
+    cloudAdjustmentAtMs < LIAM_S2_REBALANCE_REVISION_MS;
 
   // Prefer RTDB sources whenever any RTDB record exists; only fall back to legacy Firestore otherwise
   const sources: Record<string, any>[] =
@@ -798,24 +792,59 @@ export function reconcileCloudAndLocalState(params: {
     recoveredFromCareerLoss = true;
   }
 
-  if (needsLiamS2Rebalance) {
+  if (needsLiamS2Reset) {
     const historyMax = (
       Array.isArray(rtdbUser?.seasonHistory)
         ? rtdbUser.seasonHistory
         : localState.seasonHistory || []
     ).reduce((acc: number, s: any) => Math.max(acc, Number(s?.finalScore) || 0), 0);
+    const preservedS1Skins = reconciled.unlockedSkins.filter((id) => !isSeason2OnlySkinId(id));
     reconciled = sanitizeAndValidateGameState({
       ...reconciled,
-      coins: LIAM_S2_ADJUSTED_COINS,
-      lifetimeCoins: LIAM_S2_ADJUSTED_LIFETIME_COINS,
-      seasonalScore: LIAM_S2_ADJUSTED_LIFETIME_COINS,
-      prestigeCount: Math.max(2, reconciled.prestigeCount || 0),
-      prestigeShards: LIAM_S2_ADJUSTED_SHARDS,
-      lifetimePrestigeShards: LIAM_S2_ADJUSTED_SHARDS,
-      upgrades: LIAM_S2_ADJUSTED_UPGRADES,
-      claimedQuests: LIAM_S2_ADJUSTED_QUESTS,
+      coins: 0,
+      lifetimeCoins: 0,
+      seasonalScore: 0,
+      clicks: 0,
+      criticalClicks: 0,
+      maxComboReached: 0,
+      upgrades: {},
+      currentRealm: 'earth',
+      unlockedRealms: ['earth'],
+      uperCompleted: false,
+      uperCompletionModalDismissed: false,
+      prestigeCount: 0,
+      prestigeShards: 0,
+      lifetimePrestigeShards: 0,
+      prestigeUpgrades: {},
+      unlockedAchievements: [],
+      claimedQuests: [],
+      chestsOpened: 0,
+      cratesOpened: 0,
+      zombiesDefeated: 0,
       zombiesStolenCoins: 0,
-      lifetimeAllSeasonsCoins: Math.max(historyMax, LIAM_S2_ADJUSTED_LIFETIME_COINS),
+      zombieHitsTaken: 0,
+      goldenMatthewsClicked: 0,
+      giantMatthewsClicked: 0,
+      pets: [],
+      equippedPetIds: [],
+      sealedEggs: createEmptySealedEggs(),
+      hasMatthewShopToken: false,
+      matthewShopTokens: 0,
+      unlockedCursors: [STARTER_CURSOR_ID],
+      equippedCursorId: STARTER_CURSOR_ID,
+      unlockedSkins: preservedS1Skins,
+      equippedSkin: preservedS1Skins.includes('champion_matthew')
+        ? 'champion_matthew'
+        : 'classic_matthew',
+      eventStats: {
+        eventId: MATTHEW_STORM_CONFIG.eventId,
+        activeSeconds: 0,
+        gemsEarned: 0,
+        giantMatthewsClicked: 0,
+        giantMatthewRewardsCoins: 0,
+        stormSkinsPurchased: [],
+      },
+      lifetimeAllSeasonsCoins: historyMax,
       appliedCloudAdjustmentAtMs: LIAM_S2_REBALANCE_REVISION_MS,
       lastOwnerUid: uid,
       lastSaveTime: nowMs,
@@ -824,12 +853,12 @@ export function reconcileCloudAndLocalState(params: {
 
   reconciled = {
     ...reconciled,
-    appliedCloudAdjustmentAtMs: needsLiamS2Rebalance
+    appliedCloudAdjustmentAtMs: needsLiamS2Reset
       ? LIAM_S2_REBALANCE_REVISION_MS
       : Math.max(localAppliedAdjustmentAtMs, cloudAdjustmentAtMs) || undefined,
     lastOwnerUid: uid,
     lastSaveTime:
-      recoveredFromCareerLoss || needsLiamS2Rebalance
+      recoveredFromCareerLoss || needsLiamS2Reset
         ? nowMs
         : isCloudAdjustmentPending
         ? Math.max(nowMs, effectiveLastSaveTime)
@@ -852,7 +881,7 @@ export function reconcileCloudAndLocalState(params: {
     (Array.from(cloudSkinSet).some((id) => isSeason2OnlySkinId(id)) ||
       (typeof rtdbUser?.equippedSkin === 'string' && isSeason2OnlySkinId(rtdbUser.equippedSkin)));
   const shouldPushToCloud =
-    needsLiamS2Rebalance ||
+    needsLiamS2Reset ||
     recoveredFromCareerLoss ||
     hadUnauthorizedChampionInCloud ||
     hadLeakedSeason2InCloud ||
@@ -864,8 +893,9 @@ export function reconcileCloudAndLocalState(params: {
   return {
     state: reconciled,
     shouldPushToCloud:
-      !forceCloudAfterReset && (!isCloudAdjustmentPending || needsLiamS2Rebalance) && shouldPushToCloud,
+      !forceCloudAfterReset && (!isCloudAdjustmentPending || needsLiamS2Reset) && shouldPushToCloud,
     recoveredFromCareerLoss,
+    season2ResetApplied: needsLiamS2Reset,
   };
 }
 
@@ -1026,26 +1056,29 @@ export async function loadAndReconcileCloudSave(
         resetRecord?.resetAtMs || 0
       );
 
-      const { state: reconciled, shouldPushToCloud } = reconcileCloudAndLocalState({
-        uid,
-        username,
-        localState: isSandbox
-          ? { ...effectiveLocalState, currentSeasonId: activeSeason.seasonId, sandboxS2Enabled: true }
-          : effectiveLocalState,
-        rtdbUser,
-        rtdbLb,
-        legacySources: [],
-        wasExplicitlyReset,
-        resetAtMs,
-        activeSeasonId: activeSeason.seasonId,
-        nowMs: Date.now(),
-      });
+      const { state: reconciled, shouldPushToCloud, season2ResetApplied } =
+        reconcileCloudAndLocalState({
+          uid,
+          username,
+          localState: isSandbox
+            ? { ...effectiveLocalState, currentSeasonId: activeSeason.seasonId, sandboxS2Enabled: true }
+            : effectiveLocalState,
+          rtdbUser,
+          rtdbLb,
+          legacySources: [],
+          wasExplicitlyReset,
+          resetAtMs,
+          activeSeasonId: activeSeason.seasonId,
+          nowMs: Date.now(),
+        });
+
+      const ignoreStaleS2Extras = wasExplicitlyReset || Boolean(season2ResetApplied);
 
       const mergedPetsMap = new Map<string, GameState['pets'][number]>();
       for (const p of reconciled.pets || []) {
         if (p && typeof p.instanceId === 'string') mergedPetsMap.set(p.instanceId, p);
       }
-      if (!wasExplicitlyReset && Array.isArray(rtdbUser?.pets)) {
+      if (!ignoreStaleS2Extras && Array.isArray(rtdbUser?.pets)) {
         for (const p of rtdbUser.pets) {
           if (!p || typeof p.instanceId !== 'string') continue;
           const prevPet = mergedPetsMap.get(p.instanceId);
@@ -1056,19 +1089,21 @@ export async function loadAndReconcileCloudSave(
       }
       const mergedPets = Array.from(mergedPetsMap.values());
       const validPetIds = new Set(mergedPets.map((p) => p.instanceId));
-      const rawEquippedPets = Array.from(
-        new Set([
-          ...(reconciled.equippedPetIds || []),
-          ...(Array.isArray(rtdbUser?.equippedPetIds) ? rtdbUser.equippedPetIds : []),
-        ])
-      ).filter((id) => validPetIds.has(id));
+      const rawEquippedPets = ignoreStaleS2Extras
+        ? []
+        : Array.from(
+            new Set([
+              ...(reconciled.equippedPetIds || []),
+              ...(Array.isArray(rtdbUser?.equippedPetIds) ? rtdbUser.equippedPetIds : []),
+            ])
+          ).filter((id) => validPetIds.has(id));
       const mergedEquippedPetIds =
         rawEquippedPets.length > 0
           ? rawEquippedPets.slice(0, 3)
           : mergedPets.slice(0, 3).map((p) => p.instanceId);
 
       const mergedEggs = { ...reconciled.sealedEggs };
-      if (!wasExplicitlyReset && rtdbUser?.sealedEggs && typeof rtdbUser.sealedEggs === 'object') {
+      if (!ignoreStaleS2Extras && rtdbUser?.sealedEggs && typeof rtdbUser.sealedEggs === 'object') {
         for (const [k, v] of Object.entries(rtdbUser.sealedEggs)) {
           const n = Math.max(0, Number(v) || 0);
           mergedEggs[k as keyof typeof mergedEggs] = Math.max(
@@ -1079,8 +1114,10 @@ export async function loadAndReconcileCloudSave(
       }
 
       const cloudTokens =
-        typeof rtdbUser?.matthewShopTokens === 'number'
+        !ignoreStaleS2Extras && typeof rtdbUser?.matthewShopTokens === 'number'
           ? Math.max(0, Math.floor(rtdbUser.matthewShopTokens))
+          : ignoreStaleS2Extras
+          ? 0
           : undefined;
       const localTokens = Math.max(0, Math.floor(reconciled.matthewShopTokens ?? 0));
       const cloudNewer =
@@ -1133,20 +1170,34 @@ export async function loadAndReconcileCloudSave(
           hat: null,
           glasses: rtdbUser?.equippedCosmetics?.glasses || reconciled.equippedCosmetics?.glasses || null,
         },
-        hasMatthewShopToken: mergedShopTokens > 0,
-        matthewShopTokens: mergedShopTokens,
-        unlockedCursors: Array.isArray(rtdbUser?.unlockedCursors)
+        hasMatthewShopToken: ignoreStaleS2Extras ? false : mergedShopTokens > 0,
+        matthewShopTokens: ignoreStaleS2Extras ? 0 : mergedShopTokens,
+        unlockedCursors: ignoreStaleS2Extras
+          ? [STARTER_CURSOR_ID]
+          : Array.isArray(rtdbUser?.unlockedCursors)
           ? Array.from(new Set([...(reconciled.unlockedCursors || []), ...rtdbUser.unlockedCursors]))
           : reconciled.unlockedCursors || [],
-        equippedCursorId: rtdbUser?.equippedCursorId ?? reconciled.equippedCursorId ?? null,
-        cratesOpened: Math.max(reconciled.cratesOpened || 0, Number(rtdbUser?.cratesOpened) || 0),
+        equippedCursorId: ignoreStaleS2Extras
+          ? STARTER_CURSOR_ID
+          : rtdbUser?.equippedCursorId ?? reconciled.equippedCursorId ?? null,
+        cratesOpened: ignoreStaleS2Extras
+          ? 0
+          : Math.max(reconciled.cratesOpened || 0, Number(rtdbUser?.cratesOpened) || 0),
         winnerBadges: sanitizedBadges,
         clanId: rtdbUser?.clanId !== undefined ? rtdbUser.clanId : reconciled.clanId,
         clanName: rtdbUser?.clanName !== undefined ? rtdbUser.clanName : reconciled.clanName,
-        chestsOpened: Math.max(reconciled.chestsOpened || 0, Number(rtdbUser?.chestsOpened) || 0),
-        zombiesDefeated: Math.max(reconciled.zombiesDefeated || 0, Number(rtdbUser?.zombiesDefeated) || 0),
-        zombiesStolenCoins: Math.max(reconciled.zombiesStolenCoins || 0, Number(rtdbUser?.zombiesStolenCoins) || 0),
-        zombieHitsTaken: Math.max(reconciled.zombieHitsTaken ?? 0, Number(rtdbUser?.zombieHitsTaken) || 0),
+        chestsOpened: ignoreStaleS2Extras
+          ? 0
+          : Math.max(reconciled.chestsOpened || 0, Number(rtdbUser?.chestsOpened) || 0),
+        zombiesDefeated: ignoreStaleS2Extras
+          ? 0
+          : Math.max(reconciled.zombiesDefeated || 0, Number(rtdbUser?.zombiesDefeated) || 0),
+        zombiesStolenCoins: ignoreStaleS2Extras
+          ? 0
+          : Math.max(reconciled.zombiesStolenCoins || 0, Number(rtdbUser?.zombiesStolenCoins) || 0),
+        zombieHitsTaken: ignoreStaleS2Extras
+          ? 0
+          : Math.max(reconciled.zombieHitsTaken ?? 0, Number(rtdbUser?.zombieHitsTaken) || 0),
         season2IntroSeen: Boolean(rtdbUser?.season2IntroSeen || reconciled.season2IntroSeen),
         sandboxS2Enabled: isSandbox || reconciled.sandboxS2Enabled,
       });

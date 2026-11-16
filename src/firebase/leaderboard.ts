@@ -28,40 +28,10 @@ export const LEADERBOARD_EXCLUDED_USERNAMES = new Set<string>([
   'gabbydaddy69',
 ]);
 
-// One-time Season 2 rebalance for the #1 account that hit pre-patch quest/upgrade runaway (504.3Infinity / 5.04e68).
-// Preserves all legitimate unlocks (skins, pets, cursors, gems, clicks, rebirth count) and keeps #1 cleanly.
+// One-time Season 2 reset for the #1 account that hit pre-patch quest/upgrade runaway (504.3Infinity / 5.04e68).
+// Resets all Season 2 progress (coins, upgrades, rebirths, pets, cursors, Season 2 skins) back to 0 while keeping Season 1 rewards.
 export const LIAM_S2_REBALANCE_UID = 'UF3esYX32lhJJThQMMXmXQ7TJof1';
-export const LIAM_S2_REBALANCE_REVISION_MS = Date.UTC(2026, 10, 16, 12, 10, 0);
-export const LIAM_S2_ADJUSTED_COINS = 2.5e13;
-export const LIAM_S2_ADJUSTED_LIFETIME_COINS = 1.5e14;
-export const LIAM_S2_ADJUSTED_SHARDS = 36;
-export const LIAM_S2_ADJUSTED_QUESTS = [
-  'daily_zombies_25',
-  'daily_clicks_7500',
-  'season_chests_20',
-  'daily_crits_600',
-  'daily_upgrades_200',
-];
-export const LIAM_S2_ADJUSTED_UPGRADES: Record<string, number> = {
-  s2_snowball_pack: 18,
-  s2_thermal_mittens: 15,
-  s2_campfire_ember: 14,
-  s2_slingshot_frost: 12,
-  s2_hot_tea_flask: 12,
-  s2_ice_pick: 10,
-  s2_lantern_post: 10,
-  s2_hot_cocoa_stand: 10,
-  s2_frost_gloves: 8,
-  s2_sled_courier: 8,
-  s2_snow_shovel: 8,
-  s2_frost_turret: 7,
-  s2_wolf_whistle: 6,
-  s2_shelter_heater: 6,
-  s2_steel_cleaver: 5,
-  s2_plasma_glove: 4,
-  s2_arctic_barricade: 3,
-  s2_snowplow_rig: 2,
-};
+export const LIAM_S2_REBALANCE_REVISION_MS = Date.UTC(2026, 10, 16, 12, 15, 0);
 
 export function isExcludedFromLeaderboard(
   uid?: string | null,
@@ -346,24 +316,14 @@ export async function fetchWorldwideLeaderboard(
         if (!raw || typeof raw !== 'object') continue;
         let rtdbEntry = parseRawEntry(uid, raw);
 
-        // Apply one-time Season 2 rebalance view normalization until the account syncs with the updated build
+        // Hide pre-reset glitched Season 2 entry until liamkd3 syncs cleanly at 0
         if (
           seasonId === 'season_2' &&
           rtdbEntry.uid === LIAM_S2_REBALANCE_UID &&
-          (rtdbEntry.cloudAdjustmentAtMs || 0) < LIAM_S2_REBALANCE_REVISION_MS &&
-          rtdbEntry.lifetimeCoins > LIAM_S2_ADJUSTED_LIFETIME_COINS
+          (rtdbEntry.cloudAdjustmentAtMs || 0) < LIAM_S2_REBALANCE_REVISION_MS
         ) {
-          rtdbEntry = {
-            ...rtdbEntry,
-            coins: LIAM_S2_ADJUSTED_COINS,
-            lifetimeCoins: LIAM_S2_ADJUSTED_LIFETIME_COINS,
-            seasonalScore: LIAM_S2_ADJUSTED_LIFETIME_COINS,
-            prestigeShards: LIAM_S2_ADJUSTED_SHARDS,
-            lifetimePrestigeShards: LIAM_S2_ADJUSTED_SHARDS,
-            ascensionMultiplier: getAscensionMultiplier(LIAM_S2_ADJUSTED_SHARDS),
-            upgrades: LIAM_S2_ADJUSTED_UPGRADES,
-            claimedQuests: LIAM_S2_ADJUSTED_QUESTS,
-          };
+          mergedByUid.delete(rtdbEntry.uid);
+          continue;
         }
 
         // If this player is banned or temp-banned, purge from RTDB and skip

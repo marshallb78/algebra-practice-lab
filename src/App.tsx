@@ -17,7 +17,13 @@ import { ALL_CURSORS, getCursorById } from './data/cursors';
 import { CRATE_DEFINITIONS, CrateOpenResult, CrateType, rollCrateReward } from './data/crates';
 import { MATTHEW_VAULT_SKINS } from './data/season2Skins';
 import { checkAndAutoClaimQuests } from './data/quests';
-import { calculateClickPower, calculateOfflineEarnings, calculateCPS } from './utils/calculations';
+import {
+  calculateClickPower,
+  calculateOfflineEarnings,
+  calculateCPS,
+  clampFiniteCoinAmount,
+  MAX_SAFE_SEASON_COINS,
+} from './utils/calculations';
 import { formatNumber } from './utils/formatters';
 import {
   getActiveSeason,
@@ -314,9 +320,10 @@ export function App() {
     }
   };
 
-  // Poll cloud bans, probation alerts, single-device session lock & Top 3 Mini Leaderboard every 12s
+  // Poll cloud bans, probation alerts, single-device session lock & Top 3 Mini Leaderboard every 30s (skipped when tab hidden)
   useEffect(() => {
     const checkBanAndLeaderboard = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       const curr = stateRef.current;
       const uid = curr.cloudAccount?.uid || null;
       const username =
@@ -381,7 +388,7 @@ export function App() {
     };
 
     checkBanAndLeaderboard();
-    const interval = setInterval(checkBanAndLeaderboard, 12000);
+    const interval = setInterval(checkBanAndLeaderboard, 30000);
     return () => clearInterval(interval);
   }, [state.cloudAccount?.uid, state.cloudAccount?.displayUsername, sandboxS2Enabled]);
 
@@ -905,14 +912,15 @@ export function App() {
     };
   }, []);
 
-  // Fast 10-second Realtime Database Profile + Leaderboard sync while playing, plus keepalive flush on close/background
+  // Fast 20-second Realtime Database Profile + Leaderboard sync while playing, plus keepalive flush on close/background
   useEffect(() => {
     const syncProfileAndLeaderboard = () => {
       if (
         isHydratingCloudRef.current ||
         isReconcilingCloudRef.current ||
         activeBanRecord ||
-        sessionLockedByOtherDevice
+        sessionLockedByOtherDevice ||
+        (typeof document !== 'undefined' && document.visibilityState === 'hidden')
       ) {
         return;
       }
@@ -926,7 +934,7 @@ export function App() {
       ).catch(() => {});
     };
 
-    const syncInterval = setInterval(syncProfileAndLeaderboard, 10000);
+    const syncInterval = setInterval(syncProfileAndLeaderboard, 20000);
 
     const flushOnHideOrUnload = () => {
       if (
@@ -1116,6 +1124,7 @@ export function App() {
     }
     let cancelled = false;
     const poll = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       const current = activeGlobalEventRef.current;
       if (current && current.id.startsWith('preview_') && current.endsAtMs > Date.now()) {
         return;
@@ -1130,7 +1139,7 @@ export function App() {
       }
     };
     poll();
-    const id = setInterval(poll, 5000);
+    const id = setInterval(poll, 12000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -1189,6 +1198,7 @@ export function App() {
 
   const handleEarnCoins = (amount: number, isClick: boolean, isCrit: boolean) => {
     if (seasonInfo.isDowntime || activeBanRecord) return;
+    const safeAmount = clampFiniteCoinAmount(amount, MAX_SAFE_SEASON_COINS);
 
     let unlockedSkinsNow: { id: string; name: string }[] = [];
     let autoClaimedQuestsNow: { title: string; rewardGems: number; rewardCoins: number }[] = [];
@@ -1197,9 +1207,9 @@ export function App() {
       const nextCombo = 0;
       const baseNext: GameState = {
         ...prev,
-        coins: prev.coins + amount,
-        lifetimeCoins: prev.lifetimeCoins + amount,
-        seasonalScore: prev.seasonalScore + amount,
+        coins: clampFiniteCoinAmount((prev.coins || 0) + safeAmount, MAX_SAFE_SEASON_COINS),
+        lifetimeCoins: clampFiniteCoinAmount((prev.lifetimeCoins || 0) + safeAmount, MAX_SAFE_SEASON_COINS),
+        seasonalScore: clampFiniteCoinAmount((prev.seasonalScore || 0) + safeAmount, MAX_SAFE_SEASON_COINS),
         clicks: isClick ? prev.clicks + 1 : prev.clicks,
         lifetimeAllSeasonsClicks: isClick
           ? Math.max((prev.lifetimeAllSeasonsClicks || 0) + 1, prev.clicks + 1)

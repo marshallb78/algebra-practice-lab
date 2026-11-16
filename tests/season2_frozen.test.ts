@@ -45,10 +45,8 @@ import {
   getCursorById,
 } from '../src/data/cursors';
 import { CRATE_DEFINITIONS, rollCrateReward } from '../src/data/crates';
-import { calculateClickPower, calculateCPS } from '../src/utils/calculations';
+import { calculateClickPower, calculateCPS, getMaxAffordableUpgrade } from '../src/utils/calculations';
 import {
-  LIAM_S2_ADJUSTED_LIFETIME_COINS,
-  LIAM_S2_ADJUSTED_SHARDS,
   LIAM_S2_REBALANCE_REVISION_MS,
   LIAM_S2_REBALANCE_UID,
   buildLeaderboardPayload,
@@ -873,8 +871,8 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(adjusted.state.appliedCloudAdjustmentAtMs).toBe(adjTs);
     expect(adjusted.shouldPushToCloud).toBe(false);
 
-    // Also verifies one-time automatic rebalance for liamkd3 pre-patch 5.04e68 save
-    const autoRebalance = reconcileCloudAndLocalState({
+    // Also verifies one-time full Season 2 reset for liamkd3 pre-patch 5.04e68 save while preserving Season 1 wins
+    const autoReset = reconcileCloudAndLocalState({
       uid: LIAM_S2_REBALANCE_UID,
       username: 'liamkd3',
       localState: {
@@ -887,15 +885,28 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
         prestigeCount: 2,
         prestigeShards: 305,
         lifetimePrestigeShards: 305,
-        unlockedSkins: ['classic_matthew', 'champion_matthew', 'liam_matthew'],
-        equippedSkin: 'champion_matthew',
+        unlockedSkins: ['classic_matthew', 'champion_matthew', 'liam_matthew', 'ice_cube_matthew', 'snowy_matthew'],
+        equippedSkin: 'ice_cube_matthew',
+        unlockedCursors: ['starter_cursor', 'frosty_cursor'],
+        equippedCursorId: 'frosty_cursor',
         claimedQuests: ['season_chests_20', 'season_coins_udc', 'season_coins_vg'],
       },
       rtdbUser: {
         uid: LIAM_S2_REBALANCE_UID,
         username: 'liamkd3',
-        unlockedSkins: ['classic_matthew', 'champion_matthew', 'liam_matthew'],
+        unlockedSkins: ['classic_matthew', 'champion_matthew', 'liam_matthew', 'ice_cube_matthew'],
         equippedSkin: 'champion_matthew',
+        seasonHistory: [
+          {
+            seasonId: 'season_1',
+            seasonNumber: 1,
+            finalScore: 2.2e41,
+            finalRebirths: 2,
+            highestRealm: 'earth',
+            endedAt: 1794805263970,
+            wasChampion: true,
+          },
+        ],
         seasons: {
           season_2: {
             seasonId: 'season_2',
@@ -913,23 +924,34 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       resetAtMs: 0,
       activeSeasonId: 'season_2',
     });
-    expect(autoRebalance.state.lifetimeCoins).toBe(LIAM_S2_ADJUSTED_LIFETIME_COINS);
-    expect(autoRebalance.state.prestigeShards).toBe(LIAM_S2_ADJUSTED_SHARDS);
-    expect(autoRebalance.state.prestigeCount).toBe(2);
-    expect(autoRebalance.state.unlockedSkins).toContain('champion_matthew');
-    expect(autoRebalance.state.claimedQuests).not.toContain('season_coins_vg');
-    expect(autoRebalance.state.appliedCloudAdjustmentAtMs).toBe(LIAM_S2_REBALANCE_REVISION_MS);
-    expect(autoRebalance.shouldPushToCloud).toBe(true);
+    expect(autoReset.season2ResetApplied).toBe(true);
+    expect(autoReset.state.lifetimeCoins).toBe(0);
+    expect(autoReset.state.coins).toBe(0);
+    expect(autoReset.state.seasonalScore).toBe(0);
+    expect(autoReset.state.prestigeCount).toBe(0);
+    expect(autoReset.state.prestigeShards).toBe(0);
+    expect(autoReset.state.upgrades).toEqual({});
+    expect(autoReset.state.pets).toEqual([]);
+    expect(autoReset.state.unlockedCursors).toEqual(['starter_cursor']);
+    expect(autoReset.state.unlockedSkins).toContain('champion_matthew');
+    expect(autoReset.state.unlockedSkins).toContain('liam_matthew');
+    expect(autoReset.state.unlockedSkins).not.toContain('ice_cube_matthew');
+    expect(autoReset.state.unlockedSkins).not.toContain('snowy_matthew');
+    expect(autoReset.state.equippedSkin).toBe('champion_matthew');
+    expect(autoReset.state.claimedQuests).toEqual([]);
+    expect(autoReset.state.lifetimeAllSeasonsCoins).toBe(2.2e41);
+    expect(autoReset.state.appliedCloudAdjustmentAtMs).toBe(LIAM_S2_REBALANCE_REVISION_MS);
+    expect(autoReset.shouldPushToCloud).toBe(true);
 
-    // Subsequent legitimate gains above 1.5e14 after rebalance are preserved
+    // Subsequent legitimate gains after the one-time Season 2 reset are preserved normally
     const afterProgress = reconcileCloudAndLocalState({
       uid: LIAM_S2_REBALANCE_UID,
       username: 'liamkd3',
       localState: {
-        ...autoRebalance.state,
-        lifetimeCoins: 9e15,
-        seasonalScore: 9e15,
-        coins: 4e15,
+        ...autoReset.state,
+        lifetimeCoins: 9e6,
+        seasonalScore: 9e6,
+        coins: 4e6,
       },
       rtdbUser: {
         uid: LIAM_S2_REBALANCE_UID,
@@ -938,11 +960,11 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
         seasons: {
           season_2: {
             seasonId: 'season_2',
-            lifetimeCoins: LIAM_S2_ADJUSTED_LIFETIME_COINS,
-            seasonalScore: LIAM_S2_ADJUSTED_LIFETIME_COINS,
-            coins: 2.5e13,
-            prestigeCount: 2,
-            prestigeShards: LIAM_S2_ADJUSTED_SHARDS,
+            lifetimeCoins: 0,
+            seasonalScore: 0,
+            coins: 0,
+            prestigeCount: 0,
+            prestigeShards: 0,
           },
         },
       },
@@ -951,6 +973,11 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       resetAtMs: 0,
       activeSeasonId: 'season_2',
     });
-    expect(afterProgress.state.lifetimeCoins).toBe(9e15);
+    expect(afterProgress.state.lifetimeCoins).toBe(9e6);
+
+    // Bulk upgrade math never returns Infinity/NaN on huge coin amounts and enforces 1 UVg safety cap
+    const maxBuy = getMaxAffordableUpgrade(25, 1.2, 0, 1e70);
+    expect(Number.isFinite(maxBuy.totalCost)).toBe(true);
+    expect(maxBuy.totalCost).toBeLessThanOrEqual(1e66);
   });
 });

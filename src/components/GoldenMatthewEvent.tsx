@@ -4,7 +4,7 @@ import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { formatCoins } from '../utils/formatters';
 import { BALANCE } from '../data/balance';
-import { calculateCPS, calculateClickPower } from '../utils/calculations';
+import { calculateCPS, calculateClickPower, clampFiniteCoinAmount, MAX_SAFE_SEASON_COINS } from '../utils/calculations';
 import { isSeasonTwoOrLater } from '../data/skins';
 import { MATTHEW_VAULT_SKINS } from '../data/season2Skins';
 import { rollChestLoot } from '../data/petsAndEggs';
@@ -128,15 +128,15 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     // Balanced Golden Matthew reward scaling cleanly with Click Power & CPS (no runaway lifetime feedback loop)
     const cps = calculateCPS(state);
     const { totalPower } = calculateClickPower(state);
-    const productionBounty = Math.floor(cps * 35 + totalPower * 80);
+    const productionBounty = clampFiniteCoinAmount(Math.floor(cps * 35 + totalPower * 80), MAX_SAFE_SEASON_COINS);
     const bounty = Math.max(BALANCE.goldenEvent.minBountyFloor, productionBounty);
 
     if (isSeasonTwoOrLater(state.currentSeasonId)) {
       setState((prev) => ({
         ...prev,
-        coins: prev.coins + bounty,
-        lifetimeCoins: prev.lifetimeCoins + bounty,
-        seasonalScore: prev.seasonalScore + bounty,
+        coins: clampFiniteCoinAmount((prev.coins || 0) + bounty, MAX_SAFE_SEASON_COINS),
+        lifetimeCoins: clampFiniteCoinAmount((prev.lifetimeCoins || 0) + bounty, MAX_SAFE_SEASON_COINS),
+        seasonalScore: clampFiniteCoinAmount((prev.seasonalScore || 0) + bounty, MAX_SAFE_SEASON_COINS),
         goldenMatthewsClicked: prev.goldenMatthewsClicked + 1,
       }));
       onSpawnBonus(`GOLDEN MATTHEW! +${formatCoins(bounty)} Coins!`);
@@ -145,9 +145,9 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
 
     setState((prev) => ({
       ...prev,
-      coins: prev.coins + bounty,
-      lifetimeCoins: prev.lifetimeCoins + bounty,
-      seasonalScore: prev.seasonalScore + bounty,
+      coins: clampFiniteCoinAmount((prev.coins || 0) + bounty, MAX_SAFE_SEASON_COINS),
+      lifetimeCoins: clampFiniteCoinAmount((prev.lifetimeCoins || 0) + bounty, MAX_SAFE_SEASON_COINS),
+      seasonalScore: clampFiniteCoinAmount((prev.seasonalScore || 0) + bounty, MAX_SAFE_SEASON_COINS),
       goldenMatthewsClicked: prev.goldenMatthewsClicked + 1,
     }));
     onSpawnBonus(`🌟 GOLDEN MATTHEW! +${formatCoins(bounty)} COINS! 🌟`);

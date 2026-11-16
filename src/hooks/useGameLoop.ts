@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { GameState } from '../types/game';
-import { calculateCPS } from '../utils/calculations';
+import { calculateCPS, clampFiniteCoinAmount, MAX_SAFE_SEASON_COINS } from '../utils/calculations';
 import { formatNumber } from '../utils/formatters';
 import { checkAndApplyMilestoneUnlocks, equipSkin } from '../data/skins';
 import { checkAndAutoClaimQuests } from '../data/quests';
@@ -66,7 +66,7 @@ export function useGameLoop({
           fridayBonusActive: ctx.fridayBonusActive,
           stormWaveMultiplier: ctx.stormWaveMultiplier,
         });
-        const coinsToAdd = cps * dt;
+        const coinsToAdd = clampFiniteCoinAmount(cps * dt, MAX_SAFE_SEASON_COINS);
 
         let newCombo = prev.combo;
         let newComboTimer = prev.comboTimer - dt;
@@ -137,9 +137,9 @@ export function useGameLoop({
 
         const updatedBase: GameState = {
           ...prev,
-          coins: prev.coins + coinsToAdd,
-          lifetimeCoins: prev.lifetimeCoins + coinsToAdd,
-          seasonalScore: prev.seasonalScore + coinsToAdd,
+          coins: clampFiniteCoinAmount((prev.coins || 0) + coinsToAdd, MAX_SAFE_SEASON_COINS),
+          lifetimeCoins: clampFiniteCoinAmount((prev.lifetimeCoins || 0) + coinsToAdd, MAX_SAFE_SEASON_COINS),
+          seasonalScore: clampFiniteCoinAmount((prev.seasonalScore || 0) + coinsToAdd, MAX_SAFE_SEASON_COINS),
           combo: newCombo,
           comboTimer: newComboTimer,
           frenzyTimer: newFrenzyTimer,

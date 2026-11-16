@@ -7,6 +7,14 @@ import { isSeasonTwoOrLater } from '../data/skins';
 import { getCursorById } from '../data/cursors';
 import { GameState } from '../types/game';
 
+/** Maximum safe finite coin/score cap per season (1 UVg = 10^66, cleanly above 2.5 Vg max tier). */
+export const MAX_SAFE_SEASON_COINS = 1e66;
+
+export function clampFiniteCoinAmount(val: number, maxVal = MAX_SAFE_SEASON_COINS): number {
+  if (typeof val !== 'number' || !Number.isFinite(val) || val <= 0) return 0;
+  return Math.min(maxVal, val);
+}
+
 export interface LiveMultiplierOptions {
   fridayBonusActive?: boolean;
   stormWaveMultiplier?: number;
@@ -30,7 +38,9 @@ export function getCombinedLiveMultiplier(options?: LiveMultiplierOptions): {
 }
 
 export function getUpgradeCost(baseCost: number, multiplier: number, currentLevel: number): number {
-  return Math.floor(baseCost * Math.pow(multiplier, currentLevel));
+  const raw = Math.floor(baseCost * Math.pow(multiplier, Math.max(0, Math.floor(currentLevel || 0))));
+  if (!Number.isFinite(raw) || raw < 0) return Number.MAX_SAFE_INTEGER;
+  return raw;
 }
 
 export function getBulkUpgradeCost(
@@ -39,14 +49,19 @@ export function getBulkUpgradeCost(
   currentLevel: number,
   count: number
 ): { totalCost: number; actualCount: number } {
-  if (count <= 1) {
+  const safeCount = Math.max(1, Math.floor(count || 1));
+  if (safeCount <= 1) {
     return { totalCost: getUpgradeCost(baseCost, multiplier, currentLevel), actualCount: 1 };
   }
 
   const a = getUpgradeCost(baseCost, multiplier, currentLevel);
   const r = multiplier;
-  const totalCost = Math.floor((a * (Math.pow(r, count) - 1)) / (r - 1));
-  return { totalCost, actualCount: count };
+  const powR = Math.pow(r, safeCount);
+  const totalCost = Math.floor((a * (powR - 1)) / (r - 1));
+  if (!Number.isFinite(totalCost) || totalCost < 0) {
+    return { totalCost: Infinity, actualCount: safeCount };
+  }
+  return { totalCost, actualCount: safeCount };
 }
 
 export function getMaxAffordableUpgrade(
@@ -55,14 +70,23 @@ export function getMaxAffordableUpgrade(
   currentLevel: number,
   currentCoins: number
 ): { totalCost: number; count: number } {
+  const safeCoins = clampFiniteCoinAmount(currentCoins, MAX_SAFE_SEASON_COINS);
   const nextCost = getUpgradeCost(baseCost, multiplier, currentLevel);
-  if (currentCoins < nextCost) return { totalCost: 0, count: 0 };
+  if (!Number.isFinite(nextCost) || safeCoins < nextCost) return { totalCost: 0, count: 0 };
 
   const a = nextCost;
   const r = multiplier;
-  const term = (currentCoins * (r - 1)) / a + 1;
-  const count = Math.max(1, Math.floor(Math.log(term) / Math.log(r)));
-  const { totalCost } = getBulkUpgradeCost(baseCost, multiplier, currentLevel, count);
+  const term = (safeCoins * (r - 1)) / a + 1;
+  let count = Math.max(1, Math.min(5000, Math.floor(Math.log(term) / Math.log(r))));
+  if (!Number.isFinite(count) || count < 1) count = 1;
+  let { totalCost } = getBulkUpgradeCost(baseCost, multiplier, currentLevel, count);
+  while (count > 1 && (!Number.isFinite(totalCost) || totalCost > safeCoins)) {
+    count -= 1;
+    totalCost = getBulkUpgradeCost(baseCost, multiplier, currentLevel, count).totalCost;
+  }
+  if (!Number.isFinite(totalCost) || totalCost > safeCoins) {
+    return { totalCost: nextCost <= safeCoins ? nextCost : 0, count: nextCost <= safeCoins ? 1 : 0 };
+  }
 
   return { totalCost, count };
 }
@@ -122,19 +146,17 @@ export function calculateClickPower(
     petMultiplier = 1 + bonusSum;
   }
 
+  const rawTotalPower =
+    basePower *
+    ascensionMultiplier *
+    comboMultiplier *
+    frenzyMult *
+    liveMultiplier *
+    petMultiplier *
+    cursorClickMult;
   const totalPower = Math.max(
     1,
-    Number(
-      (
-        basePower *
-        ascensionMultiplier *
-        comboMultiplier *
-        frenzyMult *
-        liveMultiplier *
-        petMultiplier *
-        cursorClickMult
-      ).toFixed(2)
-    )
+    clampFiniteCoinAmount(Number(rawTotalPower.toFixed(2)), MAX_SAFE_SEASON_COINS)
   );
 
   return {
@@ -177,13 +199,13 @@ export function calculateCPS(state: GameState, liveOptions?: LiveMultiplierOptio
   // Multiplicative Live Event & Friday 2x Stacking
   const { combinedMult: liveMultiplier } = getCombinedLiveMultiplier(liveOptions);
 
-  return Math.max(
-    0,
+  return clampFiniteCoinAmount(
     rawCps *
       ascensionMultiplier *
       frenzyMult *
       liveMultiplier *
-      cursorCpsMult
+      cursorCpsMult,
+    MAX_SAFE_SEASON_COINS
   );
 }
 
@@ -196,7 +218,7 @@ export function calculateGiantMatthewClickReward(
   liveOptions?: LiveMultiplierOptions
 ): number {
   const { totalPower } = calculateClickPower(state, liveOptions);
-  return Math.max(100, Math.floor(totalPower * 100));
+  return Math.max(100, clampFiniteCoinAmount(Math.floor(totalPower * 100), MAX_SAFE_SEASON_COINS));
 }
 
 /**
@@ -231,6 +253,9 @@ export function calculateOfflineEarnings(
   const cps = calculateCPS(state);
   const efficiency = BALANCE.offline.efficiency;
 
-  const coinsEarned = Math.floor(cps * effectiveSeconds * efficiency);
+  const coinsEarned = clampFiniteCoinAmount(
+    Math.floor(cps * effectiveSeconds * efficiency),
+    MAX_SAFE_SEASON_COINS
+  );
   return { elapsedSeconds: effectiveSeconds, coinsEarned, gemsEarned: 0 };
 }
