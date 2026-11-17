@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>g+3 Games</title>
+<style>
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #050914;
+  font-family: Arial, sans-serif;
+}
+
+#app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  isolation: isolate;
+  background: #050914;
+  border: 3px solid #299bff;
+  border-radius: 22px;
+  box-shadow:
+    0 0 12px #168cff,
+    0 0 30px rgba(0, 145, 255, 0.55),
+    inset 0 0 12px rgba(0, 145, 255, 0.15);
+}
+
+#bg {
+  position: absolute;
+  inset: -8%;
+  width: 116%;
+  height: 116%;
+  object-fit: cover;
+  opacity: 0;
+  z-index: -1;
+  transition: opacity 1s ease;
+  animation: drift 24s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+#app.started #bg {
+  opacity: 0.32;
+}
+
+@keyframes drift {
+  from { transform: scale(1) translate(-1%, 0); }
+  to { transform: scale(1.08) translate(1%, -1%); }
+}
+
+#topbar {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+#controls {
+  display: flex;
+  gap: 9px;
+}
+
+.icon-button {
+  width: 44px;
+  height: 44px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #299bff;
+  border-radius: 11px;
+  background: rgba(4, 15, 35, 0.88);
+  box-shadow: 0 0 14px rgba(0, 145, 255, 0.45);
+  cursor: pointer;
+}
+
+.icon-button img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.icon-button span {
+  color: white;
+  font-size: 23px;
+}
+
+#start-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  z-index: 2;
+  padding: 24px;
+}
+
+#start-button {
+  padding: 16px 54px;
+  color: white;
+  font-size: 23px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  border: 1px solid #63bdff;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #087cff, #1744d9);
+  box-shadow: 0 0 28px rgba(0, 137, 255, 0.55);
+  cursor: pointer;
+}
+
+#backup-toggle {
+  padding: 10px 24px;
+  color: #cfe9ff;
+  font-size: 14px;
+  font-weight: bold;
+  letter-spacing: 0.6px;
+  border: 1px solid #299bff;
+  border-radius: 11px;
+  background: rgba(4, 15, 35, 0.88);
+  box-shadow: 0 0 14px rgba(0, 145, 255, 0.35);
+  cursor: pointer;
+}
+
+#backup-toggle:hover,
+.backup-btn:hover {
+  background: rgba(16, 62, 132, 0.92);
+  color: #ffffff;
+}
+
+#backup-list {
+  display: none;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  max-width: 380px;
+}
+
+#backup-list.open {
+  display: flex;
+}
+
+.backup-btn {
+  min-width: 54px;
+  padding: 10px 16px;
+  color: white;
+  font-size: 15px;
+  font-weight: bold;
+  border: 1px solid #63bdff;
+  border-radius: 10px;
+  background: rgba(8, 35, 82, 0.92);
+  box-shadow: 0 0 12px rgba(0, 145, 255, 0.4);
+  cursor: pointer;
+}
+
+#game-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 18px;
+  display: none;
+  background: transparent;
+  z-index: 1;
+}
+
+#loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: rgba(2, 8, 22, 0.92);
+}
+
+#loading-bg {
+  position: absolute;
+  inset: -5%;
+  width: 110%;
+  height: 110%;
+  object-fit: cover;
+  opacity: 0.32;
+  animation: drift 24s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+#loading-logo {
+  position: relative;
+  width: min(260px, 55vw);
+  max-height: 38vh;
+  object-fit: contain;
+  filter: drop-shadow(0 0 28px rgba(0, 145, 255, 0.8));
+}
+
+#loading-text {
+  position: relative;
+  color: white;
+  font-size: 16px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
+
+.progress-track {
+  position: relative;
+  width: min(320px, 72vw);
+  height: 7px;
+  overflow: hidden;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.18);
+}
+
+.progress-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: #39aaff;
+  box-shadow: 0 0 12px #168cff;
+  animation: loadbar 5s linear forwards;
+}
+
+@keyframes loadbar {
+  to { width: 100%; }
+}
+
+#app.started #loading {
+  display: flex;
+}
+
+#app.loaded #loading {
+  display: none;
+}
+
+@media (max-width: 500px) {
+  .icon-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  #topbar {
+    top: 10px;
+    left: 10px;
+    right: 10px;
+  }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <img id="bg"
+       src="https://drive.google.com/thumbnail?id=1SWmeXSJAv_N_yuSkQKX3Yifvqb-Z-5Kd&sz=w1600"
+       alt="">
+
+  <div id="topbar">
+    <div id="controls">
+      <button class="icon-button" id="classroom" title="Google Classroom" aria-label="Google Classroom">
+        <img src="https://www.gstatic.com/images/branding/product/1x/classroom_48dp.png" alt="Classroom">
+      </button>
+      <button class="icon-button" id="fullscreen" title="Fullscreen" aria-label="Fullscreen">
+        <span>⛶</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="start-screen">
+    <button id="start-button">START</button>
+    <button id="backup-toggle" type="button">Load Backup</button>
+    <div id="backup-list">
+      <button class="backup-btn" type="button" data-backup="0">#1</button>
+      <button class="backup-btn" type="button" data-backup="1">#2</button>
+      <button class="backup-btn" type="button" data-backup="2">#3</button>
+      <button class="backup-btn" type="button" data-backup="3">#4</button>
+      <button class="backup-btn" type="button" data-backup="4">#5</button>
+    </div>
+  </div>
+
+  <iframe id="game-frame"
+          title="g+3 Games"
+          allow="fullscreen; autoplay; gamepad"
+          allowfullscreen></iframe>
+
+  <div id="loading">
+    <img id="loading-bg"
+         src="https://drive.google.com/thumbnail?id=1SWmeXSJAv_N_yuSkQKX3Yifvqb-Z-5Kd&sz=w1600"
+         alt="">
+    <img id="loading-logo"
+         src="https://drive.google.com/thumbnail?id=1ug0nwCIs8few8UUJHGghoVP_VGypPzem&sz=w800"
+         alt="g+3">
+    <div id="loading-text">Loading Game</div>
+    <div class="progress-track">
+      <div class="progress-fill"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const GAME_URL = "https://marshallb78.github.io/study-notes-hub/";
+const BACKUP_URLS = [
+  "https://marshallb78.github.io/study-notes-hub/",
+  "https://marshallb78.github.io/algebra-practice-lab/",
+  "https://marshallb78.github.io/earth-science-atlas/",
+  "https://marshallb78.github.io/vocab-builder-app/",
+  "https://marshallb78.github.io/geometry-toolkit/"
+];
+const CLASSROOM_URL = "https://classroom.google.com/";
+
+const app = document.getElementById("app");
+const frame = document.getElementById("game-frame");
+const startScreen = document.getElementById("start-screen");
+const startButton = document.getElementById("start-button");
+const backupToggle = document.getElementById("backup-toggle");
+const backupList = document.getElementById("backup-list");
+const fullscreenButton = document.getElementById("fullscreen");
+const classroomButton = document.getElementById("classroom");
+
+let gameStarted = false;
+let activeGameUrl = GAME_URL;
+
+function launchGame(url) {
+  if (gameStarted) return;
+  gameStarted = true;
+  activeGameUrl = url;
+  app.classList.add("started");
+  startScreen.style.display = "none";
+  frame.style.display = "block";
+  frame.src = activeGameUrl;
+
+  window.setTimeout(() => {
+    app.classList.add("loaded");
+  }, 5000);
+}
+
+classroomButton.addEventListener("click", () => {
+  window.open(CLASSROOM_URL, "_blank", "noopener");
+});
+
+startButton.addEventListener("click", () => {
+  launchGame(GAME_URL);
+});
+
+backupToggle.addEventListener("click", () => {
+  backupList.classList.toggle("open");
+});
+
+document.querySelectorAll(".backup-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const idx = Number(btn.getAttribute("data-backup"));
+    const targetUrl = BACKUP_URLS[idx] || GAME_URL;
+    launchGame(targetUrl);
+  });
+});
+
+fullscreenButton.addEventListener("click", () => {
+  const popup = window.open("about:blank", "_blank");
+
+  if (!popup) {
+    alert("Allow pop-ups for this site, then click Fullscreen again.");
+    return;
+  }
+
+  const gameURL = JSON.stringify(activeGameUrl);
+  const classroomURL = JSON.stringify(CLASSROOM_URL);
+  const logoURL = JSON.stringify(
+    "https://drive.google.com/thumbnail?id=1ug0nwCIs8few8UUJHGghoVP_VGypPzem&sz=w800"
+  );
+  const backgroundURL = JSON.stringify(
+    "https://drive.google.com/thumbnail?id=1SWmeXSJAv_N_yuSkQKX3Yifvqb-Z-5Kd&sz=w1600"
+  );
+
+  popup.document.open();
+  popup.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>g+3 Games - Fullscreen</title>
+<style>
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: #000;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: #000;
+}
+
+#classroom {
+  position: fixed;
+  z-index: 20;
+  top: 12px;
+  right: 12px;
+  width: 44px;
+  height: 44px;
+  padding: 7px;
+  border: 1px solid #299bff;
+  border-radius: 11px;
+  background: rgba(4, 15, 35, 0.9);
+  box-shadow: 0 0 14px rgba(0, 145, 255, 0.45);
+  cursor: pointer;
+}
+
+#classroom img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+#loading {
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  overflow: hidden;
+  background: #030816;
+  transition: opacity .4s ease;
+}
+
+#loading-bg {
+  position: absolute;
+  inset: -5%;
+  width: 110%;
+  height: 110%;
+  object-fit: cover;
+  opacity: .32;
+  animation: drift 24s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+#logo {
+  position: relative;
+  width: min(280px, 58vw);
+  max-height: 40vh;
+  object-fit: contain;
+  filter: drop-shadow(0 0 28px rgba(0, 145, 255, .8));
+}
+
+#text {
+  position: relative;
+  color: white;
+  font: 16px Arial, sans-serif;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
+
+.track {
+  position: relative;
+  width: min(320px, 72vw);
+  height: 7px;
+  overflow: hidden;
+  border-radius: 20px;
+  background: rgba(255,255,255,.18);
+}
+
+.fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #39aaff;
+  box-shadow: 0 0 12px #168cff;
+  animation: loadbar 5s linear forwards;
+}
+
+@keyframes loadbar {
+  to { width: 100%; }
+}
+
+@keyframes drift {
+  from { transform: scale(1) translate(-1%, 0); }
+  to { transform: scale(1.08) translate(1%, -1%); }
+}
+
+#loading.hidden {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+</style>
+</head>
+<body>
+<iframe id="game" allow="fullscreen; autoplay; gamepad" allowfullscreen></iframe>
+
+<button id="classroom" title="Google Classroom" aria-label="Google Classroom">
+  <img src="https://www.gstatic.com/images/branding/product/1x/classroom_48dp.png" alt="Classroom">
+</button>
+
+<div id="loading">
+  <img id="loading-bg" alt="">
+  <img id="logo" alt="g+3">
+  <div id="text">Loading Game</div>
+  <div class="track"><div class="fill"></div></div>
+</div>
+
+<script>
+document.getElementById("loading-bg").src = ${backgroundURL};
+document.getElementById("logo").src = ${logoURL};
+document.getElementById("game").src = ${gameURL};
+
+document.getElementById("classroom").addEventListener("click", () => {
+  window.open(${classroomURL}, "_blank", "noopener");
+});
+
+window.setTimeout(() => {
+  document.getElementById("loading").classList.add("hidden");
+}, 5000);
+<\/script>
+</body>
+</html>`);
+  popup.document.close();
+});
+</script>
+</body>
+</html>
