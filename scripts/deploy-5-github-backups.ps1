@@ -25,8 +25,12 @@ foreach ($repo in $repos) {
   $full = "$owner/$repo"
   Write-Host "`n=== Setting up $full ===" -ForegroundColor Cyan
 
+  $ErrorActionPreference = 'Continue'
   gh repo view $full *> $null
-  if ($LASTEXITCODE -ne 0) {
+  $exists = ($LASTEXITCODE -eq 0)
+  $ErrorActionPreference = 'Stop'
+
+  if (-not $exists) {
     gh repo create $full --public --description "Interactive study web app"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   }
@@ -37,10 +41,12 @@ foreach ($repo in $repos) {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   # Enable GitHub Pages with GitHub Actions workflow build
+  $ErrorActionPreference = 'Continue'
   gh api -X POST "repos/$full/pages" -f build_type=workflow *> $null
   if ($LASTEXITCODE -ne 0) {
     gh api -X PUT "repos/$full/pages" -f build_type=workflow *> $null
   }
+  $ErrorActionPreference = 'Stop'
 
   Write-Host "Backup URL: https://$owner.github.io/$repo/" -ForegroundColor Green
 }
