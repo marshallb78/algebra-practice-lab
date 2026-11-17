@@ -337,6 +337,13 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     const res = await summonGlobalLiveEvent({ spec, uid, username, isSandbox });
     setBusyEventId(null);
     if (res.ok && res.event) {
+      if (state.cloudAccount?.uid && res.cloudSynced === false) {
+        onNotify?.(
+          'CONNECTION ISSUE',
+          'Could not broadcast event to server — Gems were NOT spent. Try again!'
+        );
+        return;
+      }
       setState((prev) => {
         const next = { ...prev, gems: Math.max(0, prev.gems - spec.gemCost) };
         saveGame(next);
@@ -344,7 +351,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
       });
       onEventSummoned?.(res.event);
       soundManager.playStormWaveStart();
-      onNotify?.('LIVE EVENT SUMMONED!', `${spec.label} active now!`);
+      onNotify?.('LIVE EVENT SUMMONED!', `${spec.label} live on everyone's screen!`);
     }
   };
 

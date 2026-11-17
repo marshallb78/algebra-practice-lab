@@ -1,12 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Snowflake, Flame, Zap, X, ShieldAlert, Lock, Minimize2, Maximize2, Sparkles } from 'lucide-react';
+import {
+  Snowflake,
+  Flame,
+  Zap,
+  X,
+  ShieldAlert,
+  Minimize2,
+  Maximize2,
+  Sparkles,
+  Lock,
+  Trophy,
+  Crown,
+} from 'lucide-react';
 import { GameState } from '../../types/game';
 import {
   ActiveGlobalLiveEvent,
+  GlobalEventScoreEntry,
   PLAYER_TRIGGERABLE_EVENTS,
   PlayerEventCostSpec,
-  fetchMarathonLeaderboard,
-  submitMarathonScore,
+  extractScoresFromStore,
+  fetchGlobalEventLeaderboard,
+  submitGlobalEventScore,
   summonGlobalLiveEvent,
 } from '../../firebase/liveEvents';
 import { SEASON_2_LIVE_EVENT_SKINS } from '../../data/season2Skins';
@@ -18,6 +32,7 @@ interface LiveEventsModalProps {
   isSandbox: boolean;
   onUpdateState: (updater: (prev: GameState) => GameState) => void;
   onNotify: (title: string, subtitle?: string) => void;
+  onEventSummoned?: (event: ActiveGlobalLiveEvent) => void;
   onClose: () => void;
 }
 
@@ -26,6 +41,7 @@ export const LiveEventsHubModal: React.FC<LiveEventsModalProps> = ({
   isSandbox,
   onUpdateState,
   onNotify,
+  onEventSummoned,
   onClose,
 }) => {
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -42,12 +58,20 @@ export const LiveEventsHubModal: React.FC<LiveEventsModalProps> = ({
       isSandbox,
     });
     setBusyId(null);
-    if (res.ok) {
+    if (res.ok && res.event) {
+      if (state.cloudAccount?.uid && res.cloudSynced === false) {
+        onNotify(
+          'CONNECTION ISSUE',
+          'Could not reach server to broadcast event — Gems were NOT spent. Try again!'
+        );
+        return;
+      }
       onUpdateState((prev) => ({
         ...prev,
         gems: Math.max(0, prev.gems - spec.gemCost),
       }));
-      onNotify('EVENT SUMMONED!', `${username} summoned ${spec.label}!`);
+      onEventSummoned?.(res.event);
+      onNotify('EVENT SUMMONED!', `${username} summoned ${spec.label} across all screens!`);
       onClose();
     }
   };
@@ -142,8 +166,10 @@ interface ActiveGlobalEventOverlayProps {
   currentClickPower: number;
   isSandbox: boolean;
   hasFireCursor?: boolean;
+  evStoreSnapshot?: Record<string, any>;
   onAwardCoins: (amount: number, reason: string) => void;
   onAwardGems: (amount: number) => void;
+  onNotify?: (title: string, subtitle: string) => void;
 }
 
 interface FallingTargetItem {
@@ -155,11 +181,19 @@ interface FallingTargetItem {
   isGolden: boolean;
 }
 
+interface EventWinnerSummary {
+  board: GlobalEventScoreEntry[];
+  winner: GlobalEventScoreEntry | null;
+  didWin: boolean;
+  myRank: number;
+}
+
 /**
  * Renders live global server events:
- * - Click Events (Click Marathon, Falling Matthews, 100 Golden Rain) open an interactive Pop-Up Event Arena!
- * - Screen Freeze freezes non-summoners unless they wield the Fire Cursor (which melts through ice!).
- * - Zombie Boss Raid summons Cryo Titan Bosses & highlights the active raid!
+ * - Click Events (Click Marathon, Falling Matthews, 100 Golden Rain) open an interactive Pop-Up Event Arena
+ *   with real-time multiplayer standings & crown a server Winner!
+ * - Screen Freeze completely locks non-summoners out of playing until the timer hits 0s.
+ * - Zombie Boss Raid highlights the active Cryo Titan raid for non-summoners.
  */
 export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> = ({
   event,
@@ -169,85 +203,196 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
   currentClickPower,
   isSandbox,
   hasFireCursor = false,
+  evStoreSnapshot,
   onAwardCoins,
   onAwardGems,
+  onNotify,
 }) => {
-  const [secondsLeft, setSecondsLeft] = useState(
-    Math.max(0, Math.ceil((event.endsAtMs - Date.now()) / 1000))
+  const [secondsLeft, setSecondsLeft] = useState(() =>
+    Math.max(0, Math.ceil((event.endsAtMs - getServerNowMs()) / 1000))
   );
   const [marathonClicks, setMarathonClicks] = useState(0);
-  const [marathonStartMs, setMarathonStartMs] = useState(Date.now());
-  const [leaders, setLeaders] = useState<{ uid: string; username: string; clicks: number }[]>([]);
+  const [marathonStartMs, setMarathonStartMs] = useState(() => Date.now());
+  const [leaders, setLeaders] = useState<GlobalEventScoreEntry[]>([]);
   const [fallingItems, setFallingItems] = useState<FallingTargetItem[]>([]);
   const [caughtCount, setCaughtCount] = useState(0);
   const [earnedEventCoins, setEarnedEventCoins] = useState(0);
   const [earnedEventGems, setEarnedEventGems] = useState(0);
   const [clickBurstText, setClickBurstText] = useState<string | null>(null);
   const [isPopupMinimized, setIsPopupMinimized] = useState(false);
-  const [freezeCracks, setFreezeCracks] = useState(0);
+  const [winnerSummary, setWinnerSummary] = useState<EventWinnerSummary | null>(null);
+  const [dismissedWinnerId, setDismissedWinnerId] = useState<string | null>(null);
+
+  // Refs prevent inline callbacks from parent re-renders from clearing the 250ms countdown timer!
+  const onAwardCoinsRef = useRef(onAwardCoins);
+  onAwardCoinsRef.current = onAwardCoins;
+  const onAwardGemsRef = useRef(onAwardGems);
+  onAwardGemsRef.current = onAwardGems;
+  const onNotifyRef = useRef(onNotify);
+  onNotifyRef.current = onNotify;
 
   const settledRef = useRef<string | null>(null);
-  const marathonClicksRef = useRef(0);
-  marathonClicksRef.current = marathonClicks;
-  const baseProd = Math.max(50, (currentCps || 0) + (currentClickPower || 1) * 4);
-  const baseProdRef = useRef(baseProd);
-  baseProdRef.current = baseProd;
+  const myScoreRef = useRef(0);
+  const lastScoreSubmitMsRef = useRef(0);
   const earnedEventGemsRef = useRef(0);
-
-  const isAffected =
-    !event.excludeSummoner || (event.summonedByUid && event.summonedByUid !== currentUid);
 
   const isClickEvent =
     event.type === 'click_marathon' ||
     event.type === 'falling_matthews' ||
     event.type === 'golden_rain';
 
+  const myScore = event.type === 'click_marathon' ? marathonClicks : caughtCount;
+  myScoreRef.current = myScore;
+
+  const baseProd = Math.max(50, (currentCps || 0) + (currentClickPower || 1) * 4);
+  const baseProdRef = useRef(baseProd);
+  baseProdRef.current = baseProd;
+
+  const isAffected =
+    !event.excludeSummoner || (event.summonedByUid && event.summonedByUid !== currentUid);
+
+  const isCurrentlyFrozen =
+    event.type === 'screen_freeze' && isAffected && secondsLeft > 0 && !hasFireCursor;
+
+  // Reset per-event local counters when a new event ID starts
   useEffect(() => {
+    setSecondsLeft(Math.max(0, Math.ceil((event.endsAtMs - getServerNowMs()) / 1000)));
     setMarathonClicks(0);
     setMarathonStartMs(Date.now());
     setCaughtCount(0);
     setEarnedEventCoins(0);
     setEarnedEventGems(0);
     earnedEventGemsRef.current = 0;
+    myScoreRef.current = 0;
+    lastScoreSubmitMsRef.current = 0;
     setClickBurstText(null);
     setIsPopupMinimized(false);
-    setFreezeCracks(0);
+    setLeaders([]);
+    setWinnerSummary(null);
     settledRef.current = null;
-  }, [event.id]);
+  }, [event.id, event.endsAtMs]);
 
-  // Countdown + Marathon end settlement
+  // Keep live standings instantly updated whenever the SSE/poll evStore updates
   useEffect(() => {
-    const t = setInterval(() => {
+    if (!isClickEvent || !evStoreSnapshot) return;
+    const nextBoard = extractScoresFromStore(evStoreSnapshot, event.id, isSandbox);
+    if (nextBoard.length > 0) {
+      setLeaders(nextBoard);
+    }
+  }, [evStoreSnapshot, event.id, isClickEvent, isSandbox]);
+
+  // Lock keyboard (Spacebar / Enter / Tab) when frozen by Screen Freeze so frozen players truly cannot do anything
+  useEffect(() => {
+    if (!isCurrentlyFrozen) return;
+    const blockKeys = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      e.stopPropagation();
+    };
+    window.addEventListener('keydown', blockKeys, true);
+    window.addEventListener('keyup', blockKeys, true);
+    return () => {
+      window.removeEventListener('keydown', blockKeys, true);
+      window.removeEventListener('keyup', blockKeys, true);
+    };
+  }, [isCurrentlyFrozen]);
+
+  // Countdown + Winner settlement (depends ONLY on primitive event identity/timing, never parent callbacks!)
+  useEffect(() => {
+    let settleTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = () => {
       const rem = Math.max(0, Math.ceil((event.endsAtMs - getServerNowMs()) / 1000));
       setSecondsLeft(rem);
 
-      if (rem <= 0 && settledRef.current !== event.id && event.type === 'click_marathon') {
+      if (rem <= 0 && settledRef.current !== event.id && isClickEvent) {
         settledRef.current = event.id;
-        const taps = marathonClicksRef.current;
-        if (event.id.startsWith('preview_')) {
-          if (taps > 0) {
-            const reward = Math.max(5000, Math.floor(baseProdRef.current * 120));
-            onAwardCoins(reward, 'Click Fast Marathon Preview Champion (+20 Gems!)');
-            onAwardGems(20);
+        const finalScore = myScoreRef.current;
+
+        const finalizeLeaderboard = async () => {
+          if (event.id.startsWith('preview_')) {
+            const previewBoard: GlobalEventScoreEntry[] =
+              finalScore > 0
+                ? [{ uid: currentUid, username: currentUsername, clicks: finalScore }]
+                : [];
+            const winner = previewBoard[0] || null;
+            setLeaders(previewBoard);
+            setWinnerSummary({
+              board: previewBoard,
+              winner,
+              didWin: Boolean(winner),
+              myRank: winner ? 1 : 0,
+            });
+            if (finalScore > 0) {
+              const reward = Math.max(5000, Math.floor(baseProdRef.current * 120));
+              onAwardCoinsRef.current(reward, 'Event Preview Champion (+20 Gems!)');
+              onAwardGemsRef.current(20);
+            }
+            return;
           }
-          return;
-        }
-        fetchMarathonLeaderboard(event.id, isSandbox).then((board) => {
-          setLeaders(board);
-          if (board[0] && board[0].uid === currentUid && taps > 0) {
-            const reward = Math.max(5000, Math.floor(baseProdRef.current * 120));
-            onAwardCoins(reward, 'Click Fast Marathon Champion (+20 Gems!)');
-            onAwardGems(20);
-          } else if (taps >= 20) {
-            const reward = Math.max(1500, Math.floor(baseProdRef.current * 35));
-            onAwardCoins(reward, 'Click Fast Marathon Finisher (+5 Gems!)');
-            onAwardGems(5);
+
+          if (finalScore > 0) {
+            await submitGlobalEventScore({
+              eventId: event.id,
+              uid: currentUid,
+              username: currentUsername,
+              score: finalScore,
+              isSandbox,
+            }).catch(() => {});
           }
-        });
+
+          // Give other clients ~550ms to flush their final scores before declaring server winner
+          settleTimeout = setTimeout(async () => {
+            const board = await fetchGlobalEventLeaderboard(event.id, isSandbox).catch(() => []);
+            const winner = board[0] || null;
+            const myIdx = board.findIndex((entry) => entry.uid === currentUid);
+            const myRank = myIdx >= 0 ? myIdx + 1 : 0;
+            const didWin = Boolean(winner && winner.uid === currentUid && finalScore > 0);
+            const scoreLabel = event.type === 'click_marathon' ? 'clicks' : 'catches';
+
+            setLeaders(board);
+            setWinnerSummary({
+              board,
+              winner,
+              didWin,
+              myRank,
+            });
+
+            if (winner) {
+              onNotifyRef.current?.(
+                '🏆 EVENT WINNER!',
+                `${winner.username} won with ${formatNumber(winner.clicks)} ${scoreLabel}!`
+              );
+            }
+
+            const winnerGems = event.type === 'click_marathon' ? 20 : 15;
+            const winnerCoinMult = event.type === 'click_marathon' ? 120 : 85;
+            if (didWin) {
+              const reward = Math.max(5000, Math.floor(baseProdRef.current * winnerCoinMult));
+              onAwardCoinsRef.current(
+                reward,
+                `#1 Event Champion (+${winnerGems} Gems!)`
+              );
+              onAwardGemsRef.current(winnerGems);
+            } else if (finalScore >= 10) {
+              const reward = Math.max(1500, Math.floor(baseProdRef.current * 30));
+              onAwardCoinsRef.current(reward, 'Event Participant Bonus (+5 Gems!)');
+              onAwardGemsRef.current(5);
+            }
+          }, 550);
+        };
+
+        finalizeLeaderboard();
       }
-    }, 250);
-    return () => clearInterval(t);
-  }, [event.id, event.endsAtMs, event.type, isSandbox, currentUid, onAwardCoins, onAwardGems]);
+    };
+
+    tick();
+    const t = setInterval(tick, 250);
+    return () => {
+      clearInterval(t);
+      if (settleTimeout) clearTimeout(settleTimeout);
+    };
+  }, [event.id, event.endsAtMs, event.type, isClickEvent, isSandbox, currentUid, currentUsername]);
 
   // Smoothly animate Falling Matthews & 100 Golden Rain sprites inside the Click Event Pop-up Arena
   useEffect(() => {
@@ -304,79 +449,110 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
     return () => clearInterval(t);
   }, [event.id, event.type, event.endsAtMs]);
 
+  const flushCompetitiveScore = (scoreValue: number) => {
+    if (event.id.startsWith('preview_')) {
+      setLeaders([{ uid: currentUid, username: currentUsername, clicks: scoreValue }]);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastScoreSubmitMsRef.current >= 320 || scoreValue <= 2) {
+      lastScoreSubmitMsRef.current = now;
+      submitGlobalEventScore({
+        eventId: event.id,
+        uid: currentUid,
+        username: currentUsername,
+        score: scoreValue,
+        isSandbox,
+      }).catch(() => {});
+    }
+  };
+
   const handleMarathonTap = () => {
     if (secondsLeft <= 0) return;
     const next = marathonClicks + 1;
     setMarathonClicks(next);
     const bonusCoin = Math.max(25, Math.floor((currentClickPower || 1) * 2 + (currentCps || 0) * 0.4));
     setEarnedEventCoins((c) => c + bonusCoin);
-    onAwardCoins(bonusCoin, 'Marathon Tap');
-
-    if (event.id.startsWith('preview_')) {
-      setLeaders([{ uid: currentUid, username: currentUsername, clicks: next }]);
-      return;
-    }
-    if (next % 5 === 0) {
-      submitMarathonScore({
-        eventId: event.id,
-        uid: currentUid,
-        username: currentUsername,
-        clicks: next,
-        isSandbox,
-      });
-      fetchMarathonLeaderboard(event.id, isSandbox).then(setLeaders);
-    }
+    onAwardCoinsRef.current(bonusCoin, 'Marathon Tap');
+    flushCompetitiveScore(next);
   };
 
   const handleCatchFallingTarget = (item: FallingTargetItem) => {
+    if (secondsLeft <= 0) return;
     setFallingItems((prev) => prev.filter((x) => x.id !== item.id));
-    setCaughtCount((c) => c + 1);
+    const nextCaught = caughtCount + 1;
+    setCaughtCount(nextCaught);
 
     const coinGain = item.isGolden
       ? Math.max(300, Math.floor(baseProd * 6))
       : Math.max(120, Math.floor(baseProd * 3));
     setEarnedEventCoins((c) => c + coinGain);
-    onAwardCoins(coinGain, item.isGolden ? 'Golden Rain Catch' : 'Falling Matthew Catch');
+    onAwardCoinsRef.current(coinGain, item.isGolden ? 'Golden Rain Catch' : 'Falling Matthew Catch');
 
     const maxGemsPerEvent = item.isGolden ? 12 : 8;
     const gemChance = item.isGolden ? 0.1 : 0.06;
     if (earnedEventGemsRef.current < maxGemsPerEvent && Math.random() < gemChance) {
       earnedEventGemsRef.current += 1;
       setEarnedEventGems((g) => g + 1);
-      onAwardGems(1);
+      onAwardGemsRef.current(1);
       setClickBurstText(`+${formatCoins(coinGain)} MC & +1 Gem!`);
     } else {
       setClickBurstText(`+${formatCoins(coinGain)} MC!`);
     }
+    flushCompetitiveScore(nextCaught);
   };
 
-  if (getServerNowMs() > event.endsAtMs + 2000) return null;
+  const serverNow = getServerNowMs();
+  if (serverNow > event.endsAtMs + 10_000) return null;
 
   const elapsedSec = Math.max(1, (Date.now() - marathonStartMs) / 1000);
   const marathonCps = (marathonClicks / elapsedSec).toFixed(1);
+  const topLeader = leaders[0];
+  const scoreUnitLabel = event.type === 'click_marathon' ? 'taps' : 'catches';
+  const showWinnerPodium =
+    isClickEvent &&
+    secondsLeft <= 0 &&
+    winnerSummary &&
+    dismissedWinnerId !== event.id;
 
   return (
     <>
       {/* TOP GLOBAL SUMMON BANNER */}
-      <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[85] px-5 py-2 rounded-2xl bg-gradient-to-r from-amber-500/95 via-orange-500/95 to-rose-500/95 border border-yellow-200/70 shadow-[0_0_30px_rgba(245,158,11,0.55)] text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider flex items-center gap-2.5 max-w-[94vw]">
-        <Flame className="w-4 h-4 shrink-0" />
-        <span className="truncate">{event.bannerText}</span>
-        <span className="px-2 py-0.5 rounded-full bg-slate-950/25 text-white shrink-0">
-          {secondsLeft}s
-        </span>
-        {isClickEvent && isPopupMinimized && secondsLeft > 0 && (
-          <button
-            type="button"
-            onClick={() => setIsPopupMinimized(false)}
-            className="ml-1 px-2.5 py-0.5 rounded-full bg-slate-950 text-amber-300 text-[10px] font-black cursor-pointer flex items-center gap-1"
-          >
-            <Maximize2 className="w-3 h-3" />
-            Open Arena
-          </button>
-        )}
-      </div>
+      {secondsLeft > 0 && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[98] px-5 py-2 rounded-2xl bg-gradient-to-r from-amber-500/95 via-orange-500/95 to-rose-500/95 border border-yellow-200/70 shadow-[0_0_30px_rgba(245,158,11,0.55)] text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider flex items-center gap-2.5 max-w-[94vw]">
+          <Flame className="w-4 h-4 shrink-0" />
+          <span className="truncate">{event.bannerText}</span>
+          <span className="px-2 py-0.5 rounded-full bg-slate-950/25 text-white shrink-0 font-mono">
+            {secondsLeft}s
+          </span>
+          {isClickEvent && isPopupMinimized && (
+            <button
+              type="button"
+              onClick={() => setIsPopupMinimized(false)}
+              className="ml-1 px-2.5 py-0.5 rounded-full bg-slate-950 text-amber-300 text-[10px] font-black cursor-pointer flex items-center gap-1"
+            >
+              <Maximize2 className="w-3 h-3" />
+              Open Arena
+            </button>
+          )}
+        </div>
+      )}
 
-      {/* NEW POP-UP INTERACTIVE CLICK EVENT ARENA (Click Marathon, Falling Matthews, Golden Rain) */}
+      {/* SUMMONER SAFEZONE STATUS BANNER DURING SCREEN FREEZE / BOSS RAID */}
+      {(event.type === 'screen_freeze' || event.type === 'zombie_boss_raid') &&
+        !isAffected &&
+        secondsLeft > 0 && (
+          <div className="fixed bottom-14 left-1/2 -translate-x-1/2 z-[72] px-5 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-500/95 to-emerald-500/95 border-2 border-white/80 text-slate-950 font-black text-xs sm:text-sm uppercase shadow-[0_0_32px_rgba(34,211,238,0.8)] flex items-center gap-2 pointer-events-none">
+            <Snowflake className="w-5 h-5 text-slate-950" />
+            <span>
+              {event.type === 'screen_freeze'
+                ? `Everyone Else Is Frozen (${secondsLeft}s) — Only You Can Play!`
+                : `Boss Raid Active on Everyone Else (${secondsLeft}s) — You Are Safe!`}
+            </span>
+          </div>
+        )}
+
+      {/* POP-UP INTERACTIVE CLICK EVENT ARENA (Click Marathon, Falling Matthews, Golden Rain) */}
       {isClickEvent && secondsLeft > 0 && !isPopupMinimized && (
         <div
           className="fixed inset-0 z-[75] flex items-center justify-center p-3 sm:p-6 bg-slate-950/75 backdrop-blur-md select-none"
@@ -384,7 +560,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
         >
           <div className="relative w-full max-w-4xl h-[78vh] rounded-3xl border-2 border-amber-400/70 bg-gradient-to-b from-slate-900 via-indigo-950/90 to-slate-950 shadow-[0_0_65px_rgba(251,191,36,0.45)] overflow-hidden flex flex-col">
             {/* Pop-Up Arena Header */}
-            <div className="px-5 py-3.5 border-b border-white/10 bg-slate-950/75 flex items-center justify-between gap-3 z-20">
+            <div className="px-5 py-3.5 border-b border-white/10 bg-slate-950/75 flex items-center justify-between gap-3 z-20 flex-wrap">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-300/60 flex items-center justify-center">
                   <Sparkles className="w-5 h-5 text-amber-300" />
@@ -397,14 +573,23 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
                       ? '100 Golden Matthew Sky Catch'
                       : 'Falling Matthews Click Arena'}
                   </h3>
-                  <div className="text-[11px] font-bold text-amber-200/90 flex items-center gap-3">
-                    <span>{secondsLeft}s Left</span>
+                  <div className="text-[11px] font-bold text-amber-200/90 flex items-center gap-2.5 flex-wrap">
+                    <span className="font-mono text-white">{secondsLeft}s Left</span>
                     <span>•</span>
                     <span>Earned: +{formatNumber(earnedEventCoins)} MC</span>
                     {earnedEventGems > 0 && (
                       <>
                         <span>•</span>
                         <span className="text-cyan-300">+{earnedEventGems} Gems</span>
+                      </>
+                    )}
+                    {topLeader && (
+                      <>
+                        <span>•</span>
+                        <span className="text-emerald-300 flex items-center gap-1">
+                          <Crown className="w-3.5 h-3.5 text-yellow-300" />
+                          #1 {topLeader.username} ({formatNumber(topLeader.clicks)} {scoreUnitLabel})
+                        </span>
                       </>
                     )}
                   </div>
@@ -459,17 +644,29 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
                     <div className="text-xl font-black text-cyan-300">{marathonCps}/s</div>
                   </div>
                   <div className="p-3 rounded-2xl bg-slate-900/90 border border-white/10">
-                    <div className="text-[10px] font-black uppercase text-slate-400">Leader</div>
+                    <div className="text-[10px] font-black uppercase text-slate-400">#1 Leader</div>
                     <div className="text-sm font-black text-emerald-300 truncate">
-                      {leaders[0] ? `${leaders[0].username} (${leaders[0].clicks})` : `${marathonClicks}`}
+                      {topLeader ? `${topLeader.username} (${topLeader.clicks})` : `${marathonClicks}`}
                     </div>
                   </div>
                 </div>
               </div>
             ) : (
               <div className="flex-1 relative overflow-hidden bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.2),transparent_65%)]">
-                <div className="absolute top-3 left-4 z-10 px-3 py-1.5 rounded-xl bg-slate-950/85 border border-white/15 text-xs font-black text-white">
-                  Caught: <span className="text-amber-300">{caughtCount}</span>
+                <div className="absolute top-3 left-4 z-10 flex items-center gap-2 flex-wrap">
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-950/85 border border-white/15 text-xs font-black text-white">
+                    Caught: <span className="text-amber-300">{caughtCount}</span>
+                  </div>
+                  {leaders.slice(0, 3).map((entry, idx) => (
+                    <div
+                      key={entry.uid}
+                      className="px-2.5 py-1 rounded-xl bg-slate-950/85 border border-amber-400/35 text-[11px] font-black text-slate-200 flex items-center gap-1"
+                    >
+                      <span className="text-amber-300">#{idx + 1}</span>
+                      <span className="truncate max-w-[90px]">{entry.username}</span>
+                      <span className="text-emerald-300">{entry.clicks}</span>
+                    </div>
+                  ))}
                 </div>
                 {clickBurstText && (
                   <div className="absolute top-3 right-4 z-10 px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-400/60 text-xs font-black text-emerald-300 animate-pulse">
@@ -510,7 +707,78 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
         </div>
       )}
 
-      {/* SCREEN FREEZE OVERLAY — MELTED AUTOMATICALLY BY FIRE CURSOR! */}
+      {/* EVENT WINNER PODIUM ANNOUNCEMENT (SHOWN ACROSS ALL SCREENS FOR ~9s WHEN EVENT ENDS) */}
+      {showWinnerPodium && winnerSummary && (
+        <div
+          className="fixed inset-0 z-[96] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md select-none"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <div className="w-full max-w-md rounded-3xl border-2 border-yellow-300/80 bg-gradient-to-b from-slate-900 via-indigo-950 to-slate-950 p-6 shadow-[0_0_60px_rgba(250,204,21,0.45)] text-center space-y-4">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-yellow-400/20 border-2 border-yellow-300 flex items-center justify-center">
+              <Trophy className="w-8 h-8 text-yellow-300" />
+            </div>
+
+            <div>
+              <div className="text-[11px] font-black uppercase tracking-widest text-amber-300">
+                Event Complete!
+              </div>
+              {winnerSummary.winner ? (
+                <>
+                  <h3 className="text-2xl font-black text-white mt-1">
+                    {winnerSummary.didWin ? 'YOU WON!' : `${winnerSummary.winner.username} WON!`}
+                  </h3>
+                  <p className="text-xs font-bold text-emerald-300 mt-1">
+                    #1 Champion with {formatNumber(winnerSummary.winner.clicks)} {scoreUnitLabel}
+                  </p>
+                </>
+              ) : (
+                <h3 className="text-xl font-black text-white mt-1">Time&apos;s Up!</h3>
+              )}
+            </div>
+
+            {winnerSummary.board.length > 0 && (
+              <div className="space-y-1.5 text-left">
+                {winnerSummary.board.slice(0, 5).map((entry, idx) => {
+                  const isMe = entry.uid === currentUid;
+                  return (
+                    <div
+                      key={entry.uid}
+                      className={`px-3.5 py-2 rounded-xl border flex items-center justify-between text-xs font-black ${
+                        idx === 0
+                          ? 'bg-yellow-400/20 border-yellow-300/70 text-yellow-100'
+                          : isMe
+                          ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-100'
+                          : 'bg-slate-900/90 border-slate-800 text-slate-200'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 truncate">
+                        <span className="text-amber-300 w-5">#{idx + 1}</span>
+                        <span className="truncate">
+                          {entry.username}
+                          {isMe ? ' (You)' : ''}
+                        </span>
+                      </span>
+                      <span className="text-emerald-300 shrink-0">
+                        {formatNumber(entry.clicks)} {scoreUnitLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setDismissedWinnerId(event.id)}
+              className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 hover:brightness-110 text-slate-950 font-black text-xs uppercase cursor-pointer"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SCREEN FREEZE OVERLAY — MELTED ONLY BY FIRE CURSOR */}
       {event.type === 'screen_freeze' && isAffected && secondsLeft > 0 && hasFireCursor && (
         <div className="fixed bottom-14 left-1/2 -translate-x-1/2 z-[72] px-5 py-2.5 rounded-2xl bg-gradient-to-r from-orange-600/95 via-amber-500/95 to-rose-600/95 border-2 border-yellow-200 text-slate-950 font-black text-xs sm:text-sm uppercase shadow-[0_0_32px_rgba(249,115,22,0.85)] flex items-center gap-2 pointer-events-none">
           <Flame className="w-5 h-5 text-yellow-100 animate-pulse" />
@@ -518,60 +786,63 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
         </div>
       )}
 
-      {event.type === 'screen_freeze' &&
-        isAffected &&
-        secondsLeft > 0 &&
-        !hasFireCursor &&
-        (() => {
-          const requiredCracks = Math.max(45, Math.round(event.durationSeconds * 1.25));
-          if (freezeCracks >= requiredCracks) return null;
-          const pct = Math.min(100, Math.round((freezeCracks / requiredCracks) * 100));
-          return (
-            <div
-              onClick={() => setFreezeCracks((c) => c + 1)}
-              className="fixed inset-0 z-[70] bg-gradient-to-b from-cyan-400/45 via-sky-300/35 to-blue-900/55 backdrop-blur-lg border-[10px] border-cyan-100/90 shadow-[inset_0_0_95px_rgba(165,243,252,0.85)] flex flex-col items-center justify-center cursor-pointer select-none overflow-hidden"
-            >
-              {/* Shattered Ice Lattice Overlay */}
-              <svg
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-                className="absolute inset-0 w-full h-full pointer-events-none opacity-60"
-              >
-                <path
-                  d="M0 0 L35 28 L18 55 L0 70 M100 0 L68 30 L85 60 L100 78 M50 0 L48 25 L62 48 L45 78 L52 100 M0 42 L28 45 L50 52 L76 46 L100 40"
-                  stroke="#e0f2fe"
-                  strokeWidth={0.45 + (pct / 100) * 0.65}
-                  fill="none"
-                />
-              </svg>
+      {/* FULL-SCREEN ICE PRISON FOR FROZEN PLAYERS — BLOCKS ALL ACTIONS UNTIL TIMER HITS 0 */}
+      {isCurrentlyFrozen && (
+        <div
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className="fixed inset-0 z-[95] bg-gradient-to-b from-cyan-400/55 via-sky-300/45 to-blue-950/75 backdrop-blur-xl border-[12px] border-cyan-100/95 shadow-[inset_0_0_110px_rgba(165,243,252,0.9)] flex flex-col items-center justify-center cursor-not-allowed select-none overflow-hidden pointer-events-auto"
+        >
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            className="absolute inset-0 w-full h-full pointer-events-none opacity-65"
+          >
+            <path
+              d="M0 0 L35 28 L18 55 L0 70 M100 0 L68 30 L85 60 L100 78 M50 0 L48 25 L62 48 L45 78 L52 100 M0 42 L28 45 L50 52 L76 46 L100 40"
+              stroke="#e0f2fe"
+              strokeWidth={0.85}
+              fill="none"
+            />
+          </svg>
 
-              <Snowflake
-                className="w-20 h-20 text-white animate-spin mb-4 drop-shadow-[0_0_24px_rgba(165,243,252,0.9)]"
-                style={{ animationDuration: '4.5s' }}
-              />
-              <div className="relative z-10 px-6 py-4 rounded-3xl bg-slate-950/90 border-2 border-cyan-300 text-white font-black text-center max-w-md w-[90vw] shadow-[0_0_45px_rgba(34,211,238,0.65)]">
-                <div className="text-xl tracking-wide text-cyan-200">
-                  FROZEN BY {event.summonedByUsername.toUpperCase()}!
-                </div>
-                <div className="text-sm font-black text-white mt-1.5">
-                  Deep Freeze lasts <span className="text-cyan-300 font-mono">{secondsLeft}s</span>
-                </div>
-                <div className="mt-3 w-full h-2.5 rounded-full bg-slate-800 border border-cyan-500/40 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-cyan-400 via-sky-300 to-white transition-all duration-150"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                <div className="text-[11px] text-cyan-200 mt-1.5">
-                  Hammer ice ({requiredCracks - freezeCracks} hits left) to shatter early!
-                </div>
-                <div className="text-[10px] text-orange-300 mt-1">
-                  Tip: Equip the Fire Cursor from Normal Crates to melt ice instantly!
-                </div>
-              </div>
+          <Snowflake
+            className="w-24 h-24 text-white animate-spin mb-4 drop-shadow-[0_0_28px_rgba(165,243,252,0.95)]"
+            style={{ animationDuration: '4.5s' }}
+          />
+          <div className="relative z-10 px-6 py-5 rounded-3xl bg-slate-950/92 border-2 border-cyan-300 text-white font-black text-center max-w-md w-[90vw] shadow-[0_0_45px_rgba(34,211,238,0.75)]">
+            <div className="text-xl tracking-wide text-cyan-200">
+              FROZEN BY {event.summonedByUsername.toUpperCase()}!
             </div>
-          );
-        })()}
+            <div className="text-base font-black text-white mt-2">
+              Thawing in <span className="text-cyan-300 font-mono text-2xl">{secondsLeft}s</span>
+            </div>
+            <div className="mt-3 w-full h-2.5 rounded-full bg-slate-800 border border-cyan-500/40 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-400 via-sky-300 to-white transition-all duration-200"
+                style={{
+                  width: `${Math.max(
+                    0,
+                    Math.min(100, Math.round((secondsLeft / Math.max(1, event.durationSeconds)) * 100))
+                  )}%`,
+                }}
+              />
+            </div>
+            <div className="text-xs text-cyan-100 mt-2.5">
+              Your screen is locked solid — only {event.summonedByUsername} can keep playing until it thaws!
+            </div>
+            <div className="text-[10px] text-orange-300 mt-1.5">
+              Tip: Equip the Fire Cursor from Normal Crates to melt Screen Freeze!
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ZOMBIE BOSS RAID BANNER FOR NON-SUMMONERS */}
       {event.type === 'zombie_boss_raid' && isAffected && secondsLeft > 0 && (

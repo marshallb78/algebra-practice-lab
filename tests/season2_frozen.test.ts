@@ -68,6 +68,8 @@ import {
   PLAYER_TRIGGERABLE_EVENTS,
   broadcastGlobalGoldenSwarm,
   clearGlobalLiveEvent,
+  extractActiveEventFromStore,
+  extractScoresFromStore,
   fetchActiveGlobalLiveEvent,
   fetchLatestGlobalGoldenSwarm,
   summonGlobalLiveEvent,
@@ -1148,6 +1150,63 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       await clearGlobalLiveEvent(true, true);
       expect(await fetchActiveGlobalLiveEvent(false)).toBeNull();
       expect(await fetchActiveGlobalLiveEvent(true)).toBeNull();
+
+      // Multi-player per-UID event slots, winner ranking, stop override, and screen_freeze exclusion
+      const now = Date.now() + 100;
+      const freezeSpec = PLAYER_TRIGGERABLE_EVENTS.find((e) => e.id === 'evt_screen_freeze_30')!;
+      expect(freezeSpec.excludeSummoner).toBe(true);
+
+      const mockStore = {
+        __ev_slot_playerA: {
+          uid: 'playerA',
+          isSandbox: false,
+          updatedAtMs: now,
+          event: {
+            id: 'gevt_test_multi',
+            uid: 'playerA',
+            type: 'golden_rain',
+            summonedByUid: 'playerA',
+            summonedByUsername: 'PlayerA',
+            bannerText: 'PlayerA Summoned Golden Rain!',
+            startedAtMs: now,
+            endsAtMs: now + 30_000,
+            durationSeconds: 30,
+            excludeSummoner: false,
+          },
+        },
+        __ev_score_playerA: {
+          uid: 'playerA',
+          username: 'PlayerA',
+          isSandbox: false,
+          eventId: 'gevt_test_multi',
+          score: 19,
+          updatedAtMs: now,
+        },
+        __ev_score_playerB: {
+          uid: 'playerB',
+          username: 'PlayerB',
+          isSandbox: false,
+          eventId: 'gevt_test_multi',
+          score: 34,
+          updatedAtMs: now,
+        },
+      };
+      const picked = extractActiveEventFromStore(mockStore, false, now);
+      expect(picked?.id).toBe('gevt_test_multi');
+      const ranked = extractScoresFromStore(mockStore, 'gevt_test_multi', false);
+      expect(ranked[0].username).toBe('PlayerB');
+      expect(ranked[0].clicks).toBe(34);
+      expect(ranked[1].username).toBe('PlayerA');
+
+      const stopped = extractActiveEventFromStore(
+        {
+          ...mockStore,
+          __ev_stop_dev: { uid: 'dev', stoppedAtMs: now, scope: 'all' },
+        },
+        false,
+        now
+      );
+      expect(stopped).toBeNull();
     } finally {
       (globalThis as any).localStorage = prevLS;
     }

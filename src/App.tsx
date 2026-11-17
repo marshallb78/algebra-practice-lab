@@ -84,9 +84,8 @@ import {
   broadcastGlobalGoldenSwarm,
   broadcastMatthewTokenPull,
   clearGlobalLiveEvent,
-  fetchActiveGlobalLiveEvent,
-  fetchLatestGlobalGoldenSwarm,
   fetchLatestMatthewTokenBroadcast,
+  subscribeToGlobalEventsRealtime,
   summonGlobalLiveEvent,
 } from './firebase/liveEvents';
 import {
@@ -193,6 +192,7 @@ export function App() {
   const [activeGlobalEvent, setActiveGlobalEvent] = useState<ActiveGlobalLiveEvent | null>(null);
   const activeGlobalEventRef = useRef<ActiveGlobalLiveEvent | null>(null);
   activeGlobalEventRef.current = activeGlobalEvent;
+  const [evStoreSnapshot, setEvStoreSnapshot] = useState<Record<string, any>>({});
   const [zombieRaidEndsAt, setZombieRaidEndsAt] = useState<number>(0);
   const [sandboxStormStartMs, setSandboxStormStartMs] = useState<number | null>(null);
   const [previewDowntimeOverride, setPreviewDowntimeOverride] = useState(false);
@@ -267,13 +267,14 @@ export function App() {
       : MATTHEW_STORM_CONFIG.baseStormMultiplier
     : 1;
 
+  const serverNowMs = getServerNowMs();
   const isRaidActive = isS2Active && zombieRaidEndsAt > nowMs;
   const raidSecondsRemaining = isRaidActive ? Math.max(0, Math.ceil((zombieRaidEndsAt - nowMs) / 1000)) : 0;
   const isBossRaidActive = Boolean(
     isS2Active &&
       activeGlobalEvent &&
       activeGlobalEvent.type === 'zombie_boss_raid' &&
-      activeGlobalEvent.endsAtMs > nowMs &&
+      activeGlobalEvent.endsAtMs > serverNowMs &&
       (!activeGlobalEvent.excludeSummoner ||
         activeGlobalEvent.summonedByUid !== state.cloudAccount?.uid)
   );
@@ -283,7 +284,7 @@ export function App() {
       !equippedCursor?.freezeImmune &&
       activeGlobalEvent &&
       activeGlobalEvent.type === 'screen_freeze' &&
-      activeGlobalEvent.endsAtMs > nowMs &&
+      activeGlobalEvent.endsAtMs > serverNowMs &&
       (!activeGlobalEvent.excludeSummoner ||
         activeGlobalEvent.summonedByUid !== state.cloudAccount?.uid)
   );
@@ -563,7 +564,7 @@ export function App() {
     const isStormMusic =
       stormState.status === 'active' || stormState.status === 'fullscreen_10s_countdown';
     const isGlobalLiveEventActive = Boolean(
-      activeGlobalEvent && activeGlobalEvent.endsAtMs > Date.now()
+      activeGlobalEvent && activeGlobalEvent.endsAtMs > getServerNowMs()
     );
     if (isS2Active) {
       soundManager.setMusicTrack(
@@ -1136,7 +1137,7 @@ export function App() {
       stormWaveMultiplier,
       isStormActive,
     },
-    enabled: !isGameplayPaused,
+    enabled: !isGameplayPaused && !isScreenFrozen,
   });
 
   // Trigger 3D widescreen cutscene once per active global live event ID
@@ -1198,30 +1199,39 @@ export function App() {
     });
   }, [isS2Active, isGameplayPaused, petCount, equippedPetCount]);
 
-  // Poll global summoned live events, Matthew Shop Token pull broadcasts & Flying Golden Matthew swarms (every 6s while visible)
+  // Sub-second real-time stream + fast fallback sync for global summoned live events, Flying Golden Matthew swarms & scoreboards
   useEffect(() => {
     if (seasonInfo.isDowntime || isInitialCloudHydrating || activeBanRecord) {
       setActiveGlobalEvent(null);
       return;
     }
-    let cancelled = false;
-    const poll = async () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      const current = activeGlobalEventRef.current;
-      const [ev, tokenBroadcast, goldenSwarm] = await Promise.all([
-        current && current.id.startsWith('preview_') && current.endsAtMs > Date.now()
-          ? Promise.resolve(current)
-          : fetchActiveGlobalLiveEvent(isSandbox),
-        fetchLatestMatthewTokenBroadcast(isSandbox),
-        fetchLatestGlobalGoldenSwarm(isSandbox),
-      ]);
-      if (cancelled) return;
+
+    const unsubscribe = subscribeToGlobalEventsRealtime(isSandbox, (snap) => {
+      setEvStoreSnapshot(snap.store);
 
       const latest = activeGlobalEventRef.current;
       if (!(latest && latest.id.startsWith('preview_') && latest.endsAtMs > Date.now())) {
-        setActiveGlobalEvent(ev);
+        setActiveGlobalEvent((prev) => {
+          if (prev?.id === snap.activeEvent?.id && prev?.endsAtMs === snap.activeEvent?.endsAtMs) {
+            return prev;
+          }
+          return snap.activeEvent;
+        });
       }
 
+      if (snap.latestSwarm && seenGoldenSwarmIdRef.current !== snap.latestSwarm.id) {
+        seenGoldenSwarmIdRef.current = snap.latestSwarm.id;
+        setGoldenSwarmTrigger({
+          id: snap.latestSwarm.id,
+          count: snap.latestSwarm.count || 18,
+        });
+        handleNotify('🌟 FLYING GOLDEN MATTHEWS!', snap.latestSwarm.message);
+      }
+    });
+
+    const pollTokens = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const tokenBroadcast = await fetchLatestMatthewTokenBroadcast(isSandbox).catch(() => null);
       if (
         tokenBroadcast &&
         seenTokenBroadcastIdRef.current !== tokenBroadcast.id &&
@@ -1235,18 +1245,13 @@ export function App() {
         );
         handleNotify('MATTHEW SHOP TOKEN PULLED!', tokenBroadcast.message);
       }
-
-      if (goldenSwarm && seenGoldenSwarmIdRef.current !== goldenSwarm.id) {
-        seenGoldenSwarmIdRef.current = goldenSwarm.id;
-        setGoldenSwarmTrigger({ id: goldenSwarm.id, count: goldenSwarm.count || 18 });
-        handleNotify('🌟 FLYING GOLDEN MATTHEWS!', goldenSwarm.message);
-      }
     };
-    poll();
-    const id = setInterval(poll, 4000);
+    pollTokens();
+    const tokenTimer = setInterval(pollTokens, 4000);
+
     return () => {
-      cancelled = true;
-      clearInterval(id);
+      unsubscribe();
+      clearInterval(tokenTimer);
     };
   }, [seasonInfo.isDowntime, isSandbox, isInitialCloudHydrating, activeBanRecord]);
 
@@ -1570,7 +1575,7 @@ export function App() {
       username,
       isSandbox,
       broadcastToAll: true,
-      excludeSummoner: false,
+      excludeSummoner: spec.excludeSummoner,
     });
     if (res.ok && res.event) {
       await adminPublishGlobalEvent(res.event).catch(() => false);
@@ -1586,7 +1591,7 @@ export function App() {
     const currUid = stateRef.current.cloudAccount?.uid;
     if (!isVerifiedLiveDevSession(currUid)) return;
     await Promise.all([
-      clearGlobalLiveEvent(isSandbox, true),
+      clearGlobalLiveEvent(isSandbox, true, currUid || undefined),
       adminPublishGlobalEvent(null).catch(() => false),
     ]);
     setActiveGlobalEvent(null);
@@ -2345,6 +2350,7 @@ export function App() {
           }
           isSandbox={isSandbox}
           hasFireCursor={Boolean(equippedCursor?.freezeImmune)}
+          evStoreSnapshot={evStoreSnapshot}
           onAwardCoins={(amount, reason) => {
             handleEarnCoins(amount, false, false);
             handleNotify('LIVE EVENT REWARD!', `${reason} (+${formatCoins(amount)} MC)`);
@@ -2357,6 +2363,7 @@ export function App() {
             });
             handleNotify('GEM REWARD!', `Live Event Reward (+${amount} Gems)`);
           }}
+          onNotify={handleNotify}
         />
       )}
 
@@ -2390,7 +2397,7 @@ export function App() {
           onZombieStealCoins={handleZombieStealCoins}
           onClaimSnowDrop={handleClaimSnowDrop}
           onOpenPetsModal={() => setShowPetsModal(true)}
-          isCombatPaused={isGameplayPaused}
+          isCombatPaused={isGameplayPaused || isScreenFrozen}
         />
       </div>
 

@@ -116,7 +116,7 @@ export function getFirebaseServices(): {
   }
 }
 
-const RTDB_REST_BASE = firebaseConfig.databaseURL.replace(/\/$/, '');
+export const RTDB_REST_BASE = firebaseConfig.databaseURL.replace(/\/$/, '');
 const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents`;
 
 export async function getAuthIdToken(timeoutMs = 2500): Promise<string | null> {
