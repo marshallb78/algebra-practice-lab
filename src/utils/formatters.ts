@@ -107,21 +107,49 @@ const SUFFIXES = [
   'Ctg',
 ];
 
+export function formatKrillion(krillionVal: number, precision: number = 2): string {
+  if (!Number.isFinite(krillionVal) || krillionVal <= 0) return '0 Krillion';
+  if (krillionVal < 1000) {
+    return `${krillionVal.toFixed(krillionVal >= 100 ? 1 : precision)} Krillion`;
+  }
+  if (krillionVal < 1e12) {
+    return `${Math.floor(krillionVal).toLocaleString()} Krillion`;
+  }
+  return `${krillionVal.toExponential(2).replace('+', '')} Krillion`;
+}
+
 export function formatCoins(val: number, precision: number = 1): string {
   if (isNaN(val) || val <= 0) return '0';
   if (!isFinite(val)) return '∞';
+
+  if (val >= 1e306) {
+    return formatKrillion(val / 1e306, precision);
+  }
 
   if (val < 1000) {
     return val >= 10 ? Math.floor(val).toLocaleString() : (Math.round(val * 10) / 10).toString();
   }
 
   const tier = Math.floor(Math.log10(val) / 3 + 1e-12);
-  if (tier >= SUFFIXES.length) return '∞';
+  if (tier >= SUFFIXES.length) return formatKrillion(val / 1e306, precision);
 
   const scale = Math.pow(10, tier * 3);
   const scaled = val / scale;
 
   return scaled.toFixed(precision) + SUFFIXES[tier];
+}
+
+export function formatExtendedCoins(
+  coins: number,
+  krillion: number = 0,
+  precision: number = 1
+): string {
+  const safeKr = typeof krillion === 'number' && Number.isFinite(krillion) && krillion > 0 ? krillion : 0;
+  if (safeKr > 0) {
+    const extra = typeof coins === 'number' && Number.isFinite(coins) && coins > 0 ? coins / 1e306 : 0;
+    return formatKrillion(safeKr + extra, 2);
+  }
+  return formatCoins(coins, precision);
 }
 
 export function formatNumber(val: number): string {

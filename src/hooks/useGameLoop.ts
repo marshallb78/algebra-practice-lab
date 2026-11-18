@@ -1,6 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { GameState } from '../types/game';
-import { calculateCPS, clampFiniteCoinAmount, MAX_SAFE_SEASON_COINS } from '../utils/calculations';
+import {
+  addCoinsWithKrillionCarry,
+  calculateCPS,
+  calculateKrillionProduction,
+  clampFiniteCoinAmount,
+  MAX_SAFE_SEASON_COINS,
+} from '../utils/calculations';
 import { formatNumber } from '../utils/formatters';
 import { checkAndApplyMilestoneUnlocks, equipSkin } from '../data/skins';
 import { checkAndAutoClaimQuests } from '../data/quests';
@@ -66,7 +72,12 @@ export function useGameLoop({
           fridayBonusActive: ctx.fridayBonusActive,
           stormWaveMultiplier: ctx.stormWaveMultiplier,
         });
+        const { krillionCps } = calculateKrillionProduction(prev, {
+          fridayBonusActive: ctx.fridayBonusActive,
+          stormWaveMultiplier: ctx.stormWaveMultiplier,
+        });
         const coinsToAdd = clampFiniteCoinAmount(cps * dt, MAX_SAFE_SEASON_COINS);
+        const krillionToAdd = krillionCps > 0 ? krillionCps * dt : 0;
 
         let newCombo = prev.combo;
         let newComboTimer = prev.comboTimer - dt;
@@ -135,11 +146,33 @@ export function useGameLoop({
               )
             : prev.pets;
 
+        const carriedCoins = addCoinsWithKrillionCarry(
+          prev.coins || 0,
+          prev.krillionCoins || 0,
+          coinsToAdd,
+          krillionToAdd
+        );
+        const carriedLifetime = addCoinsWithKrillionCarry(
+          prev.lifetimeCoins || 0,
+          prev.krillionLifetime || 0,
+          coinsToAdd,
+          krillionToAdd
+        );
+        const carriedScore = addCoinsWithKrillionCarry(
+          prev.seasonalScore || 0,
+          prev.krillionSeasonalScore || 0,
+          coinsToAdd,
+          krillionToAdd
+        );
+
         const updatedBase: GameState = {
           ...prev,
-          coins: clampFiniteCoinAmount((prev.coins || 0) + coinsToAdd, MAX_SAFE_SEASON_COINS),
-          lifetimeCoins: clampFiniteCoinAmount((prev.lifetimeCoins || 0) + coinsToAdd, MAX_SAFE_SEASON_COINS),
-          seasonalScore: clampFiniteCoinAmount((prev.seasonalScore || 0) + coinsToAdd, MAX_SAFE_SEASON_COINS),
+          coins: carriedCoins.coins,
+          krillionCoins: carriedCoins.krillion,
+          lifetimeCoins: carriedLifetime.coins,
+          krillionLifetime: carriedLifetime.krillion,
+          seasonalScore: carriedScore.coins,
+          krillionSeasonalScore: carriedScore.krillion,
           combo: newCombo,
           comboTimer: newComboTimer,
           frenzyTimer: newFrenzyTimer,

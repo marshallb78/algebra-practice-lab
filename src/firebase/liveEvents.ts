@@ -12,7 +12,17 @@ export type GlobalEventType =
   | 'falling_matthews'
   | 'golden_rain'
   | 'zombie_boss_raid'
-  | 'screen_freeze';
+  | 'screen_freeze'
+  | 'lucky_pinata'
+  | 'memory_simon'
+  | 'reaction_duel'
+  | 'meteor_shield'
+  | 'coin_jackpot_wheel'
+  | 'tax_collector'
+  | 'upside_down_chaos'
+  | 'blackout_flashlight'
+  | 'earthquake_buttons'
+  | 'fake_crash_prank';
 
 export interface ActiveGlobalLiveEvent {
   id: string;
@@ -95,6 +105,98 @@ export const PLAYER_TRIGGERABLE_EVENTS: (PlayerEventCostSpec & { id: string })[]
     description: 'Deep-freezes EVERYONE ELSE’s screen for a full 60s (you stay unfrozen)!',
     gemCost: 55,
     durationSeconds: 60,
+    excludeSummoner: true,
+  },
+  // === 5 NEW GOOD INTERACTIVE EVENTS ===
+  {
+    id: 'evt_lucky_pinata',
+    type: 'lucky_pinata',
+    label: 'Matthew Piñata Party (Good)',
+    description: 'Smash a giant Crystal Piñata together! Every crack bursts Coins & Gems — top smasher wins!',
+    gemCost: 35,
+    durationSeconds: 35,
+    excludeSummoner: false,
+  },
+  {
+    id: 'evt_memory_simon',
+    type: 'memory_simon',
+    label: 'Cryo Pattern Match (Good)',
+    description: 'Simon-Says memory duel! Repeat the glowing Matthew tile sequences to win Coins & +20 Gems!',
+    gemCost: 30,
+    durationSeconds: 40,
+    excludeSummoner: false,
+  },
+  {
+    id: 'evt_reaction_duel',
+    type: 'reaction_duel',
+    label: 'Quick-Draw Reflex Duel (Good)',
+    description: 'Wait for GREEN and click fastest! Best millisecond reflex score across 4 rounds wins!',
+    gemCost: 30,
+    durationSeconds: 35,
+    excludeSummoner: false,
+  },
+  {
+    id: 'evt_meteor_shield',
+    type: 'meteor_shield',
+    label: 'Meteor Coin Forge (Good)',
+    description: 'Tap on the shrinking Timing Ring! Hit PERFECT rings for 8x combos & Gems!',
+    gemCost: 35,
+    durationSeconds: 35,
+    excludeSummoner: false,
+  },
+  {
+    id: 'evt_coin_jackpot_wheel',
+    type: 'coin_jackpot_wheel',
+    label: 'Server Jackpot Wheel (Good)',
+    description: 'Everyone gets 3 interactive Prize Wheel spins for massive CPS jackpots & Gems!',
+    gemCost: 45,
+    durationSeconds: 30,
+    excludeSummoner: false,
+  },
+  // === 5 NEW BAD SABOTAGE EVENTS (AFFECTS EVERYONE ELSE!) ===
+  {
+    id: 'evt_tax_collector',
+    type: 'tax_collector',
+    label: 'Matthew Tax Audit (Bad)',
+    description: 'Sends a sneaky Tax Collector to siphon EVERYONE ELSE’s coins unless they whack him!',
+    gemCost: 35,
+    durationSeconds: 30,
+    excludeSummoner: true,
+  },
+  {
+    id: 'evt_upside_down_chaos',
+    type: 'upside_down_chaos',
+    label: 'Gravity Flip 180° (Bad)',
+    description: 'Flips EVERYONE ELSE’s entire screen upside-down for 30s (tap bolts to stabilize)!',
+    gemCost: 40,
+    durationSeconds: 30,
+    excludeSummoner: true,
+  },
+  {
+    id: 'evt_blackout_flashlight',
+    type: 'blackout_flashlight',
+    label: 'Blizzard Blackout (Bad)',
+    description: 'Plunges EVERYONE ELSE into darkness with only a tiny flashlight (catch 5 Flares to clear)!',
+    gemCost: 40,
+    durationSeconds: 35,
+    excludeSummoner: true,
+  },
+  {
+    id: 'evt_earthquake_buttons',
+    type: 'earthquake_buttons',
+    label: 'Subzero Earthquake (Bad)',
+    description: 'Shakes EVERYONE ELSE’s screen violently with seismic tremors for 30s!',
+    gemCost: 35,
+    durationSeconds: 30,
+    excludeSummoner: true,
+  },
+  {
+    id: 'evt_fake_crash_prank',
+    type: 'fake_crash_prank',
+    label: 'Ice Virus Pop-Up Storm (Bad)',
+    description: 'Floods EVERYONE ELSE’s screen with funny fake error pop-ups they must close!',
+    gemCost: 40,
+    durationSeconds: 35,
     excludeSummoner: true,
   },
 ];
@@ -413,6 +515,16 @@ export async function summonGlobalLiveEvent(params: {
     golden_rain: `${params.username} Summoned a Click Event! (100 Golden Matthews)`,
     zombie_boss_raid: `${params.username} Unleashed a Zombie Boss Raid on Everyone Else!`,
     screen_freeze: `${params.username} Froze Everyone Else's Screen (${params.spec.durationSeconds}s)!`,
+    lucky_pinata: `${params.username} Dropped a Crystal Matthew Piñata Party!`,
+    memory_simon: `${params.username} Started Cryo Pattern Match (Simon Says)!`,
+    reaction_duel: `${params.username} Triggered Quick-Draw Reflex Duel!`,
+    meteor_shield: `${params.username} Ignited the Meteor Coin Forge!`,
+    coin_jackpot_wheel: `${params.username} Spun Up the Server Jackpot Wheel!`,
+    tax_collector: `${params.username} Sent the Matthew Tax Collector After Everyone Else!`,
+    upside_down_chaos: `${params.username} Flipped Everyone Else's Gravity Upside-Down!`,
+    blackout_flashlight: `${params.username} Triggered a Blizzard Blackout on Everyone Else!`,
+    earthquake_buttons: `${params.username} Unleashed a Subzero Earthquake on Everyone Else!`,
+    fake_crash_prank: `${params.username} Infected Everyone Else with Ice Virus Pop-Ups!`,
   };
 
   const event: ActiveGlobalLiveEvent = {

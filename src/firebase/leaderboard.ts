@@ -79,6 +79,9 @@ export interface LeaderboardEntry {
   username: string;
   seasonalScore: number;
   lifetimeCoins: number;
+  krillionScore?: number;
+  krillionLifetime?: number;
+  krillionCoins?: number;
   totalClicks: number;
   highestCps?: number;
   rebirthCount: number;
@@ -133,6 +136,9 @@ function parseRawEntry(uid: string, d: Record<string, any>): LeaderboardEntry {
         : typeof d.seasonalScore === 'number'
           ? d.seasonalScore
           : 0,
+    krillionScore: typeof d.krillionScore === 'number' && Number.isFinite(d.krillionScore) ? d.krillionScore : 0,
+    krillionLifetime: typeof d.krillionLifetime === 'number' && Number.isFinite(d.krillionLifetime) ? d.krillionLifetime : 0,
+    krillionCoins: typeof d.krillionCoins === 'number' && Number.isFinite(d.krillionCoins) ? d.krillionCoins : 0,
     totalClicks: typeof d.totalClicks === 'number' ? d.totalClicks : 0,
     highestCps: typeof d.highestCps === 'number' ? d.highestCps : 0,
     rebirthCount: rebirths,
@@ -187,12 +193,16 @@ export function buildLeaderboardPayload(
   const playtimeSeconds = Math.floor(state.totalPlaytimeSeconds || 0);
   const activeProbation = loadLocalProbationState(uid);
 
+  const krillionScore = Math.max(0, state.krillionSeasonalScore || 0, state.krillionLifetime || 0);
   return {
     uid,
     username,
     seasonalScore: validatedScore,
     lifetimeCoins: Math.floor(state.lifetimeCoins || 0),
     coins: Math.floor(state.coins || 0),
+    krillionScore,
+    krillionLifetime: Math.max(0, state.krillionLifetime || 0),
+    krillionCoins: Math.max(0, state.krillionCoins || 0),
     totalClicks: Math.floor(state.clicks || 0),
     highestCps: Number((state.highestCps || 0).toFixed(1)),
     rebirthCount: rebirths,
@@ -409,6 +419,11 @@ export async function fetchWorldwideLeaderboard(
 
 export function sortLeaderboardDeterministically(entries: LeaderboardEntry[]): LeaderboardEntry[] {
   return [...entries].sort((a, b) => {
+    const bKr = b.krillionScore || 0;
+    const aKr = a.krillionScore || 0;
+    if (bKr !== aKr) {
+      return bKr - aKr;
+    }
     if (b.seasonalScore !== a.seasonalScore) {
       return b.seasonalScore - a.seasonalScore;
     }

@@ -19,6 +19,7 @@ import { CRATE_DEFINITIONS, CrateOpenResult, CrateType, rollCrateReward } from '
 import { MATTHEW_VAULT_SKINS } from './data/season2Skins';
 import { checkAndAutoClaimQuests } from './data/quests';
 import {
+  addCoinsWithKrillionCarry,
   calculateClickPower,
   calculateOfflineEarnings,
   calculateCPS,
@@ -1305,20 +1306,47 @@ export function App() {
     state.season2IntroSeen,
   ]);
 
-  const handleEarnCoins = (amount: number, isClick: boolean, isCrit: boolean) => {
+  const handleEarnCoins = (
+    amount: number,
+    isClick: boolean,
+    isCrit: boolean,
+    krillionAmount: number = 0
+  ) => {
     if (seasonInfo.isDowntime || activeBanRecord) return;
     const safeAmount = clampFiniteCoinAmount(amount, MAX_SAFE_SEASON_COINS);
+    const safeKr = Number.isFinite(krillionAmount) && krillionAmount > 0 ? krillionAmount : 0;
 
     let unlockedSkinsNow: { id: string; name: string }[] = [];
     let autoClaimedQuestsNow: { title: string; rewardGems: number; rewardCoins: number }[] = [];
 
     setState((prev) => {
       const nextCombo = 0;
+      const carriedCoins = addCoinsWithKrillionCarry(
+        prev.coins || 0,
+        prev.krillionCoins || 0,
+        safeAmount,
+        safeKr
+      );
+      const carriedLifetime = addCoinsWithKrillionCarry(
+        prev.lifetimeCoins || 0,
+        prev.krillionLifetime || 0,
+        safeAmount,
+        safeKr
+      );
+      const carriedScore = addCoinsWithKrillionCarry(
+        prev.seasonalScore || 0,
+        prev.krillionSeasonalScore || 0,
+        safeAmount,
+        safeKr
+      );
       const baseNext: GameState = {
         ...prev,
-        coins: clampFiniteCoinAmount((prev.coins || 0) + safeAmount, MAX_SAFE_SEASON_COINS),
-        lifetimeCoins: clampFiniteCoinAmount((prev.lifetimeCoins || 0) + safeAmount, MAX_SAFE_SEASON_COINS),
-        seasonalScore: clampFiniteCoinAmount((prev.seasonalScore || 0) + safeAmount, MAX_SAFE_SEASON_COINS),
+        coins: carriedCoins.coins,
+        krillionCoins: carriedCoins.krillion,
+        lifetimeCoins: carriedLifetime.coins,
+        krillionLifetime: carriedLifetime.krillion,
+        seasonalScore: carriedScore.coins,
+        krillionSeasonalScore: carriedScore.krillion,
         clicks: isClick ? prev.clicks + 1 : prev.clicks,
         lifetimeAllSeasonsClicks: isClick
           ? Math.max((prev.lifetimeAllSeasonsClicks || 0) + 1, prev.clicks + 1)
@@ -2362,6 +2390,15 @@ export function App() {
               return next;
             });
             handleNotify('GEM REWARD!', `Live Event Reward (+${amount} Gems)`);
+          }}
+          onDrainCoinsPercent={(pct) => {
+            setState((prev) => {
+              const safePct = Math.max(0, Math.min(0.25, pct));
+              if ((prev.krillionCoins || 0) > 0) {
+                return { ...prev, krillionCoins: Math.max(0, (prev.krillionCoins || 0) * (1 - safePct)) };
+              }
+              return { ...prev, coins: Math.max(0, Math.floor((prev.coins || 0) * (1 - safePct))) };
+            });
           }}
           onNotify={handleNotify}
         />

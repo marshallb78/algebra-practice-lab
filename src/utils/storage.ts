@@ -494,6 +494,18 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
     coins,
     lifetimeCoins,
     seasonalScore,
+    krillionCoins:
+      typeof parsed.krillionCoins === 'number' && Number.isFinite(parsed.krillionCoins) && parsed.krillionCoins > 0
+        ? parsed.krillionCoins
+        : 0,
+    krillionLifetime:
+      typeof parsed.krillionLifetime === 'number' && Number.isFinite(parsed.krillionLifetime) && parsed.krillionLifetime > 0
+        ? parsed.krillionLifetime
+        : 0,
+    krillionSeasonalScore:
+      typeof parsed.krillionSeasonalScore === 'number' && Number.isFinite(parsed.krillionSeasonalScore) && parsed.krillionSeasonalScore > 0
+        ? parsed.krillionSeasonalScore
+        : 0,
     clicks,
     criticalClicks,
     combo: 0,

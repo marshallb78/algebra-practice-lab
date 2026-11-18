@@ -217,6 +217,9 @@ function buildUserCloudPayload(
         coins: state.coins,
         lifetimeCoins: state.lifetimeCoins,
         seasonalScore: Math.max(state.seasonalScore || 0, Math.floor(state.lifetimeCoins)),
+        krillionCoins: state.krillionCoins || 0,
+        krillionLifetime: state.krillionLifetime || 0,
+        krillionSeasonalScore: Math.max(state.krillionSeasonalScore || 0, state.krillionLifetime || 0),
         clicks: state.clicks,
         criticalClicks: state.criticalClicks,
         maxComboReached: state.maxComboReached || 0,
@@ -698,6 +701,24 @@ export function reconcileCloudAndLocalState(params: {
     coins: forceSeasonalZero ? 0 : authCoins,
     lifetimeCoins: mergedLifetimeCoins,
     seasonalScore: mergedSeasonalScore,
+    krillionCoins: forceSeasonalZero
+      ? 0
+      : Math.max(
+          typeof authoritativeSeason.krillionCoins === 'number' ? authoritativeSeason.krillionCoins : 0,
+          localInActiveSeason ? localState.krillionCoins || 0 : 0
+        ),
+    krillionLifetime: forceSeasonalZero
+      ? 0
+      : Math.max(
+          typeof authoritativeSeason.krillionLifetime === 'number' ? authoritativeSeason.krillionLifetime : 0,
+          localInActiveSeason ? localState.krillionLifetime || 0 : 0
+        ),
+    krillionSeasonalScore: forceSeasonalZero
+      ? 0
+      : Math.max(
+          typeof authoritativeSeason.krillionSeasonalScore === 'number' ? authoritativeSeason.krillionSeasonalScore : 0,
+          localInActiveSeason ? localState.krillionSeasonalScore || 0 : 0
+        ),
     clicks: mergedClicks,
     criticalClicks: forceSeasonalZero
       ? 0

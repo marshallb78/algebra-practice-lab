@@ -41,7 +41,7 @@ import {
 } from '../src/data/petsAndEggs';
 import { reconcileCloudAndLocalState } from '../src/firebase/cloudSave';
 import { applyTradeSwapToState } from '../src/firebase/clansAndTrades';
-import { formatCoins } from '../src/utils/formatters';
+import { formatCoins, formatExtendedCoins } from '../src/utils/formatters';
 import { SEASON_2_UPGRADES } from '../src/data/season2Upgrades';
 import { checkAndAutoClaimQuests, QUESTS } from '../src/data/quests';
 import {
@@ -52,8 +52,10 @@ import {
 } from '../src/data/cursors';
 import { CRATE_DEFINITIONS, rollCrateReward } from '../src/data/crates';
 import {
+  addCoinsWithKrillionCarry,
   calculateClickPower,
   calculateCPS,
+  calculateKrillionProduction,
   canAffordCoinCost,
   getMaxAffordableUpgrade,
 } from '../src/utils/calculations';
@@ -356,8 +358,9 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(formatCoins(1e273)).toContain('Ng');
     expect(formatCoins(1e303)).toContain('Ctg');
 
-    expect(SEASON_2_UPGRADES.length).toBe(419);
+    expect(SEASON_2_UPGRADES.length).toBe(425);
     expect(SEASON_2_UPGRADES[SEASON_2_UPGRADES.length - 1].baseCost).toBeGreaterThanOrEqual(1e303);
+    expect(formatCoins(1e306)).toContain('Krillion');
     const uniqueImgs = new Set(SEASON_2_UPGRADES.map((u) => u.iconImage));
     expect(uniqueImgs.size).toBe(96);
 
@@ -522,8 +525,8 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(nextSeason.zombieHitsTaken).toBe(0);
   });
 
-  it('maps all 419 Season 2 upgrades across 96 unique icons and preserves active Matthew Shop Token', () => {
-    expect(SEASON_2_UPGRADES.length).toBe(419);
+  it('maps all 425 Season 2 upgrades across 96 unique icons and preserves active Matthew Shop Token', () => {
+    expect(SEASON_2_UPGRADES.length).toBe(425);
     expect(SEASON_2_UPGRADES[0].id).toBe('s2_snowball_pack');
     const uniqueImages = new Set(SEASON_2_UPGRADES.map((u) => u.iconImage));
     expect(uniqueImages.size).toBe(96);
@@ -1207,6 +1210,23 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
         now
       );
       expect(stopped).toBeNull();
+
+      // Krillion formatting, unlimited carry, Krillion upgrades, and all 10 new interactive events
+      expect(formatExtendedCoins(0, 1_000_000)).toBe('1,000,000 Krillion');
+      const rolled = addCoinsWithKrillionCarry(9.99e305, 0, 2e304);
+      expect(rolled.krillion).toBeGreaterThan(1);
+      expect(rolled.coins).toBe(0);
+
+      const krState = {
+        ...getDefaultGameState(),
+        currentSeasonId: 'season_2',
+        upgrades: { s2_krillion_omega_nebula: 2 },
+      };
+      const krProd = calculateKrillionProduction(krState);
+      expect(krProd.krillionCps).toBeGreaterThanOrEqual(15000);
+      expect(PLAYER_TRIGGERABLE_EVENTS.length).toBe(16);
+      expect(PLAYER_TRIGGERABLE_EVENTS.find((e) => e.type === 'upside_down_chaos')?.excludeSummoner).toBe(true);
+      expect(PLAYER_TRIGGERABLE_EVENTS.find((e) => e.type === 'lucky_pinata')?.excludeSummoner).toBe(false);
     } finally {
       (globalThis as any).localStorage = prevLS;
     }

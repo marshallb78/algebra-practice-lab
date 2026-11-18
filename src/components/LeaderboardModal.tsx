@@ -16,7 +16,7 @@ import {
 import { SEASON_2_CONFIG } from '../config/gameConfig';
 import { getAscensionMultiplier } from '../data/prestige';
 import { CHAMPION_SKIN, LIAM_SKIN, getSkinById } from '../data/skins';
-import { formatCoins, formatTime } from '../utils/formatters';
+import { formatCoins, formatExtendedCoins, formatTime } from '../utils/formatters';
 import {
   Trophy,
   Crown,
@@ -410,7 +410,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 <div className="p-3.5 rounded-2xl bg-sky-950/75 border border-cyan-300/35 backdrop-blur-md">
                   <span className="text-[10px] text-cyan-200/80 uppercase font-black">Score</span>
                   <p className="text-lg font-black text-amber-300 mt-1">
-                    {formatCoins(selectedPlayer.entry.seasonalScore)}
+                    {formatExtendedCoins(selectedPlayer.entry.seasonalScore, selectedPlayer.entry.krillionScore || 0)}
                   </p>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-sky-950/75 border border-cyan-300/35 backdrop-blur-md">
@@ -511,7 +511,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                       Your Score
                     </span>
                     <p className="text-xl font-black text-amber-300">
-                      {formatCoins(state.seasonalScore)}
+                      {formatExtendedCoins(state.seasonalScore, state.krillionSeasonalScore || 0)}
                     </p>
                   </div>
 
@@ -651,7 +651,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
 
                         <div className="text-right">
                           <div className="text-base sm:text-lg font-black text-amber-300">
-                            {formatCoins(entry.seasonalScore)}
+                            {formatExtendedCoins(entry.seasonalScore, entry.krillionScore || 0)}
                           </div>
                         </div>
                       </div>

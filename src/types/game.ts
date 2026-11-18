@@ -190,6 +190,10 @@ export interface Upgrade {
   baseCps: number;
   baseClickPower: number;
   tier?: number;
+  /** Optional endgame Krillion-tier economy fields (1 Krillion = 1e306 coins, scales infinitely) */
+  krillionBaseCost?: number;
+  krillionBaseCps?: number;
+  krillionBaseClickPower?: number;
 }
 
 export interface PrestigeUpgrade {
@@ -278,6 +282,10 @@ export interface GameState {
   coins: number;
   lifetimeCoins: number;
   seasonalScore: number;
+  /** Endgame overflow units beyond 999 Ctg (1 Krillion = 1e306 coins, unlimited ceiling) */
+  krillionCoins?: number;
+  krillionLifetime?: number;
+  krillionSeasonalScore?: number;
   clicks: number;
   criticalClicks: number;
   combo: number;

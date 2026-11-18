@@ -12,11 +12,12 @@ import { AntiAutoclickerGuard } from '../utils/antiAutoclicker';
 import { FrozenBackground } from './s2/FrozenBackground';
 import { PetCombatStage, SnowLootDrop } from './s2/PetCombatStage';
 import { getAscensionMultiplier } from '../data/prestige';
-import { formatCoins, formatTime } from '../utils/formatters';
+import { formatCoins, formatExtendedCoins, formatKrillion, formatTime } from '../utils/formatters';
 import {
   calculateClickPower,
   calculateCPS,
   calculateGiantMatthewClickReward,
+  calculateKrillionProduction,
   LiveMultiplierOptions,
 } from '../utils/calculations';
 import { MatthewStormState } from '../utils/scheduleEngine';
@@ -52,7 +53,7 @@ import {
 interface ClickerAreaProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
-  onEarnCoins: (amount: number, isClick: boolean, isCrit: boolean) => void;
+  onEarnCoins: (amount: number, isClick: boolean, isCrit: boolean, krillionAmount?: number) => void;
   onOpenSettings: () => void;
   onOpenAccount: () => void;
   onOpenLeaderboard: () => void;
@@ -275,6 +276,9 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
     const isCrit = Math.random() < critChance;
     const earned = isCrit ? Math.floor(totalPower * critMultiplier) : totalPower;
+    const { krillionClickPower } = calculateKrillionProduction(state, liveOpts);
+    const krillionEarned =
+      krillionClickPower > 0 ? (isCrit ? krillionClickPower * critMultiplier : krillionClickPower) : 0;
 
     if (isCrit) {
       soundManager.playCrit();
@@ -288,7 +292,9 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     const floatId = Date.now() + Math.random();
     const floatX = clientX + (Math.random() - 0.5) * 60;
     const floatY = clientY - 42;
-    const floatValue = isCrit ? `⚡ CRIT! +${formatCoins(earned)}` : `+${formatCoins(earned)}`;
+    const formattedEarned =
+      krillionEarned > 0 ? formatKrillion(krillionEarned) : formatCoins(earned);
+    const floatValue = isCrit ? `⚡ CRIT! +${formattedEarned}` : `+${formattedEarned}`;
 
     setFloatingNumbers((prev) => [
       ...prev.slice(-9),
@@ -305,7 +311,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       setClickRipples((prev) => prev.filter((r) => r.id !== floatId));
     }, 850);
 
-    onEarnCoins(earned, true, isCrit);
+    onEarnCoins(earned, true, isCrit, krillionEarned);
   };
 
   const performClickRef = useRef(performMatthewClick);
@@ -730,7 +736,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
                     {rank === 1 && <Crown className="w-3 h-3 text-yellow-300 shrink-0" />}
                   </div>
                   <span className="text-[10px] font-black text-amber-300 shrink-0">
-                    {formatCoins(entry.seasonalScore)}
+                    {formatExtendedCoins(entry.seasonalScore, entry.krillionScore || 0)}
                   </span>
                 </div>
               );
@@ -752,7 +758,7 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
               M
             </div>
             <span className="text-4xl sm:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-yellow-100 via-yellow-300 to-amber-400 tracking-tight font-chunky drop-shadow-[0_4px_0_#78350f]">
-              {formatCoins(state.coins)}
+              {formatExtendedCoins(state.coins, state.krillionCoins || 0)}
             </span>
           </div>
 
@@ -786,24 +792,33 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
         </div>
 
         {/* CLICK POWER + PASSIVE CPS HUD */}
-        <div className="flex items-center justify-center gap-2.5 mt-1.5 flex-wrap">
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-black/45 backdrop-blur-md text-xs sm:text-sm font-black text-cyan-200 shadow-md">
-            <Zap className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
-            <span className="text-yellow-300">+{formatCoins(totalPower)}</span>
-            <span className="text-cyan-200">per click</span>
-          </div>
+        {(() => {
+          const krProd = calculateKrillionProduction(state, liveOpts);
+          return (
+            <div className="flex items-center justify-center gap-2.5 mt-1.5 flex-wrap">
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-black/45 backdrop-blur-md text-xs sm:text-sm font-black text-cyan-200 shadow-md">
+                <Zap className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
+                <span className="text-yellow-300">
+                  +{krProd.krillionClickPower > 0 ? formatKrillion(krProd.krillionClickPower) : formatCoins(totalPower)}
+                </span>
+                <span className="text-cyan-200">per click</span>
+              </div>
 
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-black/45 backdrop-blur-md text-xs font-bold text-slate-300 shadow-md">
-            <span className="text-amber-300 font-black">{formatCoins(cps)}</span>
-            <span className="text-slate-400">/ sec</span>
-          </div>
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-black/45 backdrop-blur-md text-xs font-bold text-slate-300 shadow-md">
+                <span className="text-amber-300 font-black">
+                  {krProd.krillionCps > 0 ? formatKrillion(krProd.krillionCps) : formatCoins(cps)}
+                </span>
+                <span className="text-slate-400">/ sec</span>
+              </div>
 
-          {(fridayBonusActive || stormWaveMultiplier > 1) && (
-            <span className="px-2.5 py-0.5 rounded-lg bg-fuchsia-600/35 text-[11px] text-fuchsia-200 font-black">
-              {(fridayBonusActive ? 2 : 1) * stormWaveMultiplier}× LIVE BOOST!
-            </span>
-          )}
-        </div>
+              {(fridayBonusActive || stormWaveMultiplier > 1) && (
+                <span className="px-2.5 py-0.5 rounded-lg bg-fuchsia-600/35 text-[11px] text-fuchsia-200 font-black">
+                  {(fridayBonusActive ? 2 : 1) * stormWaveMultiplier}× LIVE BOOST!
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         {/* CRIT STAT BADGE */}
         <div className="mt-2 flex items-center justify-center bg-black/45 backdrop-blur-md px-3.5 py-1 rounded-xl shadow-lg text-[11px] font-black text-amber-300 font-mono">

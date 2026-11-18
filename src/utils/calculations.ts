@@ -7,8 +7,50 @@ import { isSeasonTwoOrLater } from '../data/skins';
 import { getCursorById } from '../data/cursors';
 import { GameState } from '../types/game';
 
-/** Maximum safe finite coin/score cap per season (999 Ctg = 9.99e305, cleanly below Number.MAX_VALUE). */
+/** Threshold at which coins roll over into Krillion units (1 Krillion = 1e306 coins, scaling infinitely). */
+export const KRILLION_COIN_UNIT = 1e306;
+
+/** Maximum safe finite coin/score cap per season before rolling into Krillion units. */
 export const MAX_SAFE_SEASON_COINS = 9.99e305;
+
+export function addCoinsWithKrillionCarry(
+  currentCoins: number,
+  currentKrillion: number,
+  deltaCoins: number,
+  deltaKrillion: number = 0
+): { coins: number; krillion: number } {
+  const safeKr =
+    typeof currentKrillion === 'number' && Number.isFinite(currentKrillion) && currentKrillion > 0
+      ? currentKrillion
+      : 0;
+  const safeDeltaKr =
+    typeof deltaKrillion === 'number' && Number.isFinite(deltaKrillion) && deltaKrillion > 0
+      ? deltaKrillion
+      : 0;
+  const safeCoins =
+    typeof currentCoins === 'number' && Number.isFinite(currentCoins) && currentCoins > 0
+      ? currentCoins
+      : 0;
+  const safeDeltaCoins =
+    typeof deltaCoins === 'number' && Number.isFinite(deltaCoins) && deltaCoins > 0
+      ? deltaCoins
+      : 0;
+
+  if (safeKr > 0 || safeDeltaKr > 0) {
+    const nextKr = safeKr + safeDeltaKr + (safeCoins + safeDeltaCoins) / KRILLION_COIN_UNIT;
+    return {
+      coins: 0,
+      krillion: Number.isFinite(nextKr) ? nextKr : safeKr,
+    };
+  }
+
+  const rawSum = safeCoins + safeDeltaCoins;
+  if (!Number.isFinite(rawSum) || rawSum >= KRILLION_COIN_UNIT) {
+    const carry = Number.isFinite(rawSum) ? rawSum / KRILLION_COIN_UNIT : 1;
+    return { coins: 0, krillion: carry };
+  }
+  return { coins: rawSum, krillion: 0 };
+}
 
 export function clampFiniteCoinAmount(val: number, maxVal = MAX_SAFE_SEASON_COINS): number {
   if (typeof val !== 'number' || !Number.isFinite(val) || val <= 0) return 0;
@@ -278,4 +320,63 @@ export function calculateOfflineEarnings(
     MAX_SAFE_SEASON_COINS
   );
   return { elapsedSeconds: effectiveSeconds, coinsEarned, gemsEarned: 0 };
+}
+
+/**
+ * Computes endgame Krillion/sec and Krillion/click from Krillion-tier upgrades,
+ * scaled by Ascension, Pets, Cursors, Frenzy, Friday, and Storm multipliers.
+ */
+export function calculateKrillionProduction(
+  state: GameState,
+  liveOptions?: LiveMultiplierOptions
+): { krillionCps: number; krillionClickPower: number } {
+  let rawCps = 0;
+  let rawClick = 0;
+  const activeUpgrades = getUpgradesForSeason(state.currentSeasonId);
+
+  for (const upgrade of activeUpgrades) {
+    const level = state.upgrades[upgrade.id] || 0;
+    if (level <= 0) continue;
+    if (upgrade.krillionBaseCps && upgrade.krillionBaseCps > 0) {
+      rawCps += level * upgrade.krillionBaseCps;
+    }
+    if (upgrade.krillionBaseClickPower && upgrade.krillionBaseClickPower > 0) {
+      rawClick += level * upgrade.krillionBaseClickPower;
+    }
+  }
+
+  if (rawCps <= 0 && rawClick <= 0) {
+    return { krillionCps: 0, krillionClickPower: 0 };
+  }
+
+  const equippedCursor = getCursorById(state.equippedCursorId);
+  const cursorCpsMult = 1 + (equippedCursor?.cpsMultiplierBonus || 0);
+  const cursorClickMult = 1 + (equippedCursor?.clickMultiplierBonus || 0);
+  const cursorAscensionBonus =
+    equippedCursor?.ascensionBonusPerShard && state.prestigeShards > 0
+      ? equippedCursor.ascensionBonusPerShard * state.prestigeShards
+      : 0;
+  const ascensionMultiplier = getAscensionMultiplier(state.prestigeShards) + cursorAscensionBonus;
+  const frenzyMult = state.frenzyTimer > 0 ? state.frenzyMultiplier : 1.0;
+  const { combinedMult: liveMultiplier } = getCombinedLiveMultiplier(liveOptions);
+
+  let petMultiplier = 1.0;
+  if (
+    isSeasonTwoOrLater(state.currentSeasonId) &&
+    Array.isArray(state.equippedPetIds) &&
+    state.equippedPetIds.length > 0 &&
+    Array.isArray(state.pets)
+  ) {
+    const equippedSet = new Set(state.equippedPetIds.slice(0, SEASON_2_CONFIG.maxEquippedPets));
+    const bonusSum = state.pets
+      .filter((p) => equippedSet.has(p.instanceId))
+      .reduce((acc, p) => acc + getPetClickMultiplierBonus(p), 0);
+    petMultiplier = 1 + bonusSum;
+  }
+
+  const shared = ascensionMultiplier * frenzyMult * liveMultiplier;
+  return {
+    krillionCps: rawCps > 0 ? rawCps * shared * cursorCpsMult : 0,
+    krillionClickPower: rawClick > 0 ? rawClick * shared * petMultiplier * cursorClickMult : 0,
+  };
 }

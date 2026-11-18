@@ -33,6 +33,7 @@ import {
   getNextPrestigeRequirement,
 } from '../data/prestige';
 import {
+  KRILLION_COIN_UNIT,
   canAffordCoinCost,
   getUpgradeCost,
   getBulkUpgradeCost,
@@ -42,7 +43,7 @@ import { getAuthoritativeDateString } from '../utils/scheduleEngine';
 import { GEM_ECONOMY_CONFIG, SEASON_2_CONFIG } from '../config/gameConfig';
 import { saveGame } from '../utils/storage';
 import { saveStateToCloud } from '../firebase/cloudSave';
-import { formatCoins } from '../utils/formatters';
+import { formatCoins, formatExtendedCoins, formatKrillion } from '../utils/formatters';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { UpgradeArtwork } from './UpgradeArtwork';
@@ -135,36 +136,44 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   const resolveUpgradePurchasePlan = (
     upgrade: (typeof activeUpgrades)[number],
     currentLevel: number
-  ): { countToDisplay: number; cost: number; canAfford: boolean } => {
+  ): { countToDisplay: number; cost: number; canAfford: boolean; isKrillion: boolean } => {
+    const isKrillion = Boolean(upgrade.krillionBaseCost && upgrade.krillionBaseCost > 0);
+    const availableBalance = isKrillion
+      ? (state.krillionCoins || 0) + (state.coins >= KRILLION_COIN_UNIT ? state.coins / KRILLION_COIN_UNIT : 0)
+      : (state.krillionCoins || 0) > 0
+      ? KRILLION_COIN_UNIT
+      : state.coins;
+    const baseCost = isKrillion ? upgrade.krillionBaseCost! : upgrade.baseCost;
+
     if (buyMode === 'MAX') {
       const maxInfo = getMaxAffordableUpgrade(
-        upgrade.baseCost,
+        baseCost,
         upgrade.costMultiplier,
         currentLevel,
-        state.coins
+        availableBalance
       );
       if (maxInfo.count > 0) {
-        return { countToDisplay: maxInfo.count, cost: maxInfo.totalCost, canAfford: true };
+        return { countToDisplay: maxInfo.count, cost: maxInfo.totalCost, canAfford: true, isKrillion };
       }
-      const nextCost = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, currentLevel);
-      return { countToDisplay: 1, cost: nextCost, canAfford: false };
+      const nextCost = getUpgradeCost(baseCost, upgrade.costMultiplier, currentLevel);
+      return { countToDisplay: 1, cost: nextCost, canAfford: false, isKrillion };
     }
 
     if (buyMode === 10) {
       const bulk10 = getBulkUpgradeCost(
-        upgrade.baseCost,
+        baseCost,
         upgrade.costMultiplier,
         currentLevel,
         10
       ).totalCost;
-      if (canAffordCoinCost(state.coins, bulk10)) {
-        return { countToDisplay: 10, cost: bulk10, canAfford: true };
+      if (canAffordCoinCost(availableBalance, bulk10)) {
+        return { countToDisplay: 10, cost: bulk10, canAfford: true, isKrillion };
       }
       const maxInfo = getMaxAffordableUpgrade(
-        upgrade.baseCost,
+        baseCost,
         upgrade.costMultiplier,
         currentLevel,
-        state.coins
+        availableBalance
       );
       if (maxInfo.count > 0) {
         const partialCount = Math.min(10, maxInfo.count);
@@ -172,7 +181,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           partialCount === maxInfo.count
             ? maxInfo.totalCost
             : getBulkUpgradeCost(
-                upgrade.baseCost,
+                baseCost,
                 upgrade.costMultiplier,
                 currentLevel,
                 partialCount
@@ -180,17 +189,19 @@ export const RightPanel: React.FC<RightPanelProps> = ({
         return {
           countToDisplay: partialCount,
           cost: partialCost,
-          canAfford: canAffordCoinCost(state.coins, partialCost),
+          canAfford: canAffordCoinCost(availableBalance, partialCost),
+          isKrillion,
         };
       }
-      return { countToDisplay: 10, cost: bulk10, canAfford: false };
+      return { countToDisplay: 10, cost: bulk10, canAfford: false, isKrillion };
     }
 
-    const singleCost = getUpgradeCost(upgrade.baseCost, upgrade.costMultiplier, currentLevel);
+    const singleCost = getUpgradeCost(baseCost, upgrade.costMultiplier, currentLevel);
     return {
       countToDisplay: 1,
       cost: singleCost,
-      canAfford: canAffordCoinCost(state.coins, singleCost),
+      canAfford: canAffordCoinCost(availableBalance, singleCost),
+      isKrillion,
     };
   };
 
@@ -199,14 +210,39 @@ export const RightPanel: React.FC<RightPanelProps> = ({
     if (!upgrade) return;
     const currentLevel = state.upgrades[upgradeId] || 0;
     const plan = resolveUpgradePurchasePlan(upgrade, currentLevel);
-    if (!plan.canAfford || !canAffordCoinCost(state.coins, plan.cost)) return;
+    if (!plan.canAfford) return;
 
     const nowMs = Date.now();
     setState((prev) => {
-      if (!canAffordCoinCost(prev.coins, plan.cost)) return prev;
+      if (plan.isKrillion) {
+        const availKr =
+          (prev.krillionCoins || 0) +
+          (prev.coins >= KRILLION_COIN_UNIT ? prev.coins / KRILLION_COIN_UNIT : 0);
+        if (!canAffordCoinCost(availKr, plan.cost)) return prev;
+        const nextKr = Math.max(0, availKr - Math.min(availKr, plan.cost));
+        const next: GameState = {
+          ...prev,
+          coins: 0,
+          krillionCoins: nextKr,
+          lastSaveTime: nowMs,
+          lastActiveInputTimestamp: nowMs,
+          upgrades: {
+            ...prev.upgrades,
+            [upgradeId]: (prev.upgrades[upgradeId] || 0) + plan.countToDisplay,
+          },
+        };
+        saveGame(next);
+        return next;
+      }
+
+      const hasKrillion = (prev.krillionCoins || 0) > 0;
+      if (!hasKrillion && !canAffordCoinCost(prev.coins, plan.cost)) return prev;
       const next: GameState = {
         ...prev,
-        coins: Math.max(0, prev.coins - Math.min(prev.coins, plan.cost)),
+        coins: hasKrillion ? 0 : Math.max(0, prev.coins - Math.min(prev.coins, plan.cost)),
+        krillionCoins: hasKrillion
+          ? Math.max(0, (prev.krillionCoins || 0) - plan.cost / KRILLION_COIN_UNIT)
+          : 0,
         lastSaveTime: nowMs,
         lastActiveInputTimestamp: nowMs,
         upgrades: {
@@ -518,14 +554,20 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               {activeUpgrades.map((upgrade) => {
                 const currentLevel = state.upgrades[upgrade.id] || 0;
                 const isCookiePopped = justBoughtId === upgrade.id;
-                const { countToDisplay, cost, canAfford } = resolveUpgradePurchasePlan(
+                const { countToDisplay, cost, canAfford, isKrillion } = resolveUpgradePurchasePlan(
                   upgrade,
                   currentLevel
                 );
 
+                const availableForProgress = isKrillion
+                  ? (state.krillionCoins || 0) +
+                    (state.coins >= KRILLION_COIN_UNIT ? state.coins / KRILLION_COIN_UNIT : 0)
+                  : (state.krillionCoins || 0) > 0
+                  ? KRILLION_COIN_UNIT
+                  : state.coins;
                 const affordProgressPct = Math.min(
                   100,
-                  cost > 0 ? Math.floor((state.coins / cost) * 100) : 100
+                  cost > 0 ? Math.floor((availableForProgress / cost) * 100) : 100
                 );
 
                 return (
@@ -573,15 +615,19 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                           {upgrade.name}
                         </div>
                         <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-                          {upgrade.baseClickPower > 0 && (
+                          {(upgrade.baseClickPower > 0 || (upgrade.krillionBaseClickPower || 0) > 0) && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-gradient-to-r from-cyan-500/25 to-sky-500/20 border border-cyan-400/60 text-[11px] font-black text-cyan-200 shadow-sm">
                               <Zap className="w-3 h-3 text-yellow-300 fill-yellow-300" />
-                              +{formatCoins(upgrade.baseClickPower * countToDisplay)}
+                              +{isKrillion
+                                ? formatKrillion((upgrade.krillionBaseClickPower || 0) * countToDisplay)
+                                : formatCoins(upgrade.baseClickPower * countToDisplay)}
                             </span>
                           )}
-                          {upgrade.baseCps > 0 && (
+                          {(upgrade.baseCps > 0 || (upgrade.krillionBaseCps || 0) > 0) && (
                             <span className="px-2 py-0.5 rounded-lg bg-slate-900/80 border border-amber-400/35 text-[10px] font-bold text-amber-300/90">
-                              +{formatCoins(upgrade.baseCps * countToDisplay)}/s
+                              +{isKrillion
+                                ? formatKrillion((upgrade.krillionBaseCps || 0) * countToDisplay)
+                                : formatCoins(upgrade.baseCps * countToDisplay)}/s
                             </span>
                           )}
                         </div>
@@ -596,7 +642,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                           : 'bg-slate-800/90 text-slate-400 border border-slate-700 cursor-not-allowed'
                       }`}
                     >
-                      {formatCoins(cost)}
+                      {isKrillion ? formatKrillion(cost) : formatCoins(cost)}
                     </button>
                   </div>
                 );

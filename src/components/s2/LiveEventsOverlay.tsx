@@ -26,6 +26,11 @@ import {
 import { SEASON_2_LIVE_EVENT_SKINS } from '../../data/season2Skins';
 import { getServerNowMs } from '../../firebase/config';
 import { formatCoins, formatNumber } from '../../utils/formatters';
+import {
+  NewInteractiveEventView,
+  isNewGoodCompetitiveEventType,
+  isNewInteractiveEventType,
+} from './NewInteractiveEvents';
 
 interface LiveEventsModalProps {
   state: GameState;
@@ -169,6 +174,7 @@ interface ActiveGlobalEventOverlayProps {
   evStoreSnapshot?: Record<string, any>;
   onAwardCoins: (amount: number, reason: string) => void;
   onAwardGems: (amount: number) => void;
+  onDrainCoinsPercent?: (pct: number) => void;
   onNotify?: (title: string, subtitle: string) => void;
 }
 
@@ -206,6 +212,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
   evStoreSnapshot,
   onAwardCoins,
   onAwardGems,
+  onDrainCoinsPercent,
   onNotify,
 }) => {
   const [secondsLeft, setSecondsLeft] = useState(() =>
@@ -240,8 +247,15 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
     event.type === 'click_marathon' ||
     event.type === 'falling_matthews' ||
     event.type === 'golden_rain';
+  const isNewInteractive = isNewInteractiveEventType(event.type);
+  const isCompetitiveEvent = isClickEvent || isNewGoodCompetitiveEventType(event.type);
 
-  const myScore = event.type === 'click_marathon' ? marathonClicks : caughtCount;
+  const [newEventScore, setNewEventScore] = useState(0);
+  const myScore = isNewInteractive
+    ? newEventScore
+    : event.type === 'click_marathon'
+    ? marathonClicks
+    : caughtCount;
   myScoreRef.current = myScore;
 
   const baseProd = Math.max(50, (currentCps || 0) + (currentClickPower || 1) * 4);
@@ -258,6 +272,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
   useEffect(() => {
     setSecondsLeft(Math.max(0, Math.ceil((event.endsAtMs - getServerNowMs()) / 1000)));
     setMarathonClicks(0);
+    setNewEventScore(0);
     setMarathonStartMs(Date.now());
     setCaughtCount(0);
     setEarnedEventCoins(0);
@@ -274,12 +289,12 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
 
   // Keep live standings instantly updated whenever the SSE/poll evStore updates
   useEffect(() => {
-    if (!isClickEvent || !evStoreSnapshot) return;
+    if (!isCompetitiveEvent || !evStoreSnapshot) return;
     const nextBoard = extractScoresFromStore(evStoreSnapshot, event.id, isSandbox);
     if (nextBoard.length > 0) {
       setLeaders(nextBoard);
     }
-  }, [evStoreSnapshot, event.id, isClickEvent, isSandbox]);
+  }, [evStoreSnapshot, event.id, isCompetitiveEvent, isSandbox]);
 
   // Lock keyboard (Spacebar / Enter / Tab) when frozen by Screen Freeze so frozen players truly cannot do anything
   useEffect(() => {
@@ -305,7 +320,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
       const rem = Math.max(0, Math.ceil((event.endsAtMs - getServerNowMs()) / 1000));
       setSecondsLeft(rem);
 
-      if (rem <= 0 && settledRef.current !== event.id && isClickEvent) {
+      if (rem <= 0 && settledRef.current !== event.id && isCompetitiveEvent) {
         settledRef.current = event.id;
         const finalScore = myScoreRef.current;
 
@@ -392,7 +407,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
       clearInterval(t);
       if (settleTimeout) clearTimeout(settleTimeout);
     };
-  }, [event.id, event.endsAtMs, event.type, isClickEvent, isSandbox, currentUid, currentUsername]);
+  }, [event.id, event.endsAtMs, event.type, isCompetitiveEvent, isSandbox, currentUid, currentUsername]);
 
   // Smoothly animate Falling Matthews & 100 Golden Rain sprites inside the Click Event Pop-up Arena
   useEffect(() => {
@@ -508,9 +523,14 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
   const elapsedSec = Math.max(1, (Date.now() - marathonStartMs) / 1000);
   const marathonCps = (marathonClicks / elapsedSec).toFixed(1);
   const topLeader = leaders[0];
-  const scoreUnitLabel = event.type === 'click_marathon' ? 'taps' : 'catches';
+  const scoreUnitLabel =
+    event.type === 'click_marathon'
+      ? 'taps'
+      : isNewInteractive
+      ? 'pts'
+      : 'catches';
   const showWinnerPodium =
-    isClickEvent &&
+    isCompetitiveEvent &&
     secondsLeft <= 0 &&
     winnerSummary &&
     dismissedWinnerId !== event.id;
@@ -525,7 +545,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
           <span className="px-2 py-0.5 rounded-full bg-slate-950/25 text-white shrink-0 font-mono">
             {secondsLeft}s
           </span>
-          {isClickEvent && isPopupMinimized && (
+          {(isClickEvent || isNewGoodCompetitiveEventType(event.type)) && isPopupMinimized && (
             <button
               type="button"
               onClick={() => setIsPopupMinimized(false)}
@@ -536,6 +556,27 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
             </button>
           )}
         </div>
+      )}
+
+      {/* 10 NEW INTERACTIVE GOOD & BAD EVENTS */}
+      {isNewInteractive && (
+        <NewInteractiveEventView
+          event={event}
+          secondsLeft={secondsLeft}
+          isAffected={Boolean(isAffected)}
+          isMinimized={isPopupMinimized}
+          onMinimize={() => setIsPopupMinimized(true)}
+          baseProd={baseProd}
+          leaders={leaders}
+          onSubmitScore={(val) => {
+            setNewEventScore(val);
+            myScoreRef.current = val;
+            flushCompetitiveScore(val);
+          }}
+          onAwardCoins={(amt, reason) => onAwardCoinsRef.current(amt, reason)}
+          onAwardGems={(amt) => onAwardGemsRef.current(amt)}
+          onDrainCoinsPercent={onDrainCoinsPercent}
+        />
       )}
 
       {/* SUMMONER SAFEZONE STATUS BANNER DURING SCREEN FREEZE / BOSS RAID */}
