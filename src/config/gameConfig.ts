@@ -136,8 +136,24 @@ export const SEASON_2_CONFIG = {
   gemChestCostGems: 25,
 };
 
+export const SEASON_3_CONFIG = {
+  themeName: 'Marvel',
+  downtimeStartIso: '2026-11-19T18:00:00-05:00',
+  downtimeStartTimeMs: Date.parse('2026-11-19T18:00:00-05:00'),
+  launchIso: '2026-11-23T00:00:00-05:00',
+  launchTimeMs: Date.parse('2026-11-23T00:00:00-05:00'),
+  nextFridayEventStartIso: '2026-11-27T00:00:00-05:00',
+  nextFridayEventEndIso: '2026-11-27T23:59:59-05:00',
+  /** Cooldown between player-triggered Events / Villain Attacks (5 minutes) */
+  eventSummonCooldownMs: 5 * 60 * 1000,
+  /** 1-in-75 chance per Infinity Stone drop from Mystery Chests */
+  infinityStoneDropDenominator: 75,
+  sandboxStorageKey: 'matthew_clicker_s3_sandbox_v1',
+  sandboxRtdbPrefix: 'sandbox_s3/',
+};
+
 export const TEST_ISOLATION_CONFIG = {
-  /** Strictly authorized Firebase UIDs allowed to toggle Season 2 preview before Monday launch (`Marshallb78`, `testmarshall`) */
+  /** Strictly authorized Firebase UIDs allowed to preview upcoming seasons & skip downtime (`Marshallb78`, `testmarshall`) */
   authorizedDevUids: [
     '89nsfff2YtaEVcNTHUBDq22V4FW2', // Marshallb78
     'cKFezHsISfbZGH4tKjQyME0wvrt1', // testmarshall
@@ -165,5 +181,18 @@ export function isSandboxSeason2Context(
 ): boolean {
   if (!sandboxEnabled) return false;
   if (nowMs >= SEASON_2_CONFIG.launchTimeMs) return false;
+  return isAuthorizedDevUid(uid);
+}
+
+/**
+ * Pre-launch Season 3 (Marvel) Sandbox / Downtime-skip is allowed ONLY for verified dev UIDs before Monday Nov 23 launch.
+ */
+export function isSandboxSeason3Context(
+  uid?: string | null,
+  sandboxS3Enabled?: boolean,
+  nowMs: number = Date.now()
+): boolean {
+  if (!sandboxS3Enabled) return false;
+  if (nowMs >= SEASON_3_CONFIG.launchTimeMs) return false;
   return isAuthorizedDevUid(uid);
 }

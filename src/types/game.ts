@@ -21,7 +21,15 @@ export type SkinCategory =
   | 'item_shop'
   | 'food_shop'
   | 'matthew_vault'
-  | 'live_event_s2';
+  | 'live_event_s2'
+  | 'marvel_common'
+  | 'marvel_uncommon'
+  | 'marvel_rare'
+  | 'marvel_epic'
+  | 'marvel_legendary'
+  | 'marvel_mythic';
+
+export type InfinityStoneId = 'space' | 'mind' | 'reality' | 'power' | 'time' | 'soul';
 
 export type SkinBackgroundTheme =
   | 'default'
@@ -330,11 +338,11 @@ export interface GameState {
   seasonHistory: SeasonHistoryEntry[];
   eventStats: EventParticipationStats;
 
-  // Season 2: Frozen Apocalypse Pets, Eggs, Food, Cosmetics, Shop, Clans & Raid State
-  pets: PetInstance[];
-  equippedPetIds: string[];
-  sealedEggs: Record<EggRarity, number>;
-  foodInventory: Record<FoodId, number>;
+  // Season 2/3 Cosmetics, Shop, Crates, Gauntlet & Sandbox State
+  pets?: PetInstance[];
+  equippedPetIds?: string[];
+  sealedEggs?: Record<EggRarity, number>;
+  foodInventory?: Record<FoodId, number>;
   ownedCosmetics: string[];
   equippedCosmetics: {
     hat: string | null;
@@ -342,6 +350,9 @@ export interface GameState {
   };
   hasMatthewShopToken: boolean;
   matthewShopTokens?: number;
+  infinityStones?: InfinityStoneId[];
+  lastProcessedSnapId?: string | null;
+  lastEventSummonAtMs?: number;
   unlockedCursors?: string[];
   equippedCursorId?: string | null;
   cratesOpened?: number;
@@ -350,10 +361,12 @@ export interface GameState {
   zombiesStolenCoins: number;
   zombieHitsTaken?: number;
   season2IntroSeen: boolean;
+  season3IntroSeen?: boolean;
   winnerBadges: SeasonWinnerBadge[];
   clanId: string | null;
   clanName: string | null;
   sandboxS2Enabled?: boolean;
+  sandboxS3Enabled?: boolean;
   activeSessionToken?: string;
 
   // Timestamps & Lifetime Career Stats

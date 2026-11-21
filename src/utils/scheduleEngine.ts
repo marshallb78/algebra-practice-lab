@@ -1,10 +1,12 @@
 import {
   SEASON_CONFIG,
   SEASON_2_CONFIG,
+  SEASON_3_CONFIG,
   FRIDAY_BONUS_CONFIG,
   MATTHEW_STORM_CONFIG,
   TIMEZONE_CONFIG,
   isSandboxSeason2Context,
+  isSandboxSeason3Context,
 } from '../config/gameConfig';
 
 export interface ActiveSeasonInfo {
@@ -289,26 +291,74 @@ export function evaluateMatthewStormState(
 export interface EffectiveSeasonInfo extends ActiveSeasonInfo {
   isSandbox: boolean;
   isFrozenApocalypseActive: boolean;
+  isMarvelActive?: boolean;
 }
 
 /**
  * Resolves the effective season for the active user/session.
- * - While `nowMs < SEASON_2_CONFIG.launchTimeMs` (Monday Nov 16 00:00 EST),
- *   everyone starts in Season Downtime counting down to Monday Midnight.
- * - Only the 2 authorized devs (`Marshallb78` & `testmarshall` via Firebase UID) can toggle
- *   isolated Season 2 Preview (`sandbox_s2/`). At Monday Midnight, sandbox disables for everyone.
+ * - Live Season 3 launches automatically Monday Nov 23 at 00:00 EST.
+ * - Before Nov 23, only verified dev UIDs (`Marshallb78`, `testmarshall`) can toggle isolated Season 3: Marvel preview
+ *   or skip Weekend Downtime (sandbox leaderboards never count on live!).
  */
 export function getEffectiveSeasonInfo(
   uid?: string | null,
   sandboxEnabled: boolean = false,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  sandboxS3Enabled: boolean = false
 ): EffectiveSeasonInfo {
   const live = getActiveSeason(nowMs);
+  if (live.seasonNumber >= 3) {
+    return {
+      ...live,
+      isSandbox: false,
+      isFrozenApocalypseActive: false,
+      isMarvelActive: true,
+    };
+  }
+
+  if (isSandboxSeason3Context(uid, sandboxS3Enabled, nowMs)) {
+    const startTimeMs = SEASON_3_CONFIG.launchTimeMs;
+    const activeEndTimeMs = startTimeMs + SEASON_CONFIG.activePlayDurationMs;
+    const endTimeMs = startTimeMs + SEASON_CONFIG.durationMs;
+
+    return {
+      seasonNumber: 3,
+      seasonId: 'season_3',
+      startTimeMs,
+      endTimeMs: activeEndTimeMs,
+      nextSeasonStartMs: endTimeMs,
+      remainingMs: Math.max(0, activeEndTimeMs - nowMs),
+      isDowntime: false,
+      downtimeRemainingSeconds: 0,
+      isSandbox: true,
+      isFrozenApocalypseActive: false,
+      isMarvelActive: true,
+    };
+  }
+
+  if (nowMs >= SEASON_3_CONFIG.downtimeStartTimeMs && nowMs < SEASON_3_CONFIG.launchTimeMs) {
+    const downtimeRemainingSeconds = Math.max(
+      0,
+      Math.ceil((SEASON_3_CONFIG.launchTimeMs - nowMs) / 1000)
+    );
+    return {
+      ...live,
+      nextSeasonStartMs: SEASON_3_CONFIG.launchTimeMs,
+      remainingMs: 0,
+      isDowntime: true,
+      downtimeRemainingSeconds,
+      isSandbox: false,
+      isFrozenApocalypseActive: false,
+      isMarvelActive: false,
+    };
+  }
+
   if (live.seasonNumber >= 2) {
     return {
       ...live,
       isSandbox: false,
       isFrozenApocalypseActive: true,
+      isMarvelActive: false,
     };
   }
 
@@ -328,6 +378,7 @@ export function getEffectiveSeasonInfo(
       downtimeRemainingSeconds: 0,
       isSandbox: true,
       isFrozenApocalypseActive: true,
+      isMarvelActive: false,
     };
   }
 
@@ -343,5 +394,6 @@ export function getEffectiveSeasonInfo(
     downtimeRemainingSeconds,
     isSandbox: false,
     isFrozenApocalypseActive: false,
+    isMarvelActive: false,
   };
 }

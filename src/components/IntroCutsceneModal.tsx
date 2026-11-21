@@ -7,6 +7,7 @@ interface IntroCutsceneModalProps {
   onComplete: () => void;
   isCloudLoading?: boolean;
   isFrozenTheme?: boolean;
+  isMarvelTheme?: boolean;
   willPlayCutsceneAfter?: boolean;
 }
 
@@ -23,6 +24,7 @@ export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({
   onComplete,
   isCloudLoading = false,
   isFrozenTheme = false,
+  isMarvelTheme = false,
   willPlayCutsceneAfter = false,
 }) => {
   const [progress, setProgress] = useState(0);
@@ -57,17 +59,27 @@ export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({
 
   const loadingStageText =
     progress < 35
-      ? isFrozenTheme
+      ? isMarvelTheme
+        ? 'Assembling Earth’s Mightiest Matthew Skins...'
+        : isFrozenTheme
         ? 'Preparing Season 2: Frozen Apocalypse & Cloud Sync...'
         : 'Connecting to Matthew Realtime Cloud & Worldwide Leaderboards...'
       : progress < 70
-      ? isFrozenTheme
-        ? 'Waking Frost Pup Companions, Snowy Homestead & 3D Cutscenes...'
+      ? isMarvelTheme
+        ? 'Charging the 6 Infinity Stones & Stark Tech Crates...'
+        : isFrozenTheme
+        ? 'Preparing Seasonal Upgrades & 3D Cutscenes...'
         : 'Loading Weekly Season Schedule, 4x Friday Storm & Collectible Skins...'
       : !isReadyToPlay
-      ? 'Synchronizing Ascension Multipliers & Cloud Profile...'
+      ? isMarvelTheme
+        ? 'Opening the Multiverse Portal...'
+        : 'Synchronizing Ascension Multipliers & Cloud Profile...'
       : isCloudLoading
       ? 'Retrieving your most recent cloud save before starting...'
+      : isMarvelTheme
+      ? willPlayCutsceneAfter
+        ? 'Click PLAY to begin the Season 3: Marvel Opening Cutscene!'
+        : 'All Systems Ready! Click PLAY to enter Season 3: Marvel!'
       : isFrozenTheme
       ? willPlayCutsceneAfter
         ? 'Click PLAY to begin the Season 2 Opening Cutscene!'
@@ -77,7 +89,11 @@ export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({
   const handleStartGame = () => {
     if (!isReadyToPlay || isCloudLoading) return;
     // Direct user gesture reliably unlocks browser AudioContext & HTMLAudioElement playback!
-    const targetTrack: MusicTrackMode = isFrozenTheme
+    const targetTrack: MusicTrackMode = isMarvelTheme
+      ? willPlayCutsceneAfter
+        ? 's2_cutscene'
+        : 's3_marvel'
+      : isFrozenTheme
       ? willPlayCutsceneAfter
         ? 's2_cutscene'
         : 's2_winter'
@@ -170,39 +186,70 @@ export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({
       {/* MAIN CENTER CONTENT */}
       <div className="relative z-10 flex flex-col items-center max-w-lg w-full text-center">
         {/* HERO EMBLEM */}
-        <div
-          className="relative w-36 h-36 sm:w-44 sm:h-44 rounded-[2rem] bg-gradient-to-tr from-cyan-400 via-sky-200 to-amber-300 p-1 mb-6 flex items-center justify-center"
-          style={{ animation: 'introHeroPulse 2.6s ease-in-out infinite' }}
-        >
-          <div className="w-full h-full rounded-[1.8rem] bg-[#040a17] flex items-center justify-center p-3 relative overflow-hidden">
+        {isMarvelTheme ? (
+          <div
+            className="relative w-60 h-60 sm:w-72 sm:h-72 mb-4 flex items-center justify-center"
+            style={{ animation: 'introHeroPulse 2.6s ease-in-out infinite' }}
+          >
             <img
-              src="./images/skins/classic_matthew.png"
-              alt="Matthew Clicker"
-              className="w-28 h-28 sm:w-32 sm:h-32 object-contain relative z-10"
+              src="./images/s3/loading_m_gauntlet.png"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = './images/s3/gauntlet/infinity_gauntlet.png';
+              }}
+              alt="Matthew: Marvel"
+              className="w-full h-full object-contain drop-shadow-[0_0_38px_rgba(251,191,36,0.55)]"
             />
+            <div className="absolute -bottom-1 px-3.5 py-0.5 rounded-full bg-gradient-to-r from-red-500 via-amber-300 to-purple-500 text-slate-950 font-black text-[10px] uppercase tracking-widest shadow-lg">
+              Season 3 • Marvel Multiverse
+            </div>
           </div>
-          <div className="absolute -bottom-2.5 px-3 py-0.5 rounded-full bg-gradient-to-r from-cyan-300 to-amber-300 text-slate-950 font-black text-[10px] uppercase tracking-widest shadow-lg">
-            {isFrozenTheme ? 'Season 2 • Frozen Apocalypse' : 'Weekly Seasons Edition'}
+        ) : (
+          <div
+            className="relative w-36 h-36 sm:w-44 sm:h-44 rounded-[2rem] bg-gradient-to-tr from-cyan-400 via-sky-200 to-amber-300 p-1 mb-6 flex items-center justify-center"
+            style={{ animation: 'introHeroPulse 2.6s ease-in-out infinite' }}
+          >
+            <div className="w-full h-full rounded-[1.8rem] bg-[#040a17] flex items-center justify-center p-2.5 relative overflow-hidden">
+              <img
+                src="./images/skins/classic_matthew.png"
+                alt="Matthew Clicker"
+                className="w-32 h-32 sm:w-36 sm:h-36 object-contain relative z-10"
+              />
+            </div>
+            <div className="absolute -bottom-2.5 px-3 py-0.5 rounded-full bg-gradient-to-r from-red-400 via-amber-300 to-purple-400 text-slate-950 font-black text-[10px] uppercase tracking-widest shadow-lg">
+              {isFrozenTheme ? 'Season 2 • Frozen Apocalypse' : 'Weekly Seasons Edition'}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-cyan-500/15 text-cyan-200 text-xs font-black uppercase tracking-widest mb-2">
-          {isFrozenTheme ? (
+          {isFrozenTheme && !isMarvelTheme ? (
             <Snowflake className="w-3.5 h-3.5 text-cyan-300 animate-spin" style={{ animationDuration: '6s' }} />
           ) : (
             <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-spin" style={{ animationDuration: '4s' }} />
           )}
-          <span>{isFrozenTheme ? 'Season 2 Major Update' : 'Matthew Clicker • Live Cloud Sync'}</span>
+          <span>
+            {isMarvelTheme
+              ? 'Season 3: Marvel Edition'
+              : isFrozenTheme
+              ? 'Season 2 Major Update'
+              : 'Matthew Clicker • Live Cloud Sync'}
+          </span>
         </div>
 
         <h1
-          className={`text-4xl sm:text-6xl font-black text-transparent bg-clip-text uppercase tracking-tight drop-shadow-[0_4px_24px_rgba(56,189,248,0.4)] ${
-            isFrozenTheme
+          className={`text-4xl sm:text-6xl font-black text-transparent bg-clip-text uppercase tracking-tight drop-shadow-[0_4px_24px_rgba(251,191,36,0.35)] ${
+            isMarvelTheme
+              ? 'bg-gradient-to-r from-red-400 via-amber-300 to-purple-400'
+              : isFrozenTheme
               ? 'bg-gradient-to-r from-cyan-200 via-white to-amber-300'
               : 'bg-gradient-to-r from-yellow-200 via-amber-400 to-cyan-300'
           }`}
         >
-          {isFrozenTheme ? 'FROZEN APOCALYPSE' : 'MATTHEW CLICKER'}
+          {isMarvelTheme
+            ? 'MATTHEW: MARVEL'
+            : isFrozenTheme
+            ? 'FROZEN APOCALYPSE'
+            : 'MATTHEW CLICKER'}
         </h1>
 
         <p className="text-xs sm:text-sm font-bold text-cyan-200/90 mt-2.5 mb-5 min-h-[1.5rem] px-2">
@@ -212,10 +259,12 @@ export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({
         {/* FEATURE PILLS */}
         <div className="flex items-center justify-center gap-2 flex-wrap mb-5 text-[11px] font-black">
           <span className="px-2.5 py-1 rounded-xl bg-white/5 text-amber-300 flex items-center gap-1">
-            <Trophy className="w-3.5 h-3.5" /> {isFrozenTheme ? '96 Upgrades to Vg' : '1-Week Seasons'}
+            <Trophy className="w-3.5 h-3.5" />{' '}
+            {isMarvelTheme ? '44 Marvel Skins' : isFrozenTheme ? '96 Upgrades to Vg' : '1-Week Seasons'}
           </span>
           <span className="px-2.5 py-1 rounded-xl bg-white/5 text-cyan-200 flex items-center gap-1">
-            <Zap className="w-3.5 h-3.5" /> {isFrozenTheme ? 'Pets & Zombie Raids' : 'Friday 4× Live Event'}
+            <Zap className="w-3.5 h-3.5" />{' '}
+            {isMarvelTheme ? 'Infinity Gauntlet Snap' : isFrozenTheme ? '4 Crates & Events' : 'Friday 4× Live Event'}
           </span>
           <span className="px-2.5 py-1 rounded-xl bg-white/5 text-emerald-300 flex items-center gap-1">
             <ShieldCheck className="w-3.5 h-3.5" /> Auto-Save Cloud
@@ -227,7 +276,7 @@ export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({
           <div className="w-full max-w-md">
             <div className="relative w-full h-4 rounded-full bg-slate-900/90 overflow-hidden p-0.5 shadow-inner">
               <div
-                className="relative h-full rounded-full bg-gradient-to-r from-cyan-400 via-sky-200 to-amber-300 transition-all duration-75 overflow-hidden"
+                className="relative h-full rounded-full bg-gradient-to-r from-red-400 via-amber-300 to-purple-400 transition-all duration-75 overflow-hidden"
                 style={{ width: `${progress}%` }}
               >
                 <div
@@ -236,8 +285,14 @@ export const IntroCutsceneModal: React.FC<IntroCutsceneModalProps> = ({
                 />
               </div>
             </div>
-            <div className="mt-2 flex items-center justify-between text-xs font-black font-mono text-cyan-200 px-1">
-              <span>{isFrozenTheme ? 'LOADING SEASON 2 WORLD...' : 'LOADING ASSETS & CLOUD...'}</span>
+            <div className="mt-2 flex items-center justify-between text-xs font-black font-mono text-amber-200 px-1">
+              <span>
+                {isMarvelTheme
+                  ? 'LOADING MARVEL MULTIVERSE...'
+                  : isFrozenTheme
+                  ? 'LOADING SEASON 2 WORLD...'
+                  : 'LOADING ASSETS & CLOUD...'}
+              </span>
               <span>{progress}%</span>
             </div>
           </div>

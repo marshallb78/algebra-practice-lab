@@ -16,8 +16,8 @@ export interface Particle {
   imageSrc?: string;
 }
 
-// Cap particles for smooth 60fps Chromebook performance
-const MAX_PARTICLES = 65;
+// Keep particle cap low and pause RAF when idle for smooth 60fps Chromebook performance
+const MAX_PARTICLES = 22;
 
 class ParticleSystem {
   private particles: Particle[] = [];
@@ -33,7 +33,6 @@ class ParticleSystem {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.resize();
-    this.startLoop();
   }
 
   public resize() {
@@ -57,20 +56,15 @@ class ParticleSystem {
 
     if (img.complete && img.naturalWidth > 0) {
       const offscreen = document.createElement('canvas');
-      offscreen.width = 48;
-      offscreen.height = 48;
+      offscreen.width = 40;
+      offscreen.height = 40;
       const octx = offscreen.getContext('2d');
       if (octx) {
         octx.beginPath();
-        octx.arc(24, 24, 22, 0, Math.PI * 2);
+        octx.arc(20, 20, 18, 0, Math.PI * 2);
         octx.closePath();
         octx.clip();
-        octx.drawImage(img, 2, 2, 44, 44);
-        octx.beginPath();
-        octx.arc(24, 24, 22, 0, Math.PI * 2);
-        octx.lineWidth = 3;
-        octx.strokeStyle = '#e879f9';
-        octx.stroke();
+        octx.drawImage(img, 2, 2, 36, 36);
         this.spriteCanvasCache.set(src, offscreen);
         return offscreen;
       }
@@ -83,34 +77,35 @@ class ParticleSystem {
       this.particles.shift();
     }
     this.particles.push(p);
+    this.ensureLoopRunning();
   }
 
   public getActiveCount(): number {
     return this.particles.length;
   }
 
-  public emitClick(x: number, y: number, isCrit: boolean, count = 6) {
+  public emitClick(x: number, y: number, isCrit: boolean, count = 4) {
     if (!this.enabled || this.reducedMotion) return;
 
-    const actualCount = isCrit ? Math.min(12, count * 2) : Math.min(8, count);
+    const actualCount = isCrit ? Math.min(7, count + 2) : Math.min(4, count);
     const colors = isCrit
-      ? ['#00f0ff', '#ff007f', '#ffffff', '#ffd700']
-      : ['#ffd700', '#ffaa00', '#00f0ff', '#ffffff'];
+      ? ['#fbbf24', '#ef4444', '#ffffff']
+      : ['#facc15', '#fb923c', '#ffffff'];
 
     for (let i = 0; i < actualCount; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = (isCrit ? 5 : 3) + Math.random() * (isCrit ? 8 : 5);
+      const speed = (isCrit ? 4.5 : 2.8) + Math.random() * (isCrit ? 6 : 4);
       this.pushBounded({
         x,
         y,
         vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - (isCrit ? 3.5 : 2),
-        size: isCrit ? 4 + Math.random() * 4 : 3 + Math.random() * 3,
+        vy: Math.sin(angle) * speed - (isCrit ? 3 : 1.5),
+        size: isCrit ? 3.5 + Math.random() * 2.5 : 2.5 + Math.random() * 2,
         color: colors[Math.floor(Math.random() * colors.length)],
-        alpha: 1.0,
-        decay: 0.03 + Math.random() * 0.02,
-        rotation: Math.random() * Math.PI * 2,
-        rotSpeed: (Math.random() - 0.5) * 0.25,
+        alpha: 0.95,
+        decay: 0.045 + Math.random() * 0.02,
+        rotation: 0,
+        rotSpeed: 0,
         type: isCrit ? 'spark' : 'coin',
         gravity: 0.25,
       });
@@ -119,70 +114,69 @@ class ParticleSystem {
 
   public emitPrestige() {
     if (!this.enabled || this.reducedMotion || !this.canvas) return;
-    const colors = ['#00f0ff', '#9d4edd', '#ff007f', '#ffd700', '#ffffff'];
-    for (let i = 0; i < 36; i++) {
+    const colors = ['#facc15', '#ef4444', '#a855f7', '#ffffff'];
+    for (let i = 0; i < 16; i++) {
       const x = Math.random() * this.canvas.width;
-      const y = this.canvas.height + 20;
+      const y = this.canvas.height + 16;
       this.pushBounded({
         x,
         y,
-        vx: (Math.random() - 0.5) * 7,
-        vy: -(8 + Math.random() * 12),
-        size: 4 + Math.random() * 5,
+        vx: (Math.random() - 0.5) * 6,
+        vy: -(8 + Math.random() * 10),
+        size: 3.5 + Math.random() * 3.5,
         color: colors[Math.floor(Math.random() * colors.length)],
-        alpha: 1.0,
-        decay: 0.015 + Math.random() * 0.01,
-        rotation: Math.random() * Math.PI * 2,
-        rotSpeed: (Math.random() - 0.5) * 0.15,
+        alpha: 0.95,
+        decay: 0.022 + Math.random() * 0.012,
+        rotation: 0,
+        rotSpeed: 0,
         type: 'star',
-        gravity: 0.1,
+        gravity: 0.12,
       });
     }
   }
 
-  /**
-   * Cosmetic Matthew Rain (used on Skin Unlock & during Matthew Storm live event).
-   * Optimized for Chromebooks using pre-clipped offscreen canvases!
-   */
-  public emitMatthewRain(count = 14, skinImages?: string[]) {
+  public emitMatthewRain(count = 10, skinImages?: string[]) {
     if (!this.enabled || this.reducedMotion || !this.canvas) return;
-    const colors = ['#a855f7', '#00f0ff', '#facc15', '#ec4899', '#38bdf8'];
+    const colors = ['#a855f7', '#ef4444', '#facc15', '#38bdf8'];
     const validImages = skinImages && skinImages.length > 0 ? skinImages : undefined;
     if (validImages) {
-      validImages.forEach((src) => this.getPreRenderedSprite(src));
+      validImages.slice(0, 6).forEach((src) => this.getPreRenderedSprite(src));
     }
 
-    const cappedCount = Math.min(18, count);
+    const cappedCount = Math.min(10, count);
     for (let i = 0; i < cappedCount; i++) {
       const x = Math.random() * this.canvas.width;
-      const y = -35 - Math.random() * 140;
+      const y = -28 - Math.random() * 90;
       const chosenImg = validImages
-        ? validImages[Math.floor(Math.random() * validImages.length)]
+        ? validImages[Math.floor(Math.random() * Math.min(validImages.length, 6))]
         : undefined;
       this.pushBounded({
         x,
         y,
-        vx: (Math.random() - 0.5) * 2.0,
-        vy: 3.8 + Math.random() * 4.0,
-        size: chosenImg ? 18 + Math.random() * 8 : 10 + Math.random() * 6,
+        vx: (Math.random() - 0.5) * 1.6,
+        vy: 4.2 + Math.random() * 3.4,
+        size: chosenImg ? 16 + Math.random() * 5 : 8 + Math.random() * 4,
         color: colors[Math.floor(Math.random() * colors.length)],
-        alpha: 0.92,
-        decay: 0.006 + Math.random() * 0.004,
+        alpha: 0.9,
+        decay: 0.01 + Math.random() * 0.005,
         rotation: 0,
         rotSpeed: 0,
         type: 'matthew_rain',
-        gravity: 0.04,
+        gravity: 0.05,
         imageSrc: chosenImg,
       });
     }
   }
 
-  private startLoop() {
-    if (this.animId) cancelAnimationFrame(this.animId);
-
+  private ensureLoopRunning() {
+    if (this.animId !== null) return;
     const tick = () => {
       this.updateAndDraw();
-      this.animId = requestAnimationFrame(tick);
+      if (this.particles.length > 0) {
+        this.animId = requestAnimationFrame(tick);
+      } else {
+        this.animId = null;
+      }
     };
     this.animId = requestAnimationFrame(tick);
   }
@@ -190,12 +184,8 @@ class ParticleSystem {
   private updateAndDraw() {
     if (!this.ctx || !this.canvas) return;
 
-    if (this.particles.length === 0) {
-      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-      return;
-    }
-
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    if (this.particles.length === 0) return;
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -224,10 +214,8 @@ class ParticleSystem {
           this.ctx.fill();
         }
       } else if (p.type === 'coin') {
-        this.ctx.beginPath();
-        this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         this.ctx.fillStyle = p.color;
-        this.ctx.fill();
+        this.ctx.fillRect(p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
       } else {
         this.ctx.fillStyle = p.color;
         this.ctx.fillRect(p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
@@ -237,7 +225,7 @@ class ParticleSystem {
   }
 
   public destroy() {
-    if (this.animId) {
+    if (this.animId !== null) {
       cancelAnimationFrame(this.animId);
       this.animId = null;
     }

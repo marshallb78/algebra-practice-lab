@@ -134,13 +134,14 @@ export function useGameLoop({
         }
 
         // Gentle hunger decay (~100% -> ~0% over ~16 minutes of active combat play) for equipped pets in Season 2
+        const eqPetIds = prev.equippedPetIds || [];
         const nextPets =
           isActivelyPlaying &&
           isSeasonTwoOrLater(prev.currentSeasonId) &&
           Array.isArray(prev.pets) &&
-          prev.equippedPetIds?.length > 0
+          eqPetIds.length > 0
             ? prev.pets.map((pet) =>
-                prev.equippedPetIds.includes(pet.instanceId)
+                eqPetIds.includes(pet.instanceId)
                   ? { ...pet, hunger: Math.max(0, pet.hunger - dt * 0.1) }
                   : pet
               )
@@ -247,7 +248,8 @@ export function useGameLoop({
       const activeSeason = getEffectiveSeasonInfo(
         current.cloudAccount?.uid,
         current.sandboxS2Enabled,
-        Date.now()
+        Date.now(),
+        current.sandboxS3Enabled
       );
       if (current.currentSeasonId && current.currentSeasonId !== activeSeason.seasonId) {
         onNotifyRef.current(

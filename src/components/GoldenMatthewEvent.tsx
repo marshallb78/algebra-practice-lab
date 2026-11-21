@@ -4,10 +4,13 @@ import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { formatCoins } from '../utils/formatters';
 import { BALANCE } from '../data/balance';
-import { calculateCPS, calculateClickPower, clampFiniteCoinAmount, MAX_SAFE_SEASON_COINS } from '../utils/calculations';
+import {
+  calculateCPS,
+  calculateClickPower,
+  clampFiniteCoinAmount,
+  MAX_SAFE_SEASON_COINS,
+} from '../utils/calculations';
 import { isSeasonTwoOrLater } from '../data/skins';
-import { MATTHEW_VAULT_SKINS } from '../data/season2Skins';
-import { rollChestLoot } from '../data/petsAndEggs';
 
 interface GoldenSwarmItem {
   id: number;
@@ -19,11 +22,21 @@ interface GoldenSwarmItem {
   spawnedAt: number;
 }
 
+interface FallingChestItem {
+  id: number;
+  x: number;
+  y: number;
+  vy: number;
+  swayPhase: number;
+}
+
 interface GoldenMatthewEventProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
   onSpawnBonus: (text: string) => void;
+  onCatchChest?: () => void;
   forceSpawnCounter?: number;
+  forceSpawnChestCounter?: number;
   swarmTrigger?: { id: string; count: number } | null;
   isPaused?: boolean;
 }
@@ -32,7 +45,9 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
   state,
   setState,
   onSpawnBonus,
+  onCatchChest,
   forceSpawnCounter = 0,
+  forceSpawnChestCounter = 0,
   swarmTrigger = null,
   isPaused = false,
 }) => {
@@ -40,6 +55,7 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
   const [position, setPosition] = useState({ x: 10, y: 30 });
   const [direction, setDirection] = useState<'left' | 'right'>('right');
   const [swarmItems, setSwarmItems] = useState<GoldenSwarmItem[]>([]);
+  const [fallingChests, setFallingChests] = useState<FallingChestItem[]>([]);
 
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
@@ -49,12 +65,28 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
   posRef.current = position;
   const swarmItemsRef = useRef(swarmItems);
   swarmItemsRef.current = swarmItems;
+  const chestsRef = useRef(fallingChests);
+  chestsRef.current = fallingChests;
   const lastSwarmTriggerIdRef = useRef<string | null>(null);
-  const pendingSwarmRef = useRef<{ id: string; count: number } | null>(null);
   const isPausedRef = useRef(isPaused);
   isPausedRef.current = isPaused;
   const isSeason2Ref = useRef(isSeasonTwoOrLater(state.currentSeasonId));
   isSeason2Ref.current = isSeasonTwoOrLater(state.currentSeasonId);
+
+  const spawnOneFallingChest = () => {
+    const winW = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const item: FallingChestItem = {
+      id: Date.now() + Math.random(),
+      x: 80 + Math.random() * Math.max(200, winW - 200),
+      y: -60,
+      vy: 72 + Math.random() * 28,
+      swayPhase: Math.random() * Math.PI * 2,
+    };
+    const next = [...chestsRef.current.slice(-2), item];
+    chestsRef.current = next;
+    setFallingChests(next);
+    soundManager.playGoldenSpawn();
+  };
 
   useEffect(() => {
     if (forceSpawnCounter <= 0 || isPausedRef.current) return;
@@ -72,13 +104,30 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     soundManager.playGoldenSpawn();
   }, [forceSpawnCounter]);
 
-  // Interval timer for spawning Golden/Flying Matthew cleanly without mid-flight kill timers
+  useEffect(() => {
+    if (forceSpawnChestCounter <= 0 || isPausedRef.current) return;
+    spawnOneFallingChest();
+  }, [forceSpawnChestCounter]);
+
+  // Periodic natural Falling Marvel Mystery Chests (slightly rarer: ~38-62s)
+  useEffect(() => {
+    if (!isSeason2Ref.current || isPaused || fallingChests.length >= 2) return;
+    const delay = 38000 + Math.random() * 24000;
+    const t = window.setTimeout(() => {
+      if (!isPausedRef.current && isSeason2Ref.current) {
+        spawnOneFallingChest();
+      }
+    }, delay);
+    return () => window.clearTimeout(t);
+  }, [isPaused, fallingChests.length]);
+
+  // Interval timer for spawning Golden/Flying Matthew (slightly less frequent)
   useEffect(() => {
     if (isActive || isPaused) return;
     const spawnDelay = isSeason2Ref.current
-      ? 15000 + Math.random() * 9000
+      ? 22000 + Math.random() * 14000
       : Math.max(
-          16000,
+          20000,
           BALANCE.goldenEvent.baseDelayMs + (Math.random() - 0.5) * BALANCE.goldenEvent.delayVarianceMs
         );
 
@@ -101,17 +150,13 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     return () => window.clearTimeout(timer);
   }, [isActive, isPaused]);
 
-  // Dev-triggered server-wide Flying Golden Matthew Swarm (defers cleanly if paused by cutscene/modal)
+  // Dev-triggered server-wide Flying Golden Matthew Swarm
   useEffect(() => {
     if (!swarmTrigger?.id || lastSwarmTriggerIdRef.current === swarmTrigger.id) return;
-    if (isPaused) {
-      pendingSwarmRef.current = swarmTrigger;
-      return;
-    }
+    if (isPaused) return;
     lastSwarmTriggerIdRef.current = swarmTrigger.id;
-    pendingSwarmRef.current = null;
 
-    const total = Math.min(24, Math.max(8, swarmTrigger.count || 18));
+    const total = Math.min(18, Math.max(6, swarmTrigger.count || 14));
     const winW = typeof window !== 'undefined' ? window.innerWidth : 1280;
     const winH = typeof window !== 'undefined' ? window.innerHeight : 720;
     const xSpan = Math.max(200, winW - 140);
@@ -133,10 +178,10 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     soundManager.playGoldenSpawn();
   }, [swarmTrigger?.id, swarmTrigger?.count, isPaused]);
 
-  // Smooth edge-to-edge flight animation (despawns ONLY when exiting opposite screen edge or caught)
   const hasSwarmActive = swarmItems.length > 0;
+  const hasChestsFalling = fallingChests.length > 0;
   useEffect(() => {
-    if ((!isActive && !hasSwarmActive) || isPaused) return;
+    if ((!isActive && !hasSwarmActive && !hasChestsFalling) || isPaused) return;
 
     let lastTickMs = performance.now();
     const interval = window.setInterval(() => {
@@ -169,6 +214,18 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
         }
       }
 
+      if (chestsRef.current.length > 0) {
+        const remaining: FallingChestItem[] = [];
+        for (const ch of chestsRef.current) {
+          const nextY = ch.y + ch.vy * dt;
+          if (nextY > winH + 90) continue;
+          const nextX = Math.max(55, Math.min(winW - 55, ch.x + Math.sin(nextY * 0.02 + ch.swayPhase) * 0.7));
+          remaining.push({ ...ch, x: nextX, y: nextY });
+        }
+        chestsRef.current = remaining;
+        setFallingChests(remaining);
+      }
+
       if (swarmItemsRef.current.length > 0) {
         const nextSwarm: GoldenSwarmItem[] = [];
         for (const item of swarmItemsRef.current) {
@@ -196,10 +253,10 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
         swarmItemsRef.current = nextSwarm;
         setSwarmItems(nextSwarm);
       }
-    }, 22);
+    }, 30);
 
     return () => window.clearInterval(interval);
-  }, [isActive, hasSwarmActive, isPaused]);
+  }, [isActive, hasSwarmActive, hasChestsFalling, isPaused]);
 
   const computeGoldenBounty = (): number => {
     const cps = calculateCPS(state);
@@ -216,11 +273,9 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     setIsActive(false);
 
     soundManager.playCrit();
-    particleEngine.emitClick(e.clientX, e.clientY, true, 25);
+    particleEngine.emitClick(e.clientX, e.clientY, true, 10);
 
-    // Balanced Golden Matthew reward scaling cleanly with Click Power & CPS (no runaway lifetime feedback loop)
     const bounty = computeGoldenBounty();
-
     setState((prev) => ({
       ...prev,
       coins: clampFiniteCoinAmount((prev.coins || 0) + bounty, MAX_SAFE_SEASON_COINS),
@@ -234,11 +289,16 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
       ),
       goldenMatthewsClicked: prev.goldenMatthewsClicked + 1,
     }));
-    onSpawnBonus(
-      isSeasonTwoOrLater(state.currentSeasonId)
-        ? `GOLDEN MATTHEW! +${formatCoins(bounty)} Coins!`
-        : `🌟 GOLDEN MATTHEW! +${formatCoins(bounty)} COINS! 🌟`
-    );
+    onSpawnBonus(`GOLDEN MATTHEW! +${formatCoins(bounty)} Coins!`);
+  };
+
+  const handleCatchChestItem = (chestId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const filtered = chestsRef.current.filter((c) => c.id !== chestId);
+    chestsRef.current = filtered;
+    setFallingChests(filtered);
+    soundManager.playChestOpen();
+    onCatchChest?.();
   };
 
   const handleCatchSwarmItem = (itemId: number, e: React.MouseEvent) => {
@@ -248,7 +308,7 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
     setSwarmItems(filtered);
 
     soundManager.playCrit();
-    particleEngine.emitClick(e.clientX, e.clientY, true, 20);
+    particleEngine.emitClick(e.clientX, e.clientY, true, 8);
 
     const bounty = computeGoldenBounty();
     setState((prev) => ({
@@ -266,17 +326,19 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
       lifetimeGems: (prev.lifetimeGems || 0) + 1,
       goldenMatthewsClicked: prev.goldenMatthewsClicked + 1,
     }));
-    onSpawnBonus(`🌟 GOLDEN SWARM CATCH! +${formatCoins(bounty)} Coins & +1 💎!`);
+    onSpawnBonus(`GOLDEN SWARM! +${formatCoins(bounty)} Coins & +1 Gem!`);
   };
 
-  if ((!isActive && swarmItems.length === 0) || isPaused) return null;
+  if ((!isActive && swarmItems.length === 0 && fallingChests.length === 0) || isPaused) {
+    return null;
+  }
 
   return (
     <>
       {isActive && (
         <div
           onClick={handleCatch}
-          className="fixed z-50 cursor-pointer select-none transition-transform hover:scale-110 active:scale-95 animate-pulse"
+          className="fixed z-50 cursor-pointer select-none transition-transform hover:scale-110 active:scale-95"
           style={{
             left: `${position.x}px`,
             top: `${position.y}px`,
@@ -284,38 +346,61 @@ export const GoldenMatthewEvent: React.FC<GoldenMatthewEventProps> = ({
           }}
         >
           <div className="relative w-24 h-24 flex items-center justify-center">
-            <div
-              className="absolute inset-0 rounded-full bg-gradient-to-tr from-yellow-500 via-amber-300 to-yellow-100 blur-md opacity-80 animate-spin"
-              style={{ animationDuration: '4s' }}
-            />
             <img
               src="./images/skins/classic_matthew.png"
-              alt="Rare Matthew"
+              alt="Golden Matthew"
               className="relative w-20 h-20 object-contain drop-shadow-[0_0_16px_rgba(255,215,0,0.95)]"
             />
           </div>
         </div>
       )}
 
+      {/* FALLING MARVEL MYSTERY CHESTS */}
+      {fallingChests.map((ch) => (
+        <button
+          key={ch.id}
+          type="button"
+          onClick={(e) => handleCatchChestItem(ch.id, e)}
+          className="fixed z-50 cursor-pointer select-none transition-transform hover:scale-115 active:scale-90 bg-transparent border-0 p-0"
+          style={{
+            left: `${ch.x}px`,
+            top: `${ch.y}px`,
+            transform: 'translate(-50%, -50%)',
+          }}
+          title="Click to open Falling Marvel Chest!"
+        >
+          <div className="relative w-32 h-36 flex flex-col items-center justify-center">
+            <img
+              src="./images/s3/chest/marvel_chest_closed.png"
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = './images/s2/chest/pixel_closed.png';
+              }}
+              alt="Falling Marvel Chest"
+              className="w-28 h-28 sm:w-32 sm:h-32 object-contain drop-shadow-[0_0_22px_rgba(251,191,36,0.95)]"
+            />
+            <span className="px-2.5 py-0.5 -mt-1.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase shadow">
+              CHEST!
+            </span>
+          </div>
+        </button>
+      ))}
+
       {swarmItems.map((item) => (
         <div
           key={item.id}
           onClick={(e) => handleCatchSwarmItem(item.id, e)}
-          className="fixed z-50 cursor-pointer select-none transition-transform hover:scale-115 active:scale-95"
+          className="fixed z-50 cursor-pointer select-none transition-transform hover:scale-110 active:scale-95"
           style={{
             left: `${item.x}px`,
             top: `${item.y}px`,
             transform: 'translate(-50%, -50%)',
           }}
         >
-          <div className="relative w-20 h-20 flex items-center justify-center">
-            <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-yellow-500 via-amber-300 to-yellow-100 blur-sm opacity-80" />
-            <img
-              src="./images/skins/classic_matthew.png"
-              alt="Flying Golden Matthew"
-              className="relative w-16 h-16 object-contain drop-shadow-[0_0_14px_rgba(255,215,0,0.95)]"
-            />
-          </div>
+          <img
+            src="./images/skins/classic_matthew.png"
+            alt="Flying Golden Matthew"
+            className="w-16 h-16 object-contain drop-shadow-[0_0_14px_rgba(255,215,0,0.95)]"
+          />
         </div>
       ))}
     </>

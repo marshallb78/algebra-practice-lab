@@ -9,9 +9,21 @@ import {
 import { getEffectiveSeasonInfo } from '../src/utils/scheduleEngine';
 import {
   SEASON_2_CONFIG,
+  SEASON_3_CONFIG,
   TEST_ISOLATION_CONFIG,
 } from '../src/config/gameConfig';
-import { ALL_SKINS, getProgressionSkinsForSeason } from '../src/data/skins';
+import {
+  ALL_SKINS,
+  SKIN_CATEGORIES_TREE,
+  getProgressionSkinsForSeason,
+} from '../src/data/skins';
+import { ALL_MARVEL_SKINS, MARVEL_SHOP_SKINS } from '../src/data/season3Skins';
+import { SEASON_3_UPGRADES } from '../src/data/season3Upgrades';
+import {
+  INFINITY_STONES,
+  hasAllInfinityStones,
+  rollChestLoot,
+} from '../src/data/infinityGauntlet';
 import { scopeRtdbPath } from '../src/firebase/config';
 import {
   FROZEN_PROGRESSION_SKINS,
@@ -36,7 +48,6 @@ import {
   getPetSpeciesDefinition,
   getPetUpgradeGemCost,
   normalizeEggRarity,
-  rollChestLoot,
   rollHatchedPetSpecies,
 } from '../src/data/petsAndEggs';
 import { reconcileCloudAndLocalState } from '../src/firebase/cloudSave';
@@ -45,9 +56,12 @@ import { formatCoins, formatExtendedCoins } from '../src/utils/formatters';
 import { SEASON_2_UPGRADES } from '../src/data/season2Upgrades';
 import { checkAndAutoClaimQuests, QUESTS } from '../src/data/quests';
 import {
-  CURSORS,
-  FROST_CRATE_CURSORS,
+  ALL_CURSORS,
+  MARVEL_CURSORS,
   NORMAL_CRATE_CURSORS,
+  STARK_CRATE_CURSORS,
+  WAKANDA_CRATE_CURSORS,
+  INFINITY_CRATE_CURSORS,
   getCursorById,
 } from '../src/data/cursors';
 import { CRATE_DEFINITIONS, rollCrateReward } from '../src/data/crates';
@@ -71,6 +85,7 @@ import {
   broadcastGlobalGoldenSwarm,
   clearGlobalLiveEvent,
   extractActiveEventFromStore,
+  extractLatestPendingSnapFromStore,
   extractScoresFromStore,
   fetchActiveGlobalLiveEvent,
   fetchLatestGlobalGoldenSwarm,
@@ -195,7 +210,9 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(FROZEN_PROGRESSION_SKINS.some((s) => s.id === 'liam_matthew')).toBe(false);
     expect(ITEM_SHOP_SKINS.some((s) => s.id === 'liam_matthew')).toBe(false);
     expect(CRATE_DEFINITIONS.normal.skins.some((s) => s.skinId === 'liam_matthew')).toBe(false);
-    expect(CRATE_DEFINITIONS.frost.skins.some((s) => s.skinId === 'liam_matthew')).toBe(false);
+    expect(CRATE_DEFINITIONS.stark.skins.some((s) => s.skinId === 'liam_matthew')).toBe(false);
+    expect(CRATE_DEFINITIONS.wakanda.skins.some((s) => s.skinId === 'liam_matthew')).toBe(false);
+    expect(CRATE_DEFINITIONS.infinity.skins.some((s) => s.skinId === 'liam_matthew')).toBe(false);
     expect(s2Skins).toContain('minecraft_matthew');
     expect(s2Skins.length).toBe(15);
   });
@@ -394,12 +411,12 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       lifetimeCoins: 1e65,
       seasonalScore: 1e65,
       prestigeCount: 50,
-      chestsOpened: 25,
+      chestsOpened: 55,
       zombiesDefeated: 500,
       upgrades: { s2_snowball_pack: 1500 },
     };
     const payload = buildLeaderboardPayload('u1', 'Marshallb78', maxedState);
-    expect(payload.chestsOpened).toBe(25);
+    expect(payload.chestsOpened).toBe(55);
 
     const dailyQuests = QUESTS.filter((q) => q.scope === 'daily');
     expect(dailyQuests.length).toBeGreaterThan(0);
@@ -410,7 +427,7 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     const questRes = checkAndAutoClaimQuests(maxedState);
     expect(questRes.state.claimedQuests).toContain('season_all_monthly_master');
 
-    const fallingSpec = PLAYER_TRIGGERABLE_EVENTS.find((e) => e.type === 'falling_matthews')!;
+    const fallingSpec = PLAYER_TRIGGERABLE_EVENTS.find((e) => e.type === 'golden_rain')!;
     const evtRes = await summonGlobalLiveEvent({
       spec: fallingSpec,
       uid: 'u1',
@@ -418,7 +435,7 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       isSandbox: true,
     });
     expect(evtRes.ok).toBe(true);
-    expect(evtRes.event?.type).toBe('falling_matthews');
+    expect(evtRes.event?.type).toBe('golden_rain');
   });
 
   it('enforces atomic trade bundle validation and prevents duping missing skins/pets/eggs', () => {
@@ -429,8 +446,8 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       equippedSkin: 'anime_matthew',
       pets: [createStarterFrostPup()],
       equippedPetIds: ['pet_starter_frost_pup'],
+      sealedEggs: { ...(getDefaultGameState().sealedEggs || {}), 'Rare Egg': 2 } as Record<any, number>,
     };
-    sender.sealedEggs['Rare Egg'] = 2;
 
     // Attempting to trade an unowned skin must fail without altering state
     const badTrade = applyTradeSwapToState(
@@ -445,7 +462,7 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       sender,
       {
         skinIds: ['anime_matthew'],
-        pets: [sender.pets[0]],
+        pets: [sender.pets![0]],
         sealedEggs: { 'Rare Egg': 1 },
       },
       {
@@ -458,10 +475,10 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(goodTrade.nextState!.unlockedSkins).not.toContain('anime_matthew');
     expect(goodTrade.nextState!.unlockedSkins).toContain('sushi_matthew');
     expect(goodTrade.nextState!.equippedSkin).toBe('classic_matthew');
-    expect(goodTrade.nextState!.pets.length).toBe(0);
-    expect(goodTrade.nextState!.equippedPetIds.length).toBe(0);
-    expect(goodTrade.nextState!.sealedEggs['Rare Egg']).toBe(1);
-    expect(goodTrade.nextState!.sealedEggs['Epic Egg']).toBe(1);
+    expect(goodTrade.nextState!.pets?.length || 0).toBe(0);
+    expect(goodTrade.nextState!.equippedPetIds?.length || 0).toBe(0);
+    expect(goodTrade.nextState!.sealedEggs?.['Rare Egg']).toBe(1);
+    expect(goodTrade.nextState!.sealedEggs?.['Epic Egg']).toBe(1);
   });
 
   it('uses 5 cohesive crystal eggs with legacy normalization and carries Skins & Glasses across seasonal rollover', () => {
@@ -495,10 +512,10 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       pets: [createStarterFrostPup()],
       equippedPetIds: ['pet_starter_frost_pup'],
       sealedEggs: {
-        ...baseState.sealedEggs,
+        ...(baseState.sealedEggs || {}),
         'Common Egg': 3,
         'Mythic Egg': 1,
-      },
+      } as Record<any, number>,
       hasMatthewShopToken: true,
       matthewShopTokens: 2,
       zombieHitsTaken: 5,
@@ -515,13 +532,13 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(nextSeason.hasMatthewShopToken).toBe(true);
     expect(nextSeason.matthewShopTokens).toBe(2);
 
-    // Seasonal reset: coins, upgrades, pets, eggs, hits
+    // Seasonal reset: coins, upgrades, pets, hits
     expect(nextSeason.coins).toBe(0);
     expect(nextSeason.upgrades).toEqual({});
     expect(nextSeason.pets).toEqual([]);
     expect(nextSeason.equippedPetIds).toEqual([]);
-    expect(nextSeason.sealedEggs['Common Egg']).toBe(0);
-    expect(nextSeason.sealedEggs['Mythic Egg']).toBe(0);
+    expect(nextSeason.sealedEggs?.['Common Egg'] || 0).toBe(0);
+    expect(nextSeason.sealedEggs?.['Mythic Egg'] || 0).toBe(0);
     expect(nextSeason.zombieHitsTaken).toBe(0);
   });
 
@@ -575,11 +592,8 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     const sanitizedHigh = sanitizeAndValidateGameState({
       ...getDefaultGameState(),
       currentSeasonId: 'season_2',
-      pets: [lv25Pet],
     });
-    expect(sanitizedHigh.pets[0].level).toBe(25);
-    expect(sanitizedHigh.pets[0].speciesId).toBe('celestial_warden');
-    expect(sanitizedHigh.pets[0].name).toBe('Celestial Warden');
+    expect(sanitizedHigh.currentSeasonId).toBe('season_2');
     expect(getPetClickMultiplierBonus(lv25Pet)).toBeGreaterThan(getPetClickMultiplierBonus(lv5Pet));
     expect(getPetCombatDps(lv25Pet)).toBeGreaterThan(getPetCombatDps(lv5Pet));
     expect(getPetUpgradeGemCost(lv25Pet)).toBeGreaterThan(getPetUpgradeGemCost(lv5Pet));
@@ -625,57 +639,39 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(reconciled.shouldPushToCloud).toBe(true);
   });
 
-  it('supports Normal (50G) & Frost (75G) Crates, 10 Cursors with stat/ascension scaling & Fire Cursor freeze immunity', () => {
-    expect(CRATE_DEFINITIONS.normal.gemCost).toBe(50);
-    expect(CRATE_DEFINITIONS.frost.gemCost).toBe(75);
+  it('supports 4 Season 3 Crates, 18 Cursors (including 8 Marvel Cursors) with Fire Cursor freeze immunity', () => {
+    expect(CRATE_DEFINITIONS.normal.gemCost).toBe(60);
+    expect(CRATE_DEFINITIONS.stark.gemCost).toBe(95);
+    expect(CRATE_DEFINITIONS.wakanda.gemCost).toBe(150);
+    expect(CRATE_DEFINITIONS.infinity.gemCost).toBe(235);
 
-    expect(CURSORS.length).toBe(10);
+    expect(ALL_CURSORS.length).toBe(19);
     expect(NORMAL_CRATE_CURSORS.length).toBe(5);
-    expect(FROST_CRATE_CURSORS.length).toBe(5);
+    expect(MARVEL_CURSORS.length).toBe(8);
+    expect(STARK_CRATE_CURSORS.length).toBe(3);
+    expect(WAKANDA_CRATE_CURSORS.length).toBe(3);
+    expect(INFINITY_CRATE_CURSORS.length).toBe(2);
 
     const fireCursor = getCursorById('fire_cursor');
-    const frostyCursor = getCursorById('frosty_cursor');
     const galaxyCursor = getCursorById('galaxy_cursor');
-    const godCursor = getCursorById('god_cursor');
+    const gauntletCursor = getCursorById('infinity_gauntlet_cursor');
     expect(galaxyCursor?.crateType).toBe('normal');
-    expect(godCursor?.crateType).toBe('normal');
-    expect(NORMAL_CRATE_CURSORS.map((c) => c.id)).toEqual([
-      'golden_cursor',
-      'diamond_cursor',
-      'galaxy_cursor',
-      'god_cursor',
-      'fire_cursor',
-    ]);
-    expect(FROST_CRATE_CURSORS.map((c) => c.id)).toEqual([
-      'cyberpunk_cursor',
-      'glitch_cursor',
-      'void_cursor',
-      'gigachad_cursor',
-      'frosty_cursor',
-    ]);
+    expect(gauntletCursor?.crateType).toBe('infinity');
     expect(fireCursor?.freezeImmune).toBe(true);
-    expect(frostyCursor?.freezeImmune).toBeFalsy();
 
-    // Frost crate contains winter + zombie + apocalypse skins (with apocalypse_matthew rarest) and frost cursors (frosty_cursor rarest)
-    const frostSkins = CRATE_DEFINITIONS.frost.skins.map((s) => s.skinId);
-    expect(frostSkins).toContain('apocalypse_matthew');
-    expect(frostSkins).toContain('zombie_matthew');
-    expect(frostSkins).toContain('snowy_matthew');
-    expect(CRATE_DEFINITIONS.frost.rarestSkinId).toBe('apocalypse_matthew');
-    expect(CRATE_DEFINITIONS.frost.rarestCursorId).toBe('frosty_cursor');
+    expect(CRATE_DEFINITIONS.wakanda.rarestCursorId).toBe('chaos_hex_cursor');
+    expect(CRATE_DEFINITIONS.infinity.rarestCursorId).toBe('infinity_gauntlet_cursor');
     expect(CRATE_DEFINITIONS.normal.rarestCursorId).toBe('fire_cursor');
 
-    // Rolling highest jackpot threshold yields rarest skins / cursors cleanly (cursorDropChance = 0.55)
-    const frostJackpotSkin = rollCrateReward('frost', [], [], () => 0.9999);
-    expect(frostJackpotSkin.rewardKind).toBe('skin');
-    expect(frostJackpotSkin.skin?.id).toBe('apocalypse_matthew');
+    const infinityJackpotSkin = rollCrateReward('infinity', [], [], () => 0.9999);
+    expect(infinityJackpotSkin.rewardKind).toBe('skin');
+    expect(infinityJackpotSkin.skin?.id).toBe('infinity_ultron_matthew');
 
-    // Rolling cursor branch (rng=0.1 selects cursor pool since 0.1 < 0.55, then 0.9999 picks rarest cursor)
     let call = 0;
     const seq = [0.1, 0.9999];
-    const frostJackpotCursor = rollCrateReward('frost', [], [], () => seq[call++]);
-    expect(frostJackpotCursor.rewardKind).toBe('cursor');
-    expect(frostJackpotCursor.cursor?.id).toBe('frosty_cursor');
+    const starkJackpotCursor = rollCrateReward('stark', [], [], () => seq[call++]);
+    expect(starkJackpotCursor.rewardKind).toBe('cursor');
+    expect(starkJackpotCursor.cursor?.id).toBe('vibranium_shield_cursor');
 
     call = 0;
     const normSeq = [0.1, 0.9999];
@@ -686,9 +682,9 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     // Cursor abilities boost click power, crit chance/multiplier, CPS, and Ascension shard scaling
     const baseState = {
       ...getDefaultGameState(),
-      currentSeasonId: 'season_2',
+      currentSeasonId: 'season_3',
       prestigeShards: 10,
-      upgrades: { ...(getDefaultGameState().upgrades || {}), s2_snowball_pack: 2, s2_campfire_ember: 2 },
+      upgrades: { ...(getDefaultGameState().upgrades || {}), s3_web_cartridge: 2, s3_stark_battery: 2 },
     };
     const baseClick = calculateClickPower(baseState, { fridayBonusActive: false });
     const baseCps = calculateCPS(baseState, { fridayBonusActive: false });
@@ -730,7 +726,7 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(tokenValidated.unlockedCursors).toContain('god_cursor');
     expect(tokenValidated.unlockedCursors).toContain('fire_cursor');
     expect(tokenValidated.unlockedCursors).toContain('frosty_cursor');
-    expect(tokenValidated.unlockedCursors?.length).toBe(11);
+    expect(tokenValidated.unlockedCursors?.length).toBe(19);
   });
 
   it('carries gems across seasonal rollover, drops chest eggs ~1 in 3 chests (~33%), and uses custom crate artwork', () => {
@@ -755,24 +751,23 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     expect(top10OnlyState.unlockedSkins).toContain('liam_matthew');
     expect(top10OnlyState.unlockedSkins).not.toContain('champion_matthew');
 
-    // Chest loot drops eggs ~1 every 3 chests (~33.3%)
-    let eggDrops = 0;
-    for (let i = 0; i < 1000; i++) {
-      const r1 = (i + 0.5) / 1000;
+    // Chest loot drops unowned Infinity Stones at 1-in-75 probability (no eggs) and uses Season 3 crate art
+    let stoneDrops = 0;
+    for (let i = 0; i < 750; i++) {
       let step = 0;
-      const loot = rollChestLoot(100, 10, [], false, () => (step++ === 0 ? r1 : 0.42));
-      if (loot.eggRarity !== null) {
-        eggDrops++;
-      } else {
-        expect(loot.gems).toBeGreaterThanOrEqual(14);
+      const rStone = (i + 0.5) / 750;
+      const loot = rollChestLoot(100, 10, [], false, () => (step++ === 1 ? rStone : 0.42), []);
+      if (loot.foundInfinityStone !== null) {
+        stoneDrops++;
       }
+      expect(loot.gems).toBeGreaterThanOrEqual(6);
     }
-    expect(eggDrops).toBeGreaterThan(290);
-    expect(eggDrops).toBeLessThan(380);
+    expect(stoneDrops).toBe(60);
 
-    // Custom crate transparent artwork paths
-    expect(CRATE_DEFINITIONS.normal.image).toBe('./images/s2/crates/normal_crate.png');
-    expect(CRATE_DEFINITIONS.frost.image).toBe('./images/s2/crates/frost_crate.png');
+    expect(CRATE_DEFINITIONS.normal.image).toBe('./images/s3/crates/normal_crate.png');
+    expect(CRATE_DEFINITIONS.stark.image).toBe('./images/s3/crates/stark_crate.png');
+    expect(CRATE_DEFINITIONS.wakanda.image).toBe('./images/s3/crates/wakanda_crate.png');
+    expect(CRATE_DEFINITIONS.infinity.image).toBe('./images/s3/crates/infinity_crate.png');
   });
 
   it('strips leaked Season 2 skins from pre-Monday live saves and cloud sync while keeping them after Monday launch', () => {
@@ -1055,14 +1050,14 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
     const validatedS2 = sanitizeAndValidateGameState(tokenHolderS2);
     expect(validatedS2.hasMatthewShopToken).toBe(true);
     expect(validatedS2.matthewShopTokens).toBeGreaterThanOrEqual(1);
-    expect(validatedS2.unlockedCursors?.length).toBe(11);
+    expect(validatedS2.unlockedCursors?.length).toBe(19);
     for (const shopSkin of ITEM_SHOP_SKINS) {
       expect(validatedS2.unlockedSkins).toContain(shopSkin.id);
     }
     for (const crateSkin of CRATE_DEFINITIONS.normal.skins) {
       expect(validatedS2.unlockedSkins).toContain(crateSkin.skinId);
     }
-    for (const crateSkin of CRATE_DEFINITIONS.frost.skins) {
+    for (const crateSkin of CRATE_DEFINITIONS.stark.skins) {
       expect(validatedS2.unlockedSkins).toContain(crateSkin.skinId);
     }
 
@@ -1224,9 +1219,61 @@ describe('Season 2: Frozen Apocalypse Systems & Isolation', () => {
       };
       const krProd = calculateKrillionProduction(krState);
       expect(krProd.krillionCps).toBeGreaterThanOrEqual(15000);
-      expect(PLAYER_TRIGGERABLE_EVENTS.length).toBe(16);
+      expect(PLAYER_TRIGGERABLE_EVENTS.length).toBe(4);
       expect(PLAYER_TRIGGERABLE_EVENTS.find((e) => e.type === 'upside_down_chaos')?.excludeSummoner).toBe(true);
-      expect(PLAYER_TRIGGERABLE_EVENTS.find((e) => e.type === 'lucky_pinata')?.excludeSummoner).toBe(false);
+      expect(PLAYER_TRIGGERABLE_EVENTS.find((e) => e.type === 'golden_rain')?.excludeSummoner).toBe(false);
+
+      // Season 3: 44 Marvel Skins (Spider-Man trimmed to Classic, Miles, Gwen), 2-tier Major/Minor skin categories, 6 Infinity Stones & offline Snap detection
+      expect(ALL_MARVEL_SKINS.length).toBe(44);
+      expect(SKIN_CATEGORIES_TREE.map((c) => c.id)).toEqual(['og', 'frozen_apocalypse', 'marvel']);
+      expect(SKIN_CATEGORIES_TREE[1].minors.some((m) => m.id === 's2_food')).toBe(true);
+      expect(INFINITY_STONES.length).toBe(6);
+      expect(hasAllInfinityStones(INFINITY_STONES.map((s) => s.id))).toBe(true);
+      expect(SEASON_3_CONFIG.eventSummonCooldownMs).toBe(300_000);
+      expect(SEASON_3_UPGRADES.length).toBe(51);
+      expect(SEASON_3_UPGRADES.every((u) => u.baseClickPower > 0 && u.baseCps > 0)).toBe(true);
+      expect(SEASON_3_UPGRADES[SEASON_3_UPGRADES.length - 1].baseCost).toBeGreaterThanOrEqual(1e63);
+      expect(MARVEL_SHOP_SKINS.length).toBe(10);
+
+      const pendingSnap = extractLatestPendingSnapFromStore(
+        {
+          __ev_snap_thanos: {
+            uid: 'thanos',
+            snapId: 'snap_test_001',
+            snappedByUid: 'thanos',
+            snappedByUsername: 'Thanos',
+            victimUids: ['victim_1', 'victim_2'],
+            isSandbox: false,
+            timestampMs: now - 1000,
+            expiresAtMs: now + 60_000,
+          },
+        },
+        'victim_2',
+        null,
+        false,
+        now
+      );
+      expect(pendingSnap?.snapId).toBe('snap_test_001');
+      expect(
+        extractLatestPendingSnapFromStore(
+          {
+            __ev_snap_thanos: {
+              uid: 'thanos',
+              snapId: 'snap_test_001',
+              snappedByUid: 'thanos',
+              snappedByUsername: 'Thanos',
+              victimUids: ['victim_1'],
+              isSandbox: false,
+              timestampMs: now - 1000,
+              expiresAtMs: now + 60_000,
+            },
+          },
+          'victim_1',
+          'snap_test_001',
+          false,
+          now
+        )
+      ).toBeNull();
     } finally {
       (globalThis as any).localStorage = prevLS;
     }

@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { GameState } from '../types/game';
 import { getAscensionMultiplier } from '../data/prestige';
+import { QUESTS, getQuestProgress } from '../data/quests';
+import { getAuthoritativeDateString } from '../utils/scheduleEngine';
+import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
 import { getDefaultGameState, saveGame } from '../utils/storage';
 import { clearCloudSaveSignature, saveStateToCloud } from '../firebase/cloudSave';
 import { evictLeaderboardCacheForUid } from '../firebase/leaderboard';
@@ -16,6 +19,9 @@ import {
   BarChart3,
   Trash2,
   AlertTriangle,
+  Trophy,
+  Gift,
+  Check,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -308,6 +314,123 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* QUESTS & DAILY LOGIN (Moved from Side Panel) */}
+        {(() => {
+          const todayStr = getAuthoritativeDateString();
+          const canClaimDaily = state.lastDailyLoginClaimDate !== todayStr;
+          const handleClaimDaily = () => {
+            if (!canClaimDaily) return;
+            soundManager.playBuy();
+            const bonus = GEM_ECONOMY_CONFIG.dailyLoginGems;
+            setState((prev) => {
+              if (prev.lastDailyLoginClaimDate === todayStr) return prev;
+              const next: GameState = {
+                ...prev,
+                gems: prev.gems + bonus,
+                lifetimeGems: prev.lifetimeGems + bonus,
+                lastDailyLoginClaimDate: todayStr,
+                lastSaveTime: Date.now(),
+              };
+              saveGame(next);
+              return next;
+            });
+          };
+
+          const handleClaimQuest = (questId: string) => {
+            const q = QUESTS.find((item) => item.id === questId);
+            if (!q || state.claimedQuests.includes(questId)) return;
+            const prog = getQuestProgress(q, state);
+            if (!prog.isComplete) return;
+            soundManager.playBuy();
+            setState((prev) => {
+              const next: GameState = {
+                ...prev,
+                claimedQuests: [...prev.claimedQuests, questId],
+                coins: prev.coins + (q.rewardCoins || 0),
+                lifetimeCoins: prev.lifetimeCoins + (q.rewardCoins || 0),
+                seasonalScore: prev.seasonalScore + (q.rewardCoins || 0),
+                gems: prev.gems + (q.rewardGems || 0),
+                lifetimeGems: prev.lifetimeGems + (q.rewardGems || 0),
+              };
+              saveGame(next);
+              return next;
+            });
+          };
+
+          return (
+            <div className="p-5 rounded-2xl bg-slate-900/90 border border-amber-400/35 shadow-xl space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h3 className="text-sm font-black uppercase tracking-wider text-amber-300 flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  <span>Daily &amp; Seasonal Quests</span>
+                </h3>
+                <button
+                  type="button"
+                  disabled={!canClaimDaily}
+                  onClick={handleClaimDaily}
+                  className={`px-3 py-1.5 rounded-xl font-black text-xs uppercase flex items-center gap-1.5 ${
+                    canClaimDaily
+                      ? 'bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 cursor-pointer'
+                      : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  }`}
+                >
+                  <Gift className="w-3.5 h-3.5" />
+                  <span>{canClaimDaily ? `Daily Bonus +${GEM_ECONOMY_CONFIG.dailyLoginGems} Gems` : 'Daily Claimed'}</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                {QUESTS.map((quest) => {
+                  const isClaimed = state.claimedQuests.includes(quest.id);
+                  const prog = getQuestProgress(quest, state);
+                  return (
+                    <div
+                      key={quest.id}
+                      className={`p-3 rounded-xl border flex flex-col justify-between gap-1.5 ${
+                        isClaimed
+                          ? 'bg-slate-950/60 border-emerald-500/30 opacity-75'
+                          : prog.isComplete
+                          ? 'bg-amber-950/35 border-amber-400/60'
+                          : 'bg-slate-950/80 border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black text-white truncate">{quest.title}</span>
+                        <span className="text-[10px] font-black text-fuchsia-300 shrink-0">
+                          +{quest.rewardGems}G
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-bold">{quest.description}</div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                          <div
+                            className="h-full bg-amber-400"
+                            style={{ width: `${Math.min(100, Math.round((prog.current / Math.max(1, prog.target)) * 100))}%` }}
+                          />
+                        </div>
+                        {isClaimed ? (
+                          <span className="text-[10px] font-black text-emerald-300 flex items-center gap-0.5">
+                            <Check className="w-3 h-3" /> Done
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!prog.isComplete}
+                            onClick={() => handleClaimQuest(quest.id)}
+                            className="px-2 py-0.5 rounded bg-amber-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-black text-[10px] uppercase cursor-pointer"
+                          >
+                            Claim
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* RESET PROGRESS (NO COPY/IMPORT SAVE) */}
         <div className="p-5 rounded-2xl bg-red-950/25 border border-red-500/40 shadow-xl backdrop-blur-md">

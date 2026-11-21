@@ -1,25 +1,34 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { CosmeticSlot, EggRarity, GameState } from '../types/game';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { CosmeticSlot, GameState } from '../types/game';
 import { getUpgradesForSeason } from '../data/upgrades';
-import { ALL_SKINS, Skin, equipSkin, isSeasonTwoOrLater } from '../data/skins';
-import { QUESTS, getQuestProgress } from '../data/quests';
 import {
-  EGG_DEFINITIONS,
-  getEggSellGemValue,
-  getPetClickMultiplierBonus,
-  getPetCombatDps,
-  getPetSellGemValue,
-  getPetSpeciesDefinition,
-  getPetUpgradeGemCost,
-} from '../data/petsAndEggs';
+  ALL_SKINS,
+  SKIN_CATEGORIES_TREE,
+  SEASON_2_ONLY_SKIN_ID_SET,
+  SEASON_3_ONLY_SKIN_ID_SET,
+  Skin,
+  equipSkin,
+  getSkinById,
+  isSeasonThreeOrLater,
+  isSeasonTwoOrLater,
+} from '../data/skins';
+import {
+  INFINITY_GAUNTLET_IMAGE,
+  INFINITY_STONES,
+  hasAllInfinityStones,
+} from '../data/infinityGauntlet';
 import {
   ITEM_SHOP_SKINS,
-  SEASON_2_LIVE_EVENT_SKINS,
   getDailyItemShopRotation,
 } from '../data/season2Skins';
+import {
+  MARVEL_SHOP_SKINS,
+  getDailyMarvelShopRotation,
+} from '../data/season3Skins';
 import { CRATE_DEFINITIONS, CrateType } from '../data/crates';
 import { ALL_CURSORS, getCursorById } from '../data/cursors';
 import { CursorVisual } from './s2/CursorVisual';
+import { LeaderboardEntry } from '../firebase/leaderboard';
 import {
   PLAYER_TRIGGERABLE_EVENTS,
   ActiveGlobalLiveEvent,
@@ -40,48 +49,41 @@ import {
   getMaxAffordableUpgrade,
 } from '../utils/calculations';
 import { getAuthoritativeDateString } from '../utils/scheduleEngine';
-import { GEM_ECONOMY_CONFIG, SEASON_2_CONFIG } from '../config/gameConfig';
+import { GEM_ECONOMY_CONFIG, SEASON_3_CONFIG, isAuthorizedDevUid } from '../config/gameConfig';
 import { saveGame } from '../utils/storage';
 import { saveStateToCloud } from '../firebase/cloudSave';
 import { formatCoins, formatExtendedCoins, formatKrillion } from '../utils/formatters';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { UpgradeArtwork } from './UpgradeArtwork';
-import { EggBadgeVisual, PetSprite2D } from './s2/PetSprite2D';
 import {
   ShoppingBag,
   Infinity as InfinityIcon,
-  Trophy,
   Check,
   Zap,
   Gem,
-  Gift,
   Eye,
-  Swords,
   Sparkles,
-  Snowflake,
+  Flame,
   Palette,
   ArrowUpCircle,
   Crown,
-  Lock,
   Hammer,
   Compass,
   X,
 } from 'lucide-react';
 
-export type RightTab = 'upgrades' | 'rebirth' | 'quests' | 'pets' | 'skins' | 'events';
+export type RightTab = 'upgrades' | 'rebirth' | 'skins' | 'gauntlet';
 
 interface RightPanelProps {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
   isSandbox?: boolean;
+  playersList?: LeaderboardEntry[];
+  isSnapBusy?: boolean;
+  onTriggerInfinitySnap?: () => void;
   onOpenSkinQualityModal?: () => void;
   onNotify?: (title: string, subtitle: string) => void;
-  onHatchEgg?: (rarity: EggRarity) => void;
-  onSellEgg?: (rarity: EggRarity) => void;
-  onToggleEquipPet?: (instanceId: string) => void;
-  onUpgradePet?: (instanceId: string) => void;
-  onSellPet?: (instanceId: string) => void;
   onBuySkinWithGems?: (skinId: string, gemCost: number) => void;
   onClaimVaultSkinWithToken?: (skinId: string) => void;
   onOpenMysteryChest?: () => void;
@@ -98,13 +100,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   state,
   setState,
   isSandbox = false,
+  playersList = [],
+  isSnapBusy = false,
+  onTriggerInfinitySnap,
   onOpenSkinQualityModal,
   onNotify,
-  onHatchEgg,
-  onSellEgg,
-  onToggleEquipPet,
-  onUpgradePet,
-  onSellPet,
   onBuySkinWithGems,
   onClaimVaultSkinWithToken,
   onOpenMysteryChest,
@@ -116,11 +116,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   const [activeTab, setActiveTab] = useState<RightTab>('upgrades');
   const [buyMode, setBuyMode] = useState<BuyMode>(1);
   const [justBoughtId, setJustBoughtId] = useState<string | null>(null);
-  const [petSubTab, setPetSubTab] = useState<'pets' | 'eggs'>('pets');
-  const [inspectedPetId, setInspectedPetId] = useState<string | null>(null);
   const [skinSubTab, setSkinSubTab] = useState<SkinSubTab>('daily');
   const [selectedCursorDetailId, setSelectedCursorDetailId] = useState<string | null>(null);
-  const [busyEventId, setBusyEventId] = useState<string | null>(null);
   const upgradesListRef = useRef<HTMLDivElement | null>(null);
   const upgradesScrollTopRef = useRef<number>(0);
 
@@ -131,6 +128,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   }, [activeTab]);
 
   const isSeason2 = isSeasonTwoOrLater(state.currentSeasonId);
+  const isSeason3 = isSeasonThreeOrLater(state.currentSeasonId);
+
   const activeUpgrades = getUpgradesForSeason(state.currentSeasonId);
 
   const resolveUpgradePurchasePlan = (
@@ -311,99 +310,37 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   };
 
   const todayDateStr = getAuthoritativeDateString();
-  const canClaimDailyLogin = state.lastDailyLoginClaimDate !== todayDateStr;
-
-  const handleClaimDailyLogin = () => {
-    if (!canClaimDailyLogin) return;
-    soundManager.playBuy();
-    particleEngine.emitPrestige();
-    const nowMs = Date.now();
-    let pushedNext: GameState | null = null;
-    setState((prev) => {
-      if (prev.lastDailyLoginClaimDate === todayDateStr) return prev;
-      const bonus = GEM_ECONOMY_CONFIG.dailyLoginGems;
-      const next: GameState = {
-        ...prev,
-        gems: prev.gems + bonus,
-        lifetimeGems: prev.lifetimeGems + bonus,
-        lastDailyLoginClaimDate: todayDateStr,
-        lastSaveTime: nowMs,
-        lastActiveInputTimestamp: nowMs,
-      };
-      pushedNext = next;
-      saveGame(next);
-      return next;
-    });
-    if (pushedNext && (pushedNext as GameState).cloudAccount) {
-      const acc = (pushedNext as GameState).cloudAccount!;
-      saveStateToCloud(acc.uid, acc.displayUsername, pushedNext, true).catch(() => {});
-    }
-    onNotify?.('DAILY BONUS!', `+${GEM_ECONOMY_CONFIG.dailyLoginGems} Gems added!`);
-  };
-
-  const handleClaimQuest = (questId: string) => {
-    const quest = QUESTS.find((q) => q.id === questId);
-    if (!quest || state.claimedQuests.includes(questId)) return;
-    const progress = getQuestProgress(quest, state);
-    if (!progress.isComplete) return;
-    soundManager.playBuy();
-    particleEngine.emitPrestige();
-    setState((prev) => {
-      const next: GameState = {
-        ...prev,
-        claimedQuests: [...prev.claimedQuests, questId],
-        coins: prev.coins + (quest.rewardCoins || 0),
-        lifetimeCoins: prev.lifetimeCoins + (quest.rewardCoins || 0),
-        seasonalScore: prev.seasonalScore + (quest.rewardCoins || 0),
-        gems: prev.gems + (quest.rewardGems || 0),
-        lifetimeGems: prev.lifetimeGems + (quest.rewardGems || 0),
-        lastActiveInputTimestamp: Date.now(),
-      };
-      saveGame(next);
-      return next;
-    });
-    onNotify?.('QUEST COMPLETE!', `${quest.title} (+${quest.rewardGems} Gems)`);
-  };
-
-  const handleSummonEvent = async (spec: PlayerEventCostSpec & { id: string }) => {
-    if (state.gems < spec.gemCost) return;
-    setBusyEventId(spec.id);
-    const uid = state.cloudAccount?.uid || 'local_tester';
-    const username = state.cloudAccount?.displayUsername || state.cloudAccount?.username || 'Player';
-    const res = await summonGlobalLiveEvent({ spec, uid, username, isSandbox });
-    setBusyEventId(null);
-    if (res.ok && res.event) {
-      if (state.cloudAccount?.uid && res.cloudSynced === false) {
-        onNotify?.(
-          'CONNECTION ISSUE',
-          'Could not broadcast event to server — Gems were NOT spent. Try again!'
-        );
-        return;
-      }
-      setState((prev) => {
-        const next = { ...prev, gems: Math.max(0, prev.gems - spec.gemCost) };
-        saveGame(next);
-        return next;
-      });
-      onEventSummoned?.(res.event);
-      soundManager.playStormWaveStart();
-      onNotify?.('LIVE EVENT SUMMONED!', `${spec.label} live on everyone's screen!`);
-    }
-  };
 
   const unlockedSkinsList = ALL_SKINS.filter((s) => state.unlockedSkins.includes(s.id));
-  const dailyQuests = QUESTS.filter((q) => q.scope === 'daily');
-  const seasonalQuests = QUESTS.filter((q) => q.scope === 'seasonal');
-  const dailyFeatured = getDailyItemShopRotation(todayDateStr);
-  const pets = state.pets || [];
-  const equippedPetIds = state.equippedPetIds || [];
-  const totalSealedEggs = Object.values(state.sealedEggs || {}).reduce((a, b) => a + b, 0);
+  const dailyFeatured = isSeason3
+    ? getDailyMarvelShopRotation(todayDateStr)
+    : getDailyItemShopRotation(todayDateStr);
+  const shopPoolTotal = isSeason3 ? MARVEL_SHOP_SKINS.length : ITEM_SHOP_SKINS.length;
+  const ownedStones = state.infinityStones || [];
+  const allStonesCollected = hasAllInfinityStones(ownedStones);
   const availableShopTokens = Math.max(0, state.matthewShopTokens ?? 0);
   const hasShopToken = Boolean(state.hasMatthewShopToken);
+
+  const visibleMajorCategories = useMemo(
+    () =>
+      SKIN_CATEGORIES_TREE.filter((major) => {
+        if (major.id === 'frozen_apocalypse') return isSeason2;
+        if (major.id === 'marvel') return isSeason3;
+        return true;
+      }),
+    [isSeason2, isSeason3]
+  );
 
   const guidedTip: { text: string; cta: string; action: () => void; accent: string } | null =
     !isSeason2
       ? null
+      : allStonesCollected && isSeason3
+      ? {
+          text: 'All 6 Infinity Stones collected! Open Gauntlet to SNAP half the server!',
+          cta: 'Open Gauntlet',
+          action: () => setActiveTab('gauntlet'),
+          accent: 'from-purple-500/25 to-amber-500/15 border-amber-400/70 text-amber-200',
+        }
       : hasShopToken &&
         dailyFeatured.some((s) => !state.unlockedSkins.includes(s.id))
       ? {
@@ -415,31 +352,11 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           },
           accent: 'from-amber-500/20 to-yellow-500/10 border-amber-400/60 text-amber-200',
         }
-      : pets.length > 0 && equippedPetIds.length === 0
-      ? {
-          text: 'Equip your Pet so it guards Matthew and fights Zombies!',
-          cta: 'Equip Pet',
-          action: () => {
-            setActiveTab('pets');
-            setPetSubTab('pets');
-          },
-          accent: 'from-cyan-500/20 to-sky-500/10 border-cyan-400/60 text-cyan-200',
-        }
-      : totalSealedEggs > 0
-      ? {
-          text: `${totalSealedEggs} Sealed Egg${totalSealedEggs > 1 ? 's' : ''} ready! Hatch stronger guardians in Pets.`,
-          cta: 'Hatch Eggs',
-          action: () => {
-            setActiveTab('pets');
-            setPetSubTab('eggs');
-          },
-          accent: 'from-sky-500/20 to-indigo-500/10 border-sky-400/60 text-sky-200',
-        }
       : null;
 
   return (
     <div className="flex h-full w-full bg-[#090d1a]/92 border-l border-white/10 shadow-2xl backdrop-blur-xl overflow-hidden font-chunky">
-      {/* VERTICAL SIDEBAR TABS: SKINS SHOP (S2 FIRST) | UPGRADES | PETS | REBIRTH | QUESTS | EVENTS */}
+      {/* VERTICAL SIDEBAR TABS: SKINS SHOP | UPGRADES | REBIRTH | QUESTS | GAUNTLET | EVENTS */}
       <div className="flex flex-col items-center py-3 px-1.5 bg-[#050811] border-r border-white/10 gap-2.5 z-30 select-none overflow-y-auto">
         {[
           ...(isSeason2
@@ -455,23 +372,17 @@ export const RightPanel: React.FC<RightPanelProps> = ({
               ]
             : []),
           { id: 'upgrades' as RightTab, label: 'Upgrades', Icon: Hammer, activeClass: 'bg-amber-500 text-slate-950 shadow-amber-500/30' },
-          ...(isSeason2
+          { id: 'rebirth' as RightTab, label: 'Rebirth', Icon: InfinityIcon, activeClass: 'bg-purple-600 text-white shadow-purple-600/30' },
+          ...(isSeason3
             ? [
                 {
-                  id: 'pets' as RightTab,
-                  label: 'Pets',
-                  Icon: Swords,
-                  activeClass: 'bg-cyan-400 text-slate-950 shadow-cyan-400/30',
-                  badge: totalSealedEggs > 0,
-                  count: pets.length,
+                  id: 'gauntlet' as RightTab,
+                  label: 'Gauntlet',
+                  Icon: Sparkles,
+                  activeClass: 'bg-amber-400 text-slate-950 shadow-amber-400/30',
+                  badge: allStonesCollected,
+                  count: ownedStones.length,
                 },
-              ]
-            : []),
-          { id: 'rebirth' as RightTab, label: 'Rebirth', Icon: InfinityIcon, activeClass: 'bg-purple-600 text-white shadow-purple-600/30' },
-          { id: 'quests' as RightTab, label: 'Quests', Icon: Trophy, activeClass: 'bg-yellow-400 text-slate-950 shadow-yellow-400/30', badge: canClaimDailyLogin },
-          ...(isSeason2
-            ? [
-                { id: 'events' as RightTab, label: 'Events', Icon: Snowflake, activeClass: 'bg-sky-400 text-slate-950 shadow-sky-400/30' },
               ]
             : []),
         ].map((tabItem) => {
@@ -520,25 +431,32 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </button>
         )}
 
-        {/* ================= UPGRADES (UP TO Ctg, KEPT MOUNTED SO SCROLL POSITION PERSISTS) ================= */}
+        {/* ================= UPGRADES (KEPT MOUNTED SO SCROLL POSITION PERSISTS) ================= */}
         <div className={activeTab === 'upgrades' ? 'flex flex-col flex-1 min-h-0' : 'hidden'}>
-          <div className="p-3 border-b border-slate-800/80 flex items-center justify-between gap-2 bg-[#101426]/80 shrink-0">
-            <div className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
-              <Hammer className="w-4 h-4" />
-              <span>{isSeason2 ? 'Upgrades Armory (1 → Ctg)' : 'Upgrades'}</span>
+          <div className="px-3 py-2.5 border-b border-red-500/25 flex items-center justify-between gap-2 bg-gradient-to-r from-[#130d18]/95 via-[#0f1629]/95 to-[#161224]/95 shrink-0">
+            <div className="min-w-0">
+              <div className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                <Hammer className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                <span className={isSeason3 ? 'font-marvel tracking-wide text-sm text-white' : ''}>
+                  {isSeason3 ? 'Stark Tech Armory' : isSeason2 ? 'Upgrades Armory (1 → Ctg)' : 'Upgrades'}
+                </span>
+              </div>
+              <div className="text-[10px] font-bold text-slate-400 mt-0.5">
+                {activeUpgrades.filter((u) => (state.upgrades[u.id] || 0) > 0).length}/{activeUpgrades.length} Tech Unlocked
+              </div>
             </div>
-            <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-750">
+            <div className="flex items-center bg-slate-950/90 rounded-xl p-1 border border-slate-700/80 shadow-inner shrink-0">
               {([1, 10, 'MAX'] as BuyMode[]).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => setBuyMode(mode)}
-                  className={`px-2 py-0.5 text-[11px] font-black rounded-md transition-all cursor-pointer ${
+                  className={`px-2.5 py-1 text-[11px] font-black rounded-lg transition-all cursor-pointer ${
                     buyMode === mode
-                      ? 'bg-cyan-500 text-slate-950'
+                      ? 'bg-gradient-to-r from-red-500 to-amber-500 text-white shadow-[0_0_10px_rgba(239,68,68,0.4)]'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  {mode === 'MAX' ? 'MAX' : `${mode}x`}
+                  {mode === 'MAX' ? 'MAX' : `${mode}×`}
                 </button>
               ))}
             </div>
@@ -551,104 +469,123 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             }}
             className="flex-1 min-h-0 overflow-y-auto p-2.5 pb-24 space-y-2"
           >
-              {activeUpgrades.map((upgrade) => {
-                const currentLevel = state.upgrades[upgrade.id] || 0;
-                const isCookiePopped = justBoughtId === upgrade.id;
-                const { countToDisplay, cost, canAfford, isKrillion } = resolveUpgradePurchasePlan(
-                  upgrade,
-                  currentLevel
-                );
+            {activeUpgrades.map((upgrade) => {
+              const currentLevel = state.upgrades[upgrade.id] || 0;
+              const isCookiePopped = justBoughtId === upgrade.id;
+              const { countToDisplay, cost, canAfford, isKrillion } = resolveUpgradePurchasePlan(
+                upgrade,
+                currentLevel
+              );
 
-                const availableForProgress = isKrillion
-                  ? (state.krillionCoins || 0) +
-                    (state.coins >= KRILLION_COIN_UNIT ? state.coins / KRILLION_COIN_UNIT : 0)
-                  : (state.krillionCoins || 0) > 0
-                  ? KRILLION_COIN_UNIT
-                  : state.coins;
-                const affordProgressPct = Math.min(
-                  100,
-                  cost > 0 ? Math.floor((availableForProgress / cost) * 100) : 100
-                );
+              const availableForProgress = isKrillion
+                ? (state.krillionCoins || 0) +
+                  (state.coins >= KRILLION_COIN_UNIT ? state.coins / KRILLION_COIN_UNIT : 0)
+                : (state.krillionCoins || 0) > 0
+                ? KRILLION_COIN_UNIT
+                : state.coins;
+              const affordProgressPct = Math.min(
+                100,
+                cost > 0 ? Math.floor((availableForProgress / cost) * 100) : 100
+              );
 
-                return (
-                  <div
-                    key={upgrade.id}
-                    onClick={() => canAfford && handleBuyUpgrade(upgrade.id)}
-                    className={`relative overflow-hidden flex items-center justify-between p-2.5 rounded-xl transition-all select-none ${
-                      isCookiePopped
-                        ? 'scale-[1.03] ring-1 ring-cyan-300 shadow-[0_0_24px_rgba(34,211,238,0.45)] bg-gradient-to-r from-cyan-950/70 to-amber-950/45'
-                        : canAfford
-                        ? 'bg-white/[0.06] hover:bg-white/[0.11] border border-amber-400/35 hover:border-yellow-300/75 hover:scale-[1.01] active:scale-[0.98] cursor-pointer shadow-md'
-                        : 'bg-white/[0.02] border border-white/5 opacity-70 cursor-not-allowed'
-                    }`}
-                  >
-                    {!canAfford && affordProgressPct > 2 && (
-                      <div
-                        className="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-cyan-500/60 to-amber-400/60 transition-all duration-200"
-                        style={{ width: `${affordProgressPct}%` }}
+              const tier = upgrade.tier || 1;
+              const tierColors: Record<number, string> = {
+                1: 'bg-slate-800 text-slate-300 border-slate-600',
+                2: 'bg-sky-950/90 text-sky-300 border-sky-500/50',
+                3: 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50',
+                4: 'bg-purple-950/90 text-purple-300 border-purple-500/50',
+                5: 'bg-amber-950/90 text-amber-300 border-amber-500/50',
+                6: 'bg-red-950/90 text-red-300 border-red-500/50',
+                7: 'bg-fuchsia-950/90 text-fuchsia-300 border-fuchsia-500/60',
+                8: 'bg-yellow-950/90 text-yellow-300 border-yellow-400/70',
+              };
+
+              return (
+                <div
+                  key={upgrade.id}
+                  onClick={() => canAfford && handleBuyUpgrade(upgrade.id)}
+                  className={`group relative overflow-hidden flex items-center justify-between gap-2 p-2 rounded-2xl transition-all select-none ${
+                    isCookiePopped
+                      ? 'scale-[1.02] ring-1 ring-amber-300 shadow-[0_0_24px_rgba(251,191,36,0.45)] bg-gradient-to-r from-red-950/80 via-slate-900/90 to-amber-950/60 border border-amber-400/80'
+                      : canAfford
+                      ? 'bg-gradient-to-r from-slate-900/90 via-[#15182d]/90 to-[#1f1324]/85 hover:from-[#1d172e] hover:to-[#281526] border border-amber-400/40 hover:border-amber-300/85 hover:scale-[1.01] active:scale-[0.99] cursor-pointer shadow-md'
+                      : 'bg-slate-950/75 border border-white/[0.06] opacity-75 cursor-not-allowed'
+                  }`}
+                >
+                  {!canAfford && affordProgressPct > 2 && (
+                    <div
+                      className="absolute bottom-0 left-0 h-1 bg-gradient-to-r from-red-500/70 via-amber-400/70 to-yellow-300/70 transition-all duration-200"
+                      style={{ width: `${affordProgressPct}%` }}
+                    />
+                  )}
+
+                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                    <div className="relative shrink-0 p-0.5 rounded-xl bg-gradient-to-br from-white/15 to-white/5 border border-white/10">
+                      <UpgradeArtwork
+                        iconKey={upgrade.icon}
+                        iconImage={upgrade.iconImage}
+                        tier={tier}
+                        className={`w-12 h-12 rounded-lg transition-transform ${
+                          canAfford ? 'scale-100' : 'grayscale-[35%]'
+                        }`}
                       />
-                    )}
-
-                    <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
-                      <div className="relative shrink-0">
-                        <UpgradeArtwork
-                          iconKey={upgrade.icon}
-                          iconImage={upgrade.iconImage}
-                          tier={upgrade.tier || 1}
-                          className={`w-14 h-14 transition-transform ${
-                            canAfford ? 'scale-100' : 'grayscale-[30%]'
-                          }`}
-                        />
-                        <span
-                          className={`absolute -bottom-1 -right-1 px-1.5 py-0.2 rounded-lg text-[10px] font-black border shadow ${
-                            currentLevel > 0
-                              ? 'bg-amber-400 text-slate-950 border-white'
-                              : 'bg-slate-900 text-slate-400 border-slate-700'
-                          }`}
-                        >
-                          Lv.{currentLevel}
-                        </span>
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="font-black text-sm text-white truncate leading-tight">
-                          {upgrade.name}
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-                          {(upgrade.baseClickPower > 0 || (upgrade.krillionBaseClickPower || 0) > 0) && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-gradient-to-r from-cyan-500/25 to-sky-500/20 border border-cyan-400/60 text-[11px] font-black text-cyan-200 shadow-sm">
-                              <Zap className="w-3 h-3 text-yellow-300 fill-yellow-300" />
-                              +{isKrillion
-                                ? formatKrillion((upgrade.krillionBaseClickPower || 0) * countToDisplay)
-                                : formatCoins(upgrade.baseClickPower * countToDisplay)}
-                            </span>
-                          )}
-                          {(upgrade.baseCps > 0 || (upgrade.krillionBaseCps || 0) > 0) && (
-                            <span className="px-2 py-0.5 rounded-lg bg-slate-900/80 border border-amber-400/35 text-[10px] font-bold text-amber-300/90">
-                              +{isKrillion
-                                ? formatKrillion((upgrade.krillionBaseCps || 0) * countToDisplay)
-                                : formatCoins(upgrade.baseCps * countToDisplay)}/s
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                      <span
+                        className={`absolute -top-1.5 -left-1.5 px-1 py-0.2 rounded-md text-[9px] font-black border shadow-sm ${
+                          tierColors[tier] || tierColors[1]
+                        }`}
+                      >
+                        T{tier}
+                      </span>
+                      <span
+                        className={`absolute -bottom-1.5 -right-1.5 px-1.5 py-0.2 rounded-md text-[10px] font-black border shadow ${
+                          currentLevel > 0
+                            ? 'bg-amber-400 text-slate-950 border-white'
+                            : 'bg-slate-900 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {currentLevel}
+                      </span>
                     </div>
 
-                    <button
-                      disabled={!canAfford}
-                      className={`px-3.5 py-2.5 rounded-xl font-black text-xs min-w-[78px] btn-chunky shrink-0 transition-transform ${
-                        canAfford
-                          ? 'bg-gradient-to-b from-yellow-300 via-amber-400 to-amber-500 text-slate-950 border-2 border-yellow-100 shadow-[0_0_16px_rgba(251,191,36,0.4)]'
-                          : 'bg-slate-800/90 text-slate-400 border border-slate-700 cursor-not-allowed'
-                      }`}
-                    >
-                      {isKrillion ? formatKrillion(cost) : formatCoins(cost)}
-                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className={`font-black text-[13px] text-white truncate leading-tight ${isSeason3 ? 'font-marvel tracking-wide' : ''}`}>
+                        {upgrade.name}
+                      </div>
+                      <div className="flex items-center gap-1 flex-wrap mt-1">
+                        {(upgrade.baseClickPower > 0 || (upgrade.krillionBaseClickPower || 0) > 0) && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-cyan-500/15 border border-cyan-400/45 text-[10px] font-black text-cyan-200">
+                            <Zap className="w-2.5 h-2.5 text-yellow-300 fill-yellow-300" />
+                            +{isKrillion
+                              ? formatKrillion((upgrade.krillionBaseClickPower || 0) * countToDisplay)
+                              : formatCoins(upgrade.baseClickPower * countToDisplay)}
+                          </span>
+                        )}
+                        {(upgrade.baseCps > 0 || (upgrade.krillionBaseCps || 0) > 0) && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-400/35 text-[10px] font-bold text-amber-300">
+                            +{isKrillion
+                              ? formatKrillion((upgrade.krillionBaseCps || 0) * countToDisplay)
+                              : formatCoins(upgrade.baseCps * countToDisplay)}/s
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+
+                  <button
+                    disabled={!canAfford}
+                    className={`px-3 py-2 rounded-xl font-black text-xs min-w-[74px] shrink-0 transition-transform ${
+                      canAfford
+                        ? 'bg-gradient-to-b from-amber-300 via-amber-400 to-orange-500 text-slate-950 border border-yellow-100 shadow-[0_0_14px_rgba(251,191,36,0.35)] group-hover:scale-105'
+                        : 'bg-slate-900 text-slate-400 border border-slate-700/80 cursor-not-allowed'
+                    }`}
+                  >
+                    {isKrillion ? formatKrillion(cost) : formatCoins(cost)}
+                  </button>
+                </div>
+              );
+            })}
           </div>
+        </div>
 
         {/* ================= REBIRTH TAB ================= */}
         {activeTab === 'rebirth' && (
@@ -694,335 +631,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </div>
         )}
 
-        {/* ================= QUESTS TAB ================= */}
-        {activeTab === 'quests' && (
-          <div className="flex-1 min-h-0 overflow-y-auto p-3.5 pb-24 space-y-4">
-            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-fuchsia-950/80 via-purple-950/80 to-slate-900 border-2 border-fuchsia-500/50 shadow-lg flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5">
-                <Gift className="w-8 h-8 text-fuchsia-300 shrink-0" />
-                <div>
-                  <h4 className="text-xs font-black text-white uppercase">Daily Login Bonus</h4>
-                  <p className="text-[11px] font-bold text-fuchsia-300">
-                    +{GEM_ECONOMY_CONFIG.dailyLoginGems} Gems
-                  </p>
-                </div>
-              </div>
-              <button
-                disabled={!canClaimDailyLogin}
-                onClick={handleClaimDailyLogin}
-                className={`px-3 py-1.5 rounded-xl font-black text-xs transition ${
-                  canClaimDailyLogin
-                    ? 'bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white cursor-pointer'
-                    : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                }`}
-              >
-                {canClaimDailyLogin ? 'Claim +5' : 'Claimed'}
-              </button>
-            </div>
-
-            {[
-              { title: 'Daily Quests', list: dailyQuests, accent: 'amber' },
-              { title: 'Monthly Quests', list: seasonalQuests, accent: 'cyan' },
-            ].map((section) => (
-              <div key={section.title}>
-                <h3 className="text-xs font-black text-amber-300 uppercase tracking-wider mb-2">
-                  {section.title}
-                </h3>
-                <div className="space-y-2">
-                  {section.list.map((quest) => {
-                    const isClaimed = state.claimedQuests.includes(quest.id);
-                    const prog = getQuestProgress(quest, state);
-                    const isMeta = quest.type === 'all_monthly';
-                    return (
-                      <div
-                        key={quest.id}
-                        className={`p-3 rounded-2xl border ${
-                          isClaimed
-                            ? 'bg-slate-900/50 border-emerald-500/30 opacity-75'
-                            : isMeta
-                            ? 'bg-gradient-to-r from-amber-950/60 to-fuchsia-950/60 border-amber-400/75'
-                            : prog.isComplete
-                            ? 'bg-[#1a2442] border-cyan-400'
-                            : 'bg-slate-900/90 border-slate-800'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <span className="font-black text-xs text-white truncate block">
-                              {quest.title}
-                            </span>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <span className="px-2 py-0.5 rounded-lg bg-fuchsia-500/20 text-[10px] font-black text-fuchsia-300">
-                                +{quest.rewardGems} Gems
-                              </span>
-                              <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 text-[10px] font-black text-amber-300">
-                                +{formatCoins(quest.rewardCoins || 0)}
-                              </span>
-                            </div>
-                          </div>
-                          {isClaimed ? (
-                            <span className="text-[10px] font-black text-emerald-400 flex items-center gap-1 shrink-0">
-                              <Check className="w-3.5 h-3.5" /> Done
-                            </span>
-                          ) : (
-                            <button
-                              disabled={!prog.isComplete}
-                              onClick={() => handleClaimQuest(quest.id)}
-                              className={`px-3 py-1.5 rounded-xl text-[10px] font-black shrink-0 ${
-                                prog.isComplete
-                                  ? 'bg-amber-400 text-slate-950 cursor-pointer'
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}
-                            >
-                              {prog.isComplete ? 'Claim' : `${prog.percent}%`}
-                            </button>
-                          )}
-                        </div>
-                        {!isClaimed && (
-                          <div className="w-full h-1.5 rounded-full bg-slate-950 mt-2 overflow-hidden">
-                            <div
-                              className="h-full bg-gradient-to-r from-cyan-400 to-amber-300 transition-all duration-300"
-                              style={{ width: `${prog.percent}%` }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ================= PETS TAB (PET SQUAD + EGGS SUB-TAB, NO FEEDING!) ================= */}
-        {activeTab === 'pets' && (
-          <div className="flex flex-col flex-1 min-h-0">
-            <div className="p-3 border-b border-slate-800/80 flex items-center justify-between gap-2 bg-[#101426]/80 shrink-0">
-              <div className="flex items-center bg-slate-900 rounded-xl p-1 border border-slate-750">
-                <button
-                  onClick={() => setPetSubTab('pets')}
-                  className={`px-3 py-1 text-xs font-black rounded-lg cursor-pointer transition ${
-                    petSubTab === 'pets' ? 'bg-cyan-400 text-slate-950' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  My Pets ({pets.length})
-                </button>
-                <button
-                  onClick={() => setPetSubTab('eggs')}
-                  className={`px-3 py-1 text-xs font-black rounded-lg cursor-pointer transition ${
-                    petSubTab === 'eggs' ? 'bg-cyan-400 text-slate-950' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  Eggs ({totalSealedEggs})
-                </button>
-              </div>
-              <span className="text-[11px] font-black text-cyan-300">
-                {equippedPetIds.length}/{SEASON_2_CONFIG.maxEquippedPets} Active
-              </span>
-            </div>
-
-            <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-24 space-y-2.5">
-              {petSubTab === 'pets' && (() => {
-                const totalSquadDps = pets
-                  .filter((p) => equippedPetIds.includes(p.instanceId))
-                  .reduce((sum, p) => sum + getPetCombatDps(p), 0);
-
-                return pets.map((pet) => {
-                  const isEquipped = equippedPetIds.includes(pet.instanceId);
-                  const isExpanded = inspectedPetId === pet.instanceId;
-                  const spec = getPetSpeciesDefinition(pet.speciesId, pet.rarity);
-                  const upgCost = hasShopToken ? 0 : getPetUpgradeGemCost(pet);
-                  const clickBonus = getPetClickMultiplierBonus(pet);
-                  const nextClickBonus = getPetClickMultiplierBonus({
-                    ...pet,
-                    level: pet.level + 1,
-                  });
-                  const dps = getPetCombatDps(pet);
-                  const nextDps = getPetCombatDps({
-                    ...pet,
-                    level: pet.level + 1,
-                  });
-                  const dpsSharePct =
-                    isEquipped && totalSquadDps > 0
-                      ? Math.round((dps / totalSquadDps) * 100)
-                      : 0;
-
-                  return (
-                    <div
-                      key={pet.instanceId}
-                      className={`p-3 rounded-2xl border transition ${
-                        isEquipped
-                          ? 'bg-cyan-950/35 border-cyan-400/70'
-                          : 'bg-slate-900/90 border-slate-800'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <PetSprite2D speciesId={pet.speciesId} rarity={pet.rarity} size={52} />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-1.5">
-                            <span className="font-black text-xs text-white truncate">
-                              {spec.name}
-                            </span>
-                            <span
-                              className="text-[10px] font-black shrink-0"
-                              style={{ color: spec.color }}
-                            >
-                              {spec.rarityLabel} • Lv.{pet.level}
-                            </span>
-                          </div>
-                          <div className="text-[10px] font-bold text-slate-300 mt-0.5">
-                            +{(clickBonus * 100).toFixed(0)}% Click • {dps.toFixed(1)} DPS
-                          </div>
-                          <div className="flex gap-1.5 mt-2">
-                            <button
-                              onClick={() => onToggleEquipPet?.(pet.instanceId)}
-                              className={`flex-1 py-1.5 rounded-xl font-black text-[10px] uppercase cursor-pointer ${
-                                isEquipped ? 'bg-cyan-400 text-slate-950' : 'bg-slate-800 text-slate-200'
-                              }`}
-                            >
-                              {isEquipped ? 'Equipped' : 'Equip'}
-                            </button>
-                            <button
-                              onClick={() =>
-                                setInspectedPetId((curr) =>
-                                  curr === pet.instanceId ? null : pet.instanceId
-                                )
-                              }
-                              className={`px-2 py-1.5 rounded-xl border text-[10px] font-black uppercase cursor-pointer ${
-                                isExpanded
-                                  ? 'bg-cyan-500/25 border-cyan-300 text-cyan-100'
-                                  : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:text-white'
-                              }`}
-                            >
-                              Stats
-                            </button>
-                            <button
-                              onClick={() => onUpgradePet?.(pet.instanceId)}
-                              disabled={state.gems < upgCost}
-                              className="px-2.5 py-1.5 rounded-xl bg-fuchsia-500/20 border border-fuchsia-400/50 text-fuchsia-200 disabled:opacity-40 font-black text-[10px] uppercase cursor-pointer flex items-center gap-1"
-                            >
-                              <ArrowUpCircle className="w-3 h-3" />
-                              <span>{hasShopToken ? `Lv.${pet.level + 1} (FREE)` : `Lv.${pet.level + 1} (${upgCost}G)`}</span>
-                            </button>
-                            {onSellPet && (
-                              <button
-                                onClick={() => onSellPet(pet.instanceId)}
-                                disabled={pets.length <= 1}
-                                title={
-                                  pets.length <= 1
-                                    ? 'Keep at least 1 active pet'
-                                    : `Sell for +${getPetSellGemValue(pet)} Gems`
-                                }
-                                className="px-2 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/30 border border-amber-400/45 text-amber-200 disabled:opacity-35 font-black text-[10px] uppercase cursor-pointer flex items-center gap-1"
-                              >
-                                <Gem className="w-3 h-3" />
-                                <span>{`Sell +${getPetSellGemValue(pet)}G`}</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {isExpanded && (
-                        <div className="mt-2.5 pt-2.5 border-t border-slate-700/60 space-y-1.5 text-[10px]">
-                          <p className="text-slate-300 font-medium leading-snug">
-                            {spec.description}
-                          </p>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <div className="p-2 rounded-xl bg-slate-950/90 border border-slate-800">
-                              <div className="text-slate-400 font-black uppercase text-[9px]">
-                                Click Bonus
-                              </div>
-                              <div className="text-cyan-300 font-black">
-                                +{(clickBonus * 100).toFixed(0)}% → +{(nextClickBonus * 100).toFixed(0)}%
-                              </div>
-                            </div>
-                            <div className="p-2 rounded-xl bg-slate-950/90 border border-slate-800">
-                              <div className="text-slate-400 font-black uppercase text-[9px]">
-                                Zombie DPS
-                              </div>
-                              <div className="text-amber-300 font-black">
-                                {dps.toFixed(1)} → {nextDps.toFixed(1)}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between text-slate-400 font-bold">
-                            <span>Origin: {pet.rarity}</span>
-                            <span>
-                              {isEquipped ? `${dpsSharePct}% of Squad DPS` : 'Not Equipped'} • ∞ Max Lv
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                });
-              })()}
-
-              {petSubTab === 'eggs' && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {EGG_DEFINITIONS.map((egg) => {
-                    const count = state.sealedEggs?.[egg.rarity] || 0;
-                    const hatchCost = hasShopToken ? 0 : egg.hatchGemCost;
-                    const canHatch = count > 0 && state.gems >= hatchCost;
-                    return (
-                      <div
-                        key={egg.rarity}
-                        className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col items-center text-center gap-2"
-                      >
-                        <EggBadgeVisual rarity={egg.rarity} size={56} />
-                        <div className="text-xs font-black leading-tight" style={{ color: egg.color }}>
-                          {egg.rarity}
-                        </div>
-                        <div className="text-[10px] font-bold text-slate-400">
-                          Owned: {count}
-                        </div>
-                        <div className="w-full p-1.5 rounded-xl bg-slate-950/85 border border-slate-800 space-y-0.5 text-left">
-                          {egg.hatchPool.map((entry) => {
-                            const spec = getPetSpeciesDefinition(entry.speciesId, egg.rarity);
-                            return (
-                              <div
-                                key={entry.speciesId}
-                                className="flex items-center justify-between gap-1 text-[9px] font-bold"
-                              >
-                                <span className="truncate" style={{ color: spec.color }}>
-                                  {spec.name}
-                                </span>
-                                <span className="text-slate-300 font-black shrink-0">
-                                  {entry.chancePct}%
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <button
-                          onClick={() => onHatchEgg?.(egg.rarity)}
-                          disabled={!canHatch}
-                          className="w-full py-1.5 rounded-xl bg-cyan-400 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-black text-[10px] uppercase cursor-pointer mt-auto"
-                        >
-                          Hatch ({hasShopToken ? 'FREE • Token' : `${egg.hatchGemCost}G`})
-                        </button>
-                        {onSellEgg && (
-                          <button
-                            onClick={() => onSellEgg(egg.rarity)}
-                            disabled={count <= 0}
-                            className="w-full py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500/30 disabled:opacity-35 border border-amber-400/45 text-amber-200 font-black text-[10px] uppercase cursor-pointer flex items-center justify-center gap-1"
-                          >
-                            <Gem className="w-3 h-3" />
-                            <span>{`Sell (+${getEggSellGemValue(egg.rarity)}G)`}</span>
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ================= SKINS SHOP TAB (VAULT + DAILY + CHESTS + GLASSES + OWNED) ================= */}
+        {/* ================= SKINS SHOP TAB (VAULT + DAILY + CRATES + CURSORS + OWNED) ================= */}
         {activeTab === 'skins' && (
           <div className="flex flex-col flex-1 min-h-0">
             <div className="p-2.5 border-b border-slate-800/80 flex items-center justify-between gap-1.5 bg-[#101426]/80 flex-wrap shrink-0">
@@ -1065,45 +674,100 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-24">
-              {skinSubTab === 'collection' && (
-                <div className="space-y-3">
-                  <div className="text-[11px] font-bold text-slate-400">
-                    Your owned Matthew skins ({unlockedSkinsList.length}). Skins &amp; Glasses carry over across all seasons!
-                  </div>
-                  <div className="grid grid-cols-3 gap-2.5">
-                    {unlockedSkinsList.map((skin) => {
-                      const isEquipped = state.equippedSkin === skin.id;
-                      return (
-                        <button
-                          key={skin.id}
-                          onClick={() => handleEquipSkin(skin)}
-                          title={skin.name}
-                          className={`relative aspect-square rounded-2xl p-2 bg-slate-950/90 border-2 flex flex-col items-center justify-center transition cursor-pointer hover:scale-105 ${
-                            isEquipped
-                              ? 'border-amber-400 ring-2 ring-amber-400/50'
-                              : 'border-slate-800 hover:border-cyan-400/60'
-                          }`}
-                        >
-                          <img
-                            src={skin.image}
-                            alt={skin.name}
-                            onError={(e) => {
-                              (e.currentTarget as HTMLImageElement).src =
-                                skin.fallbackImage || './images/skins/classic_matthew.png';
-                            }}
-                            className="w-4/5 h-4/5 object-contain pointer-events-none"
-                          />
-                          {isEquipped && (
-                            <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center">
-                              <Check className="w-3 h-3 stroke-[3]" />
+              {skinSubTab === 'collection' && (() => {
+                const ownedSet = new Set(state.unlockedSkins);
+                const sections = visibleMajorCategories
+                  .map((major) => {
+                    const minorGroups = major.minors
+                      .map((minor) => {
+                        const skins = minor.skinIds
+                          .map((id) => getSkinById(id))
+                          .filter((skin) => {
+                            if (!ownedSet.has(skin.id)) return false;
+                            if (!isSeason2 && SEASON_2_ONLY_SKIN_ID_SET.has(skin.id)) return false;
+                            if (!isSeason3 && SEASON_3_ONLY_SKIN_ID_SET.has(skin.id)) return false;
+                            return true;
+                          });
+                        return { ...minor, skins };
+                      })
+                      .filter((g) => g.skins.length > 0);
+                    return { ...major, minorGroups };
+                  })
+                  .filter((sec) => sec.minorGroups.length > 0);
+
+                return (
+                  <div className="space-y-5">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
+                      <span>Owned Skins ({unlockedSkinsList.length})</span>
+                      <span className="text-amber-300 font-black uppercase">Tap to Equip</span>
+                    </div>
+
+                    {sections.length === 0 ? (
+                      <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 text-center text-xs font-bold text-slate-400">
+                        No skins unlocked yet. Unlock skins from Milestones, Matthew Shop, and Crates!
+                      </div>
+                    ) : (
+                      sections.map((major) => (
+                        <div key={major.id} className="space-y-3">
+                          <div className="pb-1 border-b border-amber-400/35 flex items-center justify-between">
+                            <h3 className="text-sm font-black uppercase tracking-wider text-amber-300 font-marvel">
+                              {major.label}
+                            </h3>
+                            <span className="text-[10px] font-black text-slate-400">
+                              {major.minorGroups.reduce((sum, g) => sum + g.skins.length, 0)} Owned
                             </span>
-                          )}
-                        </button>
-                      );
-                    })}
+                          </div>
+
+                          {major.minorGroups.map((minor) => (
+                            <div key={minor.id} className="space-y-2">
+                              <div className="text-[10px] font-black uppercase tracking-widest text-cyan-300 pl-1">
+                                {minor.label}
+                              </div>
+                              <div className="grid grid-cols-3 gap-2">
+                                {minor.skins.map((skin) => {
+                                  const isEquipped = state.equippedSkin === skin.id;
+                                  return (
+                                    <button
+                                      key={skin.id}
+                                      type="button"
+                                      onClick={() => handleEquipSkin(skin)}
+                                      title={skin.name}
+                                      className={`relative aspect-square rounded-2xl p-2 bg-slate-950/90 border-2 flex flex-col items-center justify-center transition cursor-pointer hover:scale-105 ${
+                                        isEquipped
+                                          ? 'border-amber-400 ring-2 ring-amber-400/50'
+                                          : 'border-slate-800 hover:border-cyan-400/60'
+                                      }`}
+                                    >
+                                      <img
+                                        src={skin.image}
+                                        alt={skin.name}
+                                        loading="lazy"
+                                        onError={(e) => {
+                                          (e.currentTarget as HTMLImageElement).src =
+                                            skin.fallbackImage || './images/skins/classic_matthew.png';
+                                        }}
+                                        className="w-4/5 h-4/5 object-contain pointer-events-none"
+                                      />
+                                      <span className="text-[8.5px] font-bold text-slate-300 truncate w-full text-center mt-0.5">
+                                        {skin.name}
+                                      </span>
+                                      {isEquipped && (
+                                        <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center">
+                                          <Check className="w-3 h-3 stroke-[3]" />
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {skinSubTab === 'daily' && (
                 <div className="space-y-4">
@@ -1120,15 +784,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                     </div>
                     <p className="text-[10.5px] font-bold text-amber-100/80">
                       {hasShopToken
-                        ? 'Your Matthew Shop Token permanently unlocks all Shop Skins, Crates, Cursors, Egg Hatches & Pet Upgrades for FREE across all seasons!'
-                        : 'Find the ultra-rare Matthew Shop Token inside Mystery Chests or Golden Matthews to permanently unlock EVERYTHING in shops for FREE forever across all seasons!'}
+                        ? 'Your Matthew Shop Token permanently unlocks all Shop Skins, Crates, and Cursors for FREE across all seasons!'
+                        : 'Find the ultra-rare Matthew Shop Token inside Mystery Chests or Golden Matthews to permanently unlock EVERYTHING in shops for FREE forever!'}
                     </p>
                   </div>
 
                   {/* DAILY ROTATING GEM SKINS */}
                   <div>
                     <div className="text-[11px] font-black uppercase text-fuchsia-300 mb-2">
-                      Daily Rotating Shop ({dailyFeatured.length}/{ITEM_SHOP_SKINS.length} • Swaps Daily • {todayDateStr})
+                      Daily Rotating Shop ({dailyFeatured.length}/{shopPoolTotal} • Swaps Daily • {todayDateStr})
                     </div>
                     <div className="grid grid-cols-2 gap-2.5">
                       {dailyFeatured.map((skin) => {
@@ -1178,69 +842,53 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                     Unbox Skins &amp; Ability Cursors! Duplicates refund Gems automatically.
                   </div>
 
-                  {(['normal', 'frost'] as CrateType[]).map((ctype) => {
-                    const spec = CRATE_DEFINITIONS[ctype];
-                    const isFrost = ctype === 'frost';
-                    const canAfford = hasShopToken || state.gems >= spec.gemCost;
-                    return (
-                      <div
-                        key={ctype}
-                        className={`p-3.5 rounded-2xl border-2 space-y-2.5 ${
-                          isFrost
-                            ? 'bg-gradient-to-br from-slate-900 via-cyan-950/60 to-slate-950 border-cyan-400/55'
-                            : 'bg-gradient-to-br from-slate-900 via-orange-950/50 to-slate-950 border-amber-400/55'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <h4 className="text-sm font-black uppercase text-white">{spec.name}</h4>
-                            <p className="text-[10.5px] font-bold text-slate-300 mt-0.5">{spec.subtitle}</p>
-                          </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {(['normal', 'stark', 'wakanda', 'infinity'] as CrateType[]).map((ctype) => {
+                      const spec = CRATE_DEFINITIONS[ctype];
+                      const canAfford = hasShopToken || state.gems >= spec.gemCost;
+                      const crateAccentMap: Record<CrateType, string> = {
+                        normal: '#f59e0b',
+                        stark: '#ef4444',
+                        wakanda: '#a855f7',
+                        infinity: '#eab308',
+                      };
+                      const accentColor = crateAccentMap[ctype];
+                      const topCursorObj = getCursorById(spec.rarestCursorId);
+                      const topSkinObj = getSkinById(spec.rarestSkinId);
+                      return (
+                        <div
+                          key={ctype}
+                          className="group p-3 rounded-2xl border-2 bg-gradient-to-b from-slate-900/95 to-slate-950 flex flex-col items-center text-center gap-2 transition-transform hover:-translate-y-0.5"
+                          style={{ borderColor: `${accentColor}88` }}
+                        >
                           <img
                             src={spec.image}
                             alt={spec.name}
-                            className={`w-16 h-16 object-contain shrink-0 ${
-                              isFrost
-                                ? 'drop-shadow-[0_0_14px_rgba(56,189,248,0.85)]'
-                                : 'drop-shadow-[0_0_14px_rgba(251,146,60,0.85)]'
-                            }`}
+                            className="w-24 h-24 object-contain transition-transform duration-200 group-hover:scale-105"
+                            style={{ filter: `drop-shadow(0 0 14px ${accentColor}99)` }}
                           />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-1.5 text-[10px] font-bold">
-                          <div className="p-2 rounded-xl bg-slate-950/80 border border-white/10">
-                            <div className="text-slate-400 uppercase text-[9px]">55% Cursor Drop</div>
-                            <div className={isFrost ? 'text-cyan-300 font-black' : 'text-orange-300 font-black'}>
-                              Rarest: {isFrost ? 'Frosty Cursor' : 'Fire Cursor (Freeze Immune!)'}
+                          <div className="w-full">
+                            <h4 className="text-xs font-black uppercase text-white truncate">
+                              {spec.name}
+                            </h4>
+                            <div className="text-[9.5px] font-bold text-slate-400 truncate mt-0.5">
+                              {topCursorObj?.name || 'Cursor'} • {topSkinObj?.name?.replace('Matthew ', '') || 'Skin'}
                             </div>
                           </div>
-                          <div className="p-2 rounded-xl bg-slate-950/80 border border-white/10">
-                            <div className="text-slate-400 uppercase text-[9px]">45% Skin Drop</div>
-                            <div className="text-amber-300 font-black">
-                              Rarest: {isFrost ? 'Apocalypse Matthew' : 'Void Emperor Matthew'}
-                            </div>
-                          </div>
-                        </div>
 
-                        <button
-                          onClick={() => onOpenCrate?.(ctype)}
-                          disabled={!canAfford}
-                          className={`w-full py-2.5 rounded-xl font-black text-xs uppercase cursor-pointer transition flex items-center justify-center gap-1.5 ${
-                            isFrost
-                              ? 'bg-gradient-to-r from-cyan-400 to-sky-300 text-slate-950 disabled:opacity-40'
-                              : 'bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950 disabled:opacity-40'
-                          }`}
-                        >
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span>
-                            {hasShopToken
-                              ? `Open ${spec.name} (FREE • Token)`
-                              : `Open ${spec.name} (${spec.gemCost} Gems)`}
-                          </span>
-                        </button>
-                      </div>
-                    );
-                  })}
+                          <button
+                            onClick={() => onOpenCrate?.(ctype)}
+                            disabled={!canAfford}
+                            className="w-full mt-auto py-2 rounded-xl font-black text-[10px] uppercase cursor-pointer transition flex items-center justify-center gap-1 text-slate-950 disabled:opacity-40 hover:brightness-110 active:scale-95"
+                            style={{ background: accentColor }}
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            <span>{hasShopToken ? 'FREE • Token' : `${spec.gemCost} Gems`}</span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
@@ -1261,7 +909,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                               {equipped ? `Equipped: ${equipped.name}` : 'No Cursor Equipped'}
                             </div>
                             <div className="text-[10px] font-bold text-cyan-300 truncate">
-                              {equipped ? equipped.abilitySummary : 'Unbox cursors from Normal & Frost Crates!'}
+                              {equipped ? equipped.abilitySummary : 'Unbox cursors from Stark, Wakanda & Infinity Crates!'}
                             </div>
                           </div>
                         </div>
@@ -1348,11 +996,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                             }}
                           >
                             {cursor.rarity} •{' '}
-                            {cursor.crateType === 'frost'
-                              ? 'Frost Crate'
-                              : cursor.crateType === 'starter'
+                            {cursor.crateType === 'starter'
                               ? 'Starter Cursor'
-                              : 'Normal Crate'}
+                              : (CRATE_DEFINITIONS as Record<string, { name?: string }>)[cursor.crateType]?.name || 'Crate Cursor'}
                           </span>
 
                           <div className="w-full mt-3 p-3 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-1.5">
@@ -1394,7 +1040,9 @@ export const RightPanel: React.FC<RightPanelProps> = ({
                             ) : (
                               <div className="w-full py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-400 font-black text-xs uppercase">
                                 Locked — Unbox in{' '}
-                                {cursor.crateType === 'frost' ? 'Frost Crate' : 'Normal Crate'}
+                                {cursor.crateType === 'starter'
+                                  ? 'Starter'
+                                  : (CRATE_DEFINITIONS as Record<string, { name?: string }>)[cursor.crateType]?.name || 'Crates'}
                               </div>
                             )}
                           </div>
@@ -1409,74 +1057,105 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </div>
         )}
 
-        {/* ================= EVENTS TAB (GRAPHICS-FIRST PLAYER SUMMONS + FRIDAY STORM PREVIEW) ================= */}
-        {activeTab === 'events' && (
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-24 space-y-3">
-            <div className="grid grid-cols-1 gap-2.5">
-              {PLAYER_TRIGGERABLE_EVENTS.map((spec) => (
-                <div
-                  key={spec.id}
-                  className="p-3 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950/60 border border-sky-400/35 flex items-center justify-between gap-2.5"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-amber-400/15 border border-amber-300/40 flex items-center justify-center shrink-0">
-                      <Zap className="w-5 h-5 text-amber-300" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-black text-white truncate">{spec.label}</div>
-                      <div className="text-[10px] font-bold text-slate-400">
-                        {spec.durationSeconds}s Global
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleSummonEvent(spec)}
-                    disabled={state.gems < spec.gemCost || busyEventId === spec.id}
-                    className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-orange-400 disabled:opacity-40 text-slate-950 font-black text-[10px] uppercase cursor-pointer shrink-0"
-                  >
-                    {busyEventId === spec.id ? '...' : `${spec.gemCost}G`}
-                  </button>
+        {/* ================= INFINITY GAUNTLET TAB (SEASON 3) ================= */}
+        {activeTab === 'gauntlet' && (() => {
+          const stoneSockets: { id: (typeof ownedStones)[number]; x: string; y: string }[] = [
+            { id: 'power', x: '22%', y: '34%' },
+            { id: 'space', x: '38%', y: '27%' },
+            { id: 'reality', x: '54%', y: '27%' },
+            { id: 'soul', x: '68%', y: '34%' },
+            { id: 'time', x: '77%', y: '58%' },
+            { id: 'mind', x: '48%', y: '52%' },
+          ];
+          const remainingCount = Math.max(0, 6 - ownedStones.length);
+          return (
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-24 space-y-3.5">
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-950/80 via-slate-950 to-amber-950/50 border-2 border-amber-400/60 flex flex-col items-center text-center gap-2.5 shadow-[0_0_30px_rgba(168,85,247,0.3)]">
+                <div className="text-[11px] font-black uppercase tracking-widest text-amber-300">
+                  Infinity Stones Lit Up ({ownedStones.length} / 6)
                 </div>
-              ))}
-            </div>
 
-            <div className="p-3 rounded-2xl bg-slate-900/90 border border-purple-400/35 space-y-2.5">
-              <div className="text-xs font-black text-purple-300 uppercase flex items-center gap-1.5">
-                <Gem className="w-3.5 h-3.5" />
-                <span>Friday Storm Exclusives</span>
+                {/* GAUNTLET VISUAL WITH CONSISTENT PROGRESSIVE STONE IMAGES */}
+                <div className="relative w-40 h-40 flex items-center justify-center">
+                  <img
+                    src={
+                      ownedStones.length > 0
+                        ? `./images/s3/gauntlet/gauntlet_${Math.min(6, ownedStones.length)}.png`
+                        : INFINITY_GAUNTLET_IMAGE
+                    }
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).src = INFINITY_GAUNTLET_IMAGE;
+                    }}
+                    alt="Infinity Gauntlet"
+                    className={`w-40 h-40 object-contain transition-transform ${
+                      allStonesCollected
+                        ? 'scale-105 drop-shadow-[0_0_26px_rgba(250,204,21,0.95)] animate-pulse'
+                        : 'drop-shadow-[0_0_12px_rgba(168,85,247,0.45)]'
+                    }`}
+                  />
+                </div>
+
+                <h4 className="text-base font-black text-white uppercase font-marvel">
+                  Thanos Infinity Gauntlet
+                </h4>
+                <p className="text-[11px] font-bold text-slate-300 leading-snug">
+                  Click falling Marvel Chests for a <span className="text-amber-300">1-in-75 chance</span> per chest to light up an unowned Infinity Stone. Collect all 6 to unlock The Snap!
+                </p>
+
+                {allStonesCollected ? (
+                  <button
+                    type="button"
+                    disabled={isSnapBusy}
+                    onClick={() => onTriggerInfinitySnap?.()}
+                    className="w-full mt-1 py-3 rounded-xl bg-gradient-to-r from-amber-300 via-yellow-300 to-rose-400 text-slate-950 font-black text-xs uppercase tracking-wider shadow-[0_0_28px_rgba(250,204,21,0.75)] hover:brightness-110 active:scale-95 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {isSnapBusy ? 'Snapping Half the Universe...' : 'SNAP HALF THE UNIVERSE (Uses All 6 Stones)'}
+                  </button>
+                ) : (
+                  <div className="w-full py-2.5 rounded-xl bg-slate-900/90 border border-amber-400/35 text-xs font-black uppercase text-amber-200">
+                    Need {remainingCount} More Stone{remainingCount === 1 ? '' : 's'} ({ownedStones.length}/6)
+                  </div>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                {SEASON_2_LIVE_EVENT_SKINS.map((s) => {
-                  const isOwned = state.unlockedSkins.includes(s.id);
+
+              <div className="grid grid-cols-2 gap-2.5">
+                {INFINITY_STONES.map((stone) => {
+                  const isOwned = ownedStones.includes(stone.id);
                   return (
                     <div
-                      key={s.id}
-                      className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center text-center gap-1"
+                      key={stone.id}
+                      className={`p-3 rounded-2xl border flex items-center gap-2.5 transition ${
+                        isOwned
+                          ? 'bg-slate-900/95 border-amber-300/75 shadow-lg'
+                          : 'bg-slate-950/70 border-slate-800/80 opacity-55'
+                      }`}
                     >
-                      {isOwned ? (
-                        <>
-                          <img src={s.image} alt={s.name} className="w-12 h-12 object-contain" />
-                          <span className="text-[10px] font-black text-emerald-300 truncate w-full">
-                            {s.name}
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <div className="w-12 h-12 rounded-xl bg-fuchsia-950/60 border border-fuchsia-400/40 flex items-center justify-center">
-                            <Lock className="w-5 h-5 text-fuchsia-300" />
-                          </div>
-                          <span className="text-[10px] font-black text-fuchsia-200/80 truncate w-full">
-                            ??? Storm Secret
-                          </span>
-                        </>
-                      )}
+                      <div
+                        className="w-11 h-11 rounded-xl bg-slate-950 border border-white/10 flex items-center justify-center shrink-0"
+                        style={isOwned ? { boxShadow: `0 0 18px ${stone.glowColor}` } : undefined}
+                      >
+                        <img
+                          src={stone.image}
+                          alt={stone.name}
+                          className={`w-8 h-8 object-contain ${isOwned ? '' : 'grayscale opacity-35'}`}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black truncate" style={{ color: stone.color }}>
+                          {stone.name}
+                        </div>
+                        <div className="text-[9.5px] font-bold text-slate-400 truncate">
+                          {isOwned ? 'Lit Up!' : 'Chest Drop (1/75)'}
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
+
       </div>
     </div>
   );

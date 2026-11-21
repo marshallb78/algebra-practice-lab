@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GameState } from '../types/game';
-import { getStormSkinsForSeason, equipSkin, Skin } from '../data/skins';
+import { getStormSkinsForSeason, equipSkin, isSeasonThreeOrLater, Skin } from '../data/skins';
 import { MatthewStormState } from '../utils/scheduleEngine';
 import { GEM_ECONOMY_CONFIG } from '../config/gameConfig';
 import { formatCoins, formatTime } from '../utils/formatters';
@@ -66,7 +66,8 @@ export const MatthewStormModal: React.FC<MatthewStormModalProps> = ({
     return () => clearTimeout(timer);
   }, [isOpenRecap]);
 
-  // Only show the current active season's 5 secret storm skins — no future season spoilers!
+  // Only show the current active season's secret live-event skins — no future season spoilers!
+  const isSeason3 = isSeasonThreeOrLater(state.currentSeasonId);
   const currentSeasonStormSkins = getStormSkinsForSeason(state.currentSeasonId);
 
   const handleBuyStormSkin = (skin: Skin) => {
@@ -191,8 +192,8 @@ export const MatthewStormModal: React.FC<MatthewStormModalProps> = ({
                 <ShoppingBag className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-200 via-yellow-200 to-cyan-300 uppercase tracking-wide">
-                  Storm Event Vault
+                <h2 className="text-xl sm:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-red-300 to-fuchsia-300 uppercase tracking-wide font-marvel">
+                  {isSeason3 ? 'Marvel Multiverse Event Vault' : 'Storm Event Vault'}
                 </h2>
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="px-2.5 py-0.5 rounded-full bg-fuchsia-500/20 border border-fuchsia-400/50 text-[11px] font-black text-fuchsia-200">

@@ -5,7 +5,12 @@ import {
   ITEM_SHOP_SKINS,
   getDailyItemShopRotation,
 } from '../../data/season2Skins';
-import { ChestLootResult } from '../../data/petsAndEggs';
+import {
+  MARVEL_SHOP_SKINS,
+  getDailyMarvelShopRotation,
+} from '../../data/season3Skins';
+import { isSeasonThreeOrLater } from '../../data/skins';
+import { ChestLootResult } from '../../data/infinityGauntlet';
 import { getAuthoritativeDateString } from '../../utils/scheduleEngine';
 
 interface GemItemShopModalProps {
@@ -26,8 +31,12 @@ export const GemItemShopModal: React.FC<GemItemShopModalProps> = ({
 }) => {
   const hasShopToken = Boolean(state.hasMatthewShopToken);
 
+  const isSeason3 = isSeasonThreeOrLater(state.currentSeasonId);
   const todayStr = getAuthoritativeDateString();
-  const dailyFeatured = getDailyItemShopRotation(todayStr);
+  const dailyFeatured = isSeason3
+    ? getDailyMarvelShopRotation(todayStr)
+    : getDailyItemShopRotation(todayStr);
+  const poolTotal = isSeason3 ? MARVEL_SHOP_SKINS.length : ITEM_SHOP_SKINS.length;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/96 backdrop-blur-xl flex flex-col p-4 sm:p-6 overflow-hidden select-none">
@@ -42,7 +51,7 @@ export const GemItemShopModal: React.FC<GemItemShopModalProps> = ({
               MATTHEW SHOP
             </h2>
             <p className="text-xs font-bold text-slate-300">
-              {dailyFeatured.length} of {ITEM_SHOP_SKINS.length} Featured Today • Swaps Daily ({todayStr})
+              {dailyFeatured.length} of {poolTotal} Featured Today • Swaps Daily ({todayStr})
             </p>
           </div>
         </div>

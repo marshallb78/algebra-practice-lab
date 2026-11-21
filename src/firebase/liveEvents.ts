@@ -8,28 +8,20 @@ import {
 } from './config';
 
 export type GlobalEventType =
-  | 'click_marathon'
-  | 'falling_matthews'
   | 'golden_rain'
-  | 'zombie_boss_raid'
   | 'screen_freeze'
-  | 'lucky_pinata'
-  | 'memory_simon'
-  | 'reaction_duel'
-  | 'meteor_shield'
-  | 'coin_jackpot_wheel'
-  | 'tax_collector'
   | 'upside_down_chaos'
-  | 'blackout_flashlight'
-  | 'earthquake_buttons'
-  | 'fake_crash_prank';
+  | 'blackout_flashlight';
 
 export interface ActiveGlobalLiveEvent {
   id: string;
   uid?: string;
   type: GlobalEventType;
+  kind?: 'boost' | 'attack';
   summonedByUid: string;
   summonedByUsername: string;
+  targetUid?: string | null;
+  targetUsername?: string | null;
   bannerText: string;
   startedAtMs: number;
   endsAtMs: number;
@@ -43,131 +35,61 @@ export interface ActiveGlobalLiveEvent {
   marathonTopClicks?: number;
 }
 
+export interface SnapEventRecord {
+  uid: string;
+  snapId: string;
+  snappedByUid: string;
+  snappedByUsername: string;
+  victimUids: string[];
+  isSandbox: boolean;
+  timestampMs: number;
+  expiresAtMs: number;
+}
+
 export interface PlayerEventCostSpec {
   type: GlobalEventType;
+  kind: 'boost' | 'attack';
   label: string;
   description: string;
+  image: string;
   gemCost: number;
   durationSeconds: number;
   excludeSummoner: boolean;
+  supportsTarget?: boolean;
+  hasCutscene?: boolean;
 }
 
 export const PLAYER_TRIGGERABLE_EVENTS: (PlayerEventCostSpec & { id: string })[] = [
   {
-    id: 'evt_click_marathon',
-    type: 'click_marathon',
-    label: 'Click Fast Marathon (60s)',
-    description: 'Everyone competes to click fastest for 60s! Winner earns ~10x their own money!',
-    gemCost: 35,
-    durationSeconds: 60,
-    excludeSummoner: false,
-  },
-  {
-    id: 'evt_falling_matthews',
-    type: 'falling_matthews',
-    label: 'Click Falling Matthews',
-    description: 'Rains clickable tumbling Matthews across every screen — highest catches wins!',
-    gemCost: 25,
-    durationSeconds: 30,
-    excludeSummoner: false,
-  },
-  {
     id: 'evt_golden_rain',
     type: 'golden_rain',
-    label: '100 Golden Matthew Rain',
-    description: 'Summons 100 flying Golden Matthews swarming across the server — top catcher wins!',
+    kind: 'boost',
+    label: 'Stark Gold Rain',
+    description: '100x Golden Matthews rain across every screen!',
+    image: './images/s3/events/event_golden_rain.png',
     gemCost: 45,
     durationSeconds: 35,
     excludeSummoner: false,
-  },
-  {
-    id: 'evt_zombie_boss_raid',
-    type: 'zombie_boss_raid',
-    label: 'Server Zombie Boss Raid',
-    description: 'Unleashes an armored Giant Zombie Boss on EVERYONE ELSE (you stay safe)!',
-    gemCost: 40,
-    durationSeconds: 55,
-    excludeSummoner: true,
   },
   {
     id: 'evt_screen_freeze_30',
     type: 'screen_freeze',
-    label: 'Screen Freeze — 30s Tier',
-    description: 'Locks EVERYONE ELSE’s screen in solid ice for 30s (only you can keep playing)!',
-    gemCost: 30,
-    durationSeconds: 30,
-    excludeSummoner: true,
-  },
-  {
-    id: 'evt_screen_freeze_60',
-    type: 'screen_freeze',
-    label: 'Screen Freeze — 60s Tier',
-    description: 'Deep-freezes EVERYONE ELSE’s screen for a full 60s (you stay unfrozen)!',
-    gemCost: 55,
-    durationSeconds: 60,
-    excludeSummoner: true,
-  },
-  // === 5 NEW GOOD INTERACTIVE EVENTS ===
-  {
-    id: 'evt_lucky_pinata',
-    type: 'lucky_pinata',
-    label: 'Matthew Piñata Party (Good)',
-    description: 'Smash a giant Crystal Piñata together! Every crack bursts Coins & Gems — top smasher wins!',
-    gemCost: 35,
-    durationSeconds: 35,
-    excludeSummoner: false,
-  },
-  {
-    id: 'evt_memory_simon',
-    type: 'memory_simon',
-    label: 'Cryo Pattern Match (Good)',
-    description: 'Simon-Says memory duel! Repeat the glowing Matthew tile sequences to win Coins & +20 Gems!',
-    gemCost: 30,
-    durationSeconds: 40,
-    excludeSummoner: false,
-  },
-  {
-    id: 'evt_reaction_duel',
-    type: 'reaction_duel',
-    label: 'Quick-Draw Reflex Duel (Good)',
-    description: 'Wait for GREEN and click fastest! Best millisecond reflex score across 4 rounds wins!',
-    gemCost: 30,
-    durationSeconds: 35,
-    excludeSummoner: false,
-  },
-  {
-    id: 'evt_meteor_shield',
-    type: 'meteor_shield',
-    label: 'Meteor Coin Forge (Good)',
-    description: 'Tap on the shrinking Timing Ring! Hit PERFECT rings for 8x combos & Gems!',
-    gemCost: 35,
-    durationSeconds: 35,
-    excludeSummoner: false,
-  },
-  {
-    id: 'evt_coin_jackpot_wheel',
-    type: 'coin_jackpot_wheel',
-    label: 'Server Jackpot Wheel (Good)',
-    description: 'Everyone gets 3 interactive Prize Wheel spins for massive CPS jackpots & Gems!',
-    gemCost: 45,
-    durationSeconds: 30,
-    excludeSummoner: false,
-  },
-  // === 5 NEW BAD SABOTAGE EVENTS (AFFECTS EVERYONE ELSE!) ===
-  {
-    id: 'evt_tax_collector',
-    type: 'tax_collector',
-    label: 'Matthew Tax Audit (Bad)',
-    description: 'Sends a sneaky Tax Collector to siphon EVERYONE ELSE’s coins unless they whack him!',
+    kind: 'attack',
+    label: 'Dr. Strange Dark Ice',
+    description: 'Seals rival screens in Mirror-Dimension Dark Ice for 30s!',
+    image: './images/s3/events/attack_time_freeze.png',
     gemCost: 35,
     durationSeconds: 30,
     excludeSummoner: true,
+    hasCutscene: true,
   },
   {
     id: 'evt_upside_down_chaos',
     type: 'upside_down_chaos',
-    label: 'Gravity Flip 180° (Bad)',
-    description: 'Flips EVERYONE ELSE’s entire screen upside-down for 30s (tap bolts to stabilize)!',
+    kind: 'attack',
+    label: 'Mirror Flip 180°',
+    description: 'Flips rival screens upside-down for 30s!',
+    image: './images/s3/events/attack_mirror_flip.png',
     gemCost: 40,
     durationSeconds: 30,
     excludeSummoner: true,
@@ -175,26 +97,10 @@ export const PLAYER_TRIGGERABLE_EVENTS: (PlayerEventCostSpec & { id: string })[]
   {
     id: 'evt_blackout_flashlight',
     type: 'blackout_flashlight',
-    label: 'Blizzard Blackout (Bad)',
-    description: 'Plunges EVERYONE ELSE into darkness with only a tiny flashlight (catch 5 Flares to clear)!',
-    gemCost: 40,
-    durationSeconds: 35,
-    excludeSummoner: true,
-  },
-  {
-    id: 'evt_earthquake_buttons',
-    type: 'earthquake_buttons',
-    label: 'Subzero Earthquake (Bad)',
-    description: 'Shakes EVERYONE ELSE’s screen violently with seismic tremors for 30s!',
-    gemCost: 35,
-    durationSeconds: 30,
-    excludeSummoner: true,
-  },
-  {
-    id: 'evt_fake_crash_prank',
-    type: 'fake_crash_prank',
-    label: 'Ice Virus Pop-Up Storm (Bad)',
-    description: 'Floods EVERYONE ELSE’s screen with funny fake error pop-ups they must close!',
+    kind: 'attack',
+    label: 'Symbiote Blackout',
+    description: 'Pitch-black shadow — catch 5 Flares to clear!',
+    image: './images/s3/events/attack_symbiote_blackout.png',
     gemCost: 40,
     durationSeconds: 35,
     excludeSummoner: true,
@@ -504,35 +410,30 @@ export async function summonGlobalLiveEvent(params: {
   isSandbox?: boolean;
   broadcastToAll?: boolean;
   excludeSummoner?: boolean;
+  targetUid?: string | null;
+  targetUsername?: string | null;
 }): Promise<{ ok: boolean; cloudSynced?: boolean; event?: ActiveGlobalLiveEvent }> {
   const now = getServerNowMs();
   const isSbx = Boolean(params.isSandbox);
   const effectiveExclude =
     params.excludeSummoner !== undefined ? params.excludeSummoner : params.spec.excludeSummoner;
+  const targetSuffix = params.targetUsername ? ` on ${params.targetUsername}` : ' on Everyone Else';
   const bannerMap: Record<GlobalEventType, string> = {
-    click_marathon: `${params.username} Summoned a Click Event! (60s Marathon)`,
-    falling_matthews: `${params.username} Summoned a Click Event! (Falling Matthews)`,
-    golden_rain: `${params.username} Summoned a Click Event! (100 Golden Matthews)`,
-    zombie_boss_raid: `${params.username} Unleashed a Zombie Boss Raid on Everyone Else!`,
-    screen_freeze: `${params.username} Froze Everyone Else's Screen (${params.spec.durationSeconds}s)!`,
-    lucky_pinata: `${params.username} Dropped a Crystal Matthew Piñata Party!`,
-    memory_simon: `${params.username} Started Cryo Pattern Match (Simon Says)!`,
-    reaction_duel: `${params.username} Triggered Quick-Draw Reflex Duel!`,
-    meteor_shield: `${params.username} Ignited the Meteor Coin Forge!`,
-    coin_jackpot_wheel: `${params.username} Spun Up the Server Jackpot Wheel!`,
-    tax_collector: `${params.username} Sent the Matthew Tax Collector After Everyone Else!`,
-    upside_down_chaos: `${params.username} Flipped Everyone Else's Gravity Upside-Down!`,
-    blackout_flashlight: `${params.username} Triggered a Blizzard Blackout on Everyone Else!`,
-    earthquake_buttons: `${params.username} Unleashed a Subzero Earthquake on Everyone Else!`,
-    fake_crash_prank: `${params.username} Infected Everyone Else with Ice Virus Pop-Ups!`,
+    golden_rain: `${params.username} summoned Stark Gold Rain (100x)!`,
+    screen_freeze: `${params.username} cast Time Freeze${targetSuffix} (${params.spec.durationSeconds}s)!`,
+    upside_down_chaos: `${params.username} cast Mirror Flip 180°${targetSuffix}!`,
+    blackout_flashlight: `${params.username} unleashed Symbiote Blackout${targetSuffix}!`,
   };
 
   const event: ActiveGlobalLiveEvent = {
     id: `gevt_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     uid: params.uid,
     type: params.spec.type,
+    kind: params.spec.kind,
     summonedByUid: params.uid,
     summonedByUsername: params.username,
+    targetUid: params.targetUid || null,
+    targetUsername: params.targetUsername || null,
     bannerText: bannerMap[params.spec.type],
     startedAtMs: now,
     // Offset by 4.5s intro cutscene playback so full event duration runs after cutscene ends
@@ -903,6 +804,106 @@ export interface GlobalEventsStreamSnapshot {
   activeEvent: ActiveGlobalLiveEvent | null;
   latestSwarm: GlobalGoldenSwarmBroadcast | null;
   store: Record<string, any>;
+}
+
+const LOCAL_SNAP_KEY_PREFIX = 'matthew_clicker_infinity_snap_v1';
+
+export function extractLatestPendingSnapFromStore(
+  store: Record<string, any> | null | undefined,
+  currentUid: string | null | undefined,
+  lastProcessedSnapId: string | null | undefined,
+  isSandbox: boolean,
+  nowMs: number = getServerNowMs()
+): SnapEventRecord | null {
+  if (!currentUid) return null;
+  const candidates: SnapEventRecord[] = [];
+
+  if (store && typeof store === 'object') {
+    for (const [key, val] of Object.entries(store)) {
+      if (!val || typeof val !== 'object' || !key.startsWith('__ev_snap_')) continue;
+      const snap = val as SnapEventRecord;
+      if (
+        snap.snapId &&
+        Boolean(snap.isSandbox) === isSandbox &&
+        nowMs <= (snap.expiresAtMs || 0) &&
+        Array.isArray(snap.victimUids) &&
+        snap.victimUids.includes(currentUid) &&
+        snap.snappedByUid !== currentUid &&
+        snap.snapId !== lastProcessedSnapId
+      ) {
+        candidates.push(snap);
+      }
+    }
+  }
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`${LOCAL_SNAP_KEY_PREFIX}_${isSandbox ? 'sbx' : 'live'}`);
+      if (raw) {
+        const snap = JSON.parse(raw) as SnapEventRecord;
+        if (
+          snap &&
+          snap.snapId &&
+          nowMs <= (snap.expiresAtMs || 0) &&
+          Array.isArray(snap.victimUids) &&
+          snap.victimUids.includes(currentUid) &&
+          snap.snapId !== lastProcessedSnapId
+        ) {
+          candidates.push(snap);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
+  return candidates[0];
+}
+
+export async function broadcastInfinitySnap(params: {
+  uid: string;
+  username: string;
+  victimUids: string[];
+  isSandbox?: boolean;
+  allowSelfVictimForTest?: boolean;
+}): Promise<SnapEventRecord> {
+  const now = getServerNowMs();
+  const isSbx = Boolean(params.isSandbox);
+  const filteredVictims = Array.from(
+    new Set(
+      params.victimUids.filter(
+        (id) => Boolean(id) && (params.allowSelfVictimForTest || id !== params.uid)
+      )
+    )
+  );
+  const snap: SnapEventRecord = {
+    uid: params.uid,
+    snapId: `snap_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    snappedByUid: params.uid,
+    snappedByUsername: params.username || 'Thanos',
+    victimUids: filteredVictims,
+    isSandbox: isSbx,
+    timestampMs: now,
+    // Keep active 7 days so offline snapped players still see the dust cutscene when they next log in
+    expiresAtMs: now + 7 * 24 * 60 * 60 * 1000,
+  };
+
+  const safeUid = (params.uid || 'anon').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const key = `__ev_snap_${isSbx ? 'sbx_' : ''}${safeUid}`;
+  cachedEvStore[key] = snap;
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(`${LOCAL_SNAP_KEY_PREFIX}_${isSbx ? 'sbx' : 'live'}`, JSON.stringify(snap));
+    }
+  } catch {
+    // ignore
+  }
+
+  await rtdbRestWrite(`usernames/${key}`, snap, 'PUT', 3500).catch(() => false);
+  return snap;
 }
 
 /**

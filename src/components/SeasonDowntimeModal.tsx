@@ -1,8 +1,21 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { GameState } from '../types/game';
-import { formatCoins, formatNumber, formatTime } from '../utils/formatters';
-import { Clock, ShieldAlert, Trophy, Settings, Eye, FlaskConical, Wrench, User } from 'lucide-react';
-import { isVerifiedLiveDevSession } from '../firebase/moderation';
+import { formatCoins, formatTime } from '../utils/formatters';
+import { isAuthorizedDevUid } from '../config/gameConfig';
+import { INFINITY_GAUNTLET_IMAGE, INFINITY_STONES } from '../data/infinityGauntlet';
+import { soundManager } from '../audio/soundManager';
+import {
+  Clock,
+  Trophy,
+  Palette,
+  Menu,
+  ShieldAlert,
+  UserCheck,
+  Sparkles,
+  FlaskConical,
+  Wrench,
+  Volume2,
+} from 'lucide-react';
 
 interface SeasonDowntimeModalProps {
   isOpen: boolean;
@@ -17,6 +30,11 @@ interface SeasonDowntimeModalProps {
   onOpenDevTools?: () => void;
 }
 
+/**
+ * Cinematic Weekend / Pre-Launch Season Downtime Overlay:
+ * Features animated cosmic Infinity Gauntlet visuals + original cinematic synth anthem (`s3_downtime`).
+ * Devs have a dedicated button to skip Downtime into Season 3: Marvel with full cutscenes (Leaderboards OFF).
+ */
 export const SeasonDowntimeModal: React.FC<SeasonDowntimeModalProps> = ({
   isOpen,
   state,
@@ -29,125 +47,170 @@ export const SeasonDowntimeModal: React.FC<SeasonDowntimeModalProps> = ({
   onEnterSandboxS2,
   onOpenDevTools,
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    soundManager.setMusicTrack('s3_downtime', true);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
-  const careerClicks = Math.max(state.lifetimeAllSeasonsClicks || 0, state.clicks || 0);
-  const activeUsername = state.cloudAccount?.displayUsername || state.cloudAccount?.username;
-  const isDev = isVerifiedLiveDevSession(state.cloudAccount?.uid);
+  const isDev = isAuthorizedDevUid(state.cloudAccount?.uid);
 
   return (
-    <div className="fixed inset-0 z-[45] w-screen h-screen flex flex-col items-center justify-center bg-[#060914] text-white select-none p-6 overflow-y-auto font-chunky">
+    <div
+      onPointerDown={() => soundManager.unlockAndEnsureAudio()}
+      className="fixed inset-0 z-[105] bg-[#04020d] flex items-center justify-center p-4 overflow-y-auto select-none"
+    >
+      {/* Cinematic Animated Cosmic Nebula & Radial Rings */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_35%,rgba(168,85,247,0.28),rgba(220,38,38,0.16)_42%,rgba(2,6,23,0.98)_80%)] pointer-events-none" />
       <div
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[32rem] h-[32rem] rounded-full border-2 border-dashed border-amber-500/20 animate-spin pointer-events-none"
-        style={{ animationDuration: '18s' }}
+        className="absolute w-[620px] h-[620px] rounded-full border border-amber-400/15 animate-spin pointer-events-none"
+        style={{ animationDuration: '32s' }}
+      />
+      <div
+        className="absolute w-[440px] h-[440px] rounded-full border border-purple-400/20 animate-spin pointer-events-none"
+        style={{ animationDuration: '20s', animationDirection: 'reverse' }}
       />
 
-      <div className="relative z-10 w-full max-w-4xl flex flex-col items-center text-center">
-        <div
-          onDoubleClick={() => onOpenAccount?.()}
-          className="w-24 h-24 rounded-3xl bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center mb-4 shadow-[0_0_35px_rgba(251,191,36,0.45)] animate-pulse"
-        >
-          <ShieldAlert className="w-12 h-12 text-amber-300" />
+      <div className="relative z-10 w-full max-w-2xl rounded-3xl bg-[#0c0a1d]/92 border-2 border-amber-400/50 p-6 sm:p-9 text-center shadow-[0_0_90px_rgba(168,85,247,0.35)] my-auto backdrop-blur-xl">
+        {/* Orbiting Infinity Stones + Gauntlet Centerpiece */}
+        <div className="relative w-32 h-32 mx-auto mb-4 flex items-center justify-center">
+          <div className="absolute inset-0 rounded-full bg-gradient-to-br from-amber-400/25 via-purple-500/20 to-red-500/25 blur-xl animate-pulse" />
+          <img
+            src={INFINITY_GAUNTLET_IMAGE}
+            alt="Season 3 Infinity Gauntlet"
+            className="w-24 h-24 object-contain relative z-10 drop-shadow-[0_0_24px_rgba(251,191,36,0.75)]"
+          />
+          {INFINITY_STONES.map((stone, idx) => {
+            const angle = (idx / INFINITY_STONES.length) * Math.PI * 2 - Math.PI / 2;
+            const r = 56;
+            return (
+              <img
+                key={stone.id}
+                src={stone.image}
+                alt={stone.name}
+                className="w-6 h-6 object-contain absolute z-20 animate-pulse"
+                style={{
+                  left: `calc(50% + ${Math.cos(angle) * r}px - 12px)`,
+                  top: `calc(50% + ${Math.sin(angle) * r}px - 12px)`,
+                  filter: `drop-shadow(0 0 8px ${stone.glowColor})`,
+                }}
+              />
+            );
+          })}
         </div>
 
-        <h1 className="text-4xl sm:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-200 via-amber-400 to-cyan-300 uppercase tracking-tight">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/40 text-amber-300 text-[11px] font-black uppercase tracking-[0.2em]">
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>Official Season Intermission</span>
+        </div>
+
+        <h1 className="text-3xl sm:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-amber-300 to-purple-300 uppercase tracking-tight mt-3">
           SEASON DOWNTIME
         </h1>
 
-        {/* BIG COUNTDOWN TIMER */}
-        <div className="my-6 px-8 py-6 rounded-2xl bg-white/[0.04] backdrop-blur-md border border-cyan-400/25 shadow-2xl">
-          <span className="text-xs font-black uppercase tracking-widest text-cyan-300 flex items-center justify-center gap-1.5">
-            <Clock className="w-4 h-4" /> Next Season Starts Monday In
-          </span>
-          <div className="text-4xl sm:text-6xl font-black font-mono text-yellow-300 mt-2 drop-shadow-[0_0_25px_rgba(250,204,21,0.6)]">
+        <p className="text-xs sm:text-sm font-bold text-slate-300 mt-2 max-w-lg mx-auto">
+          The Multiverse is resetting! Get ready for{' '}
+          <span className="text-amber-300 font-black">Season 3: MARVEL</span> — featuring 44 Marvel Matthew skins, 8 Marvel cursors, 4 crates &amp; the Infinity Gauntlet Snap!
+        </p>
+
+        {/* Big Countdown Box */}
+        <div className="mt-5 p-5 rounded-2xl bg-slate-950/90 border border-amber-400/35 shadow-inner">
+          <div className="flex items-center justify-center gap-2 text-amber-300 text-[11px] font-black uppercase tracking-[0.25em]">
+            <Clock className="w-4 h-4" />
+            <span>Season 3: Marvel Launches In</span>
+          </div>
+          <div className="text-3xl sm:text-5xl font-black font-mono text-white mt-2 tracking-wider drop-shadow-[0_0_20px_rgba(251,191,36,0.45)]">
             {formatTime(downtimeRemainingSeconds)}
           </div>
+          <div className="mt-2 inline-flex items-center gap-1.5 text-[10px] font-bold text-purple-300/90">
+            <Volume2 className="w-3.5 h-3.5" />
+            <span>Tap anywhere if audio is paused to hear the Downtime Anthem</span>
+          </div>
         </div>
 
-        {/* VISUAL SUMMARY TILES */}
-        <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-3.5 mb-6">
-          <div className="p-4 rounded-xl bg-white/[0.04] border border-white/10">
-            <span className="text-[10px] font-black uppercase text-slate-400">
+        {/* Account & Stats Row */}
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+            <div className="text-[10px] font-black text-slate-400 uppercase">
               Season #{seasonNumber} Score
-            </span>
-            <p className="text-lg font-black text-amber-300 mt-1">
-              {formatCoins(Math.max(state.seasonalScore || 0, state.lifetimeCoins || 0))}
-            </p>
+            </div>
+            <div className="text-base font-black text-amber-300 mt-0.5">
+              {formatCoins(state.seasonalScore || 0)}
+            </div>
           </div>
-
-          <div className="p-4 rounded-xl bg-white/[0.04] border border-white/10">
-            <span className="text-[10px] font-black uppercase text-emerald-300">Skins Saved ✓</span>
-            <p className="text-lg font-black text-white mt-1">
+          <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
+            <div className="text-[10px] font-black text-slate-400 uppercase">
+              Skins Unlocked (Kept Forever)
+            </div>
+            <div className="text-base font-black text-emerald-300 mt-0.5">
               {state.unlockedSkins.length} Matthews
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-white/[0.04] border border-white/10">
-            <span className="text-[10px] font-black uppercase text-emerald-300">Playtime ✓</span>
-            <p className="text-lg font-black text-white mt-1">
-              {formatTime(state.totalPlaytimeSeconds)}
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-white/[0.04] border border-white/10">
-            <span className="text-[10px] font-black uppercase text-emerald-300">Clicks ✓</span>
-            <p className="text-lg font-black text-white mt-1">{formatNumber(careerClicks)}</p>
+            </div>
           </div>
         </div>
 
-        {/* ACTION BUTTONS */}
-        <div className="flex items-center justify-center gap-3 flex-wrap">
-          <button
-            onClick={onOpenLeaderboard}
-            className="px-6 py-3.5 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm uppercase flex items-center gap-2 cursor-pointer transition shadow-lg btn-chunky"
-          >
-            <Trophy className="w-5 h-5" />
-            <span>Standings</span>
-          </button>
-
-          <button
-            onClick={onOpenSkins}
-            className="px-6 py-3.5 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs sm:text-sm uppercase flex items-center gap-2 cursor-pointer transition shadow-lg btn-chunky"
-          >
-            <Eye className="w-5 h-5" />
-            <span>My Skins</span>
-          </button>
-
+        {/* Navigation Buttons */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-5">
           {onOpenAccount && (
             <button
               onClick={onOpenAccount}
-              className="px-6 py-3.5 rounded-2xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs sm:text-sm uppercase flex items-center gap-2 cursor-pointer transition shadow-lg btn-chunky"
+              className="py-3 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-400 text-emerald-200 hover:text-slate-950 border border-emerald-400/50 font-black text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer transition"
             >
-              <User className="w-5 h-5" />
-              <span>{activeUsername ? activeUsername : 'Sign In'}</span>
+              <UserCheck className="w-4 h-4 shrink-0" />
+              <span className="truncate">
+                {state.cloudAccount ? state.cloudAccount.displayUsername : 'Sign In'}
+              </span>
             </button>
           )}
-
+          <button
+            onClick={onOpenLeaderboard}
+            className="py-3 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer shadow-lg transition"
+          >
+            <Trophy className="w-4 h-4 shrink-0" />
+            <span>Leaderboard</span>
+          </button>
+          <button
+            onClick={onOpenSkins}
+            className="py-3 px-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-400 text-cyan-200 hover:text-slate-950 border border-cyan-400/50 font-black text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer transition"
+          >
+            <Palette className="w-4 h-4 shrink-0" />
+            <span>My Skins</span>
+          </button>
           <button
             onClick={onOpenEscMenu}
-            className="px-6 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 border-2 border-slate-600 font-black text-xs sm:text-sm uppercase flex items-center gap-2 cursor-pointer transition"
+            className="py-3 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 font-black text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer transition"
           >
-            <Settings className="w-5 h-5 text-cyan-400" />
-            <span>Menu (ESC)</span>
+            <Menu className="w-4 h-4 shrink-0" />
+            <span>Menu</span>
           </button>
         </div>
 
-        {/* EXCLUSIVE DEV PREVIEW & CONTROLS (Shown ONLY to verified authorized dev UIDs) */}
+        {!state.cloudAccount && (
+          <div className="mt-4 p-3 rounded-xl bg-emerald-950/35 border border-emerald-500/35 text-xs font-bold text-emerald-200 flex items-center justify-center gap-2">
+            <ShieldAlert className="w-4 h-4 shrink-0 text-emerald-400" />
+            <span>Sign in before Season 3 launches so your skins &amp; score are saved to Cloud!</span>
+          </div>
+        )}
+
+        {/* EXCLUSIVE DEV BUTTON: Skip Downtime & Play Season 3 Cutscenes (Leaderboards OFF) */}
         {isDev && (
-          <div className="mt-6 flex items-center justify-center gap-3 flex-wrap p-4 rounded-2xl bg-cyan-950/50 border-2 border-cyan-400/50">
+          <div className="mt-6 flex items-center justify-center gap-3 flex-wrap p-4 rounded-2xl bg-gradient-to-r from-red-950/60 via-purple-950/60 to-amber-950/50 border-2 border-amber-400/60 shadow-xl">
             {onEnterSandboxS2 && (
               <button
-                onClick={onEnterSandboxS2}
-                className="px-5 py-3 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-slate-950 font-black text-xs sm:text-sm uppercase flex items-center gap-2 cursor-pointer shadow-lg"
+                onClick={() => {
+                  soundManager.unlockAndEnsureAudio();
+                  onEnterSandboxS2();
+                }}
+                className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-red-400 via-amber-300 to-purple-400 hover:brightness-110 text-slate-950 font-black text-xs sm:text-sm uppercase flex items-center gap-2 cursor-pointer shadow-lg transition active:scale-95"
               >
                 <FlaskConical className="w-4 h-4" />
-                <span>Test Season 2 Now</span>
+                <span>Test Season 3</span>
               </button>
             )}
             {onOpenDevTools && (
               <button
                 onClick={onOpenDevTools}
-                className="px-5 py-3 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs sm:text-sm uppercase flex items-center gap-2 cursor-pointer shadow-lg"
+                className="px-4 py-3.5 rounded-xl bg-amber-400/20 hover:bg-amber-400 text-amber-200 hover:text-slate-950 border border-amber-400/50 font-black text-xs uppercase flex items-center gap-1.5 cursor-pointer transition"
               >
                 <Wrench className="w-4 h-4" />
                 <span>Dev Tools</span>

@@ -6,7 +6,18 @@
  * Plus low-latency Web Audio API procedural SFX for clicks, crits, and unlocks.
  */
 
-export type MusicTrackMode = 'chill' | 'storm' | 's2_winter' | 's2_event' | 's2_cutscene' | 's2_mystery';
+export type MusicTrackMode =
+  | 'chill'
+  | 'storm'
+  | 's2_winter'
+  | 's2_event'
+  | 's2_cutscene'
+  | 's2_mystery'
+  | 's3_downtime'
+  | 's3_marvel'
+  | 's3_event';
+
+const S3_MODES = new Set<MusicTrackMode>(['s3_downtime', 's3_marvel', 's3_event']);
 
 class SoundManager {
   private ctx: AudioContext | null = null;
@@ -15,9 +26,11 @@ class SoundManager {
 
   private tracks: Partial<Record<MusicTrackMode, HTMLAudioElement>> = {};
   private trackMultipliers: Partial<Record<MusicTrackMode, number>> = {};
-  private currentTrackMode: MusicTrackMode = 's2_winter';
+  private currentTrackMode: MusicTrackMode = 's3_marvel';
   private fadeRafId: number | null = null;
   private isFadedOutPaused: boolean = false;
+  private s3MusicTimer: ReturnType<typeof setInterval> | null = null;
+  private s3StepIndex: number = 0;
 
   private isMuted: boolean = false;
   private masterVolume: number = 0.8;
@@ -28,18 +41,23 @@ class SoundManager {
   constructor() {
     if (typeof window !== 'undefined' && typeof Audio !== 'undefined') {
       try {
-        const urls: Record<MusicTrackMode, string> = {
+        const urls: Partial<Record<MusicTrackMode, string>> = {
           chill: './audio/chill_bgm.mp3',
           storm: './audio/storm_techno.mp3',
           s2_winter: './audio/s2/s2_winter_bgm.mp3',
           s2_event: './audio/s2/s2_event_bgm.mp3',
           s2_cutscene: './audio/s2/s2_cutscene_bgm.mp3',
           s2_mystery: './audio/s2/s2_mystery_bgm.mp3',
+          s3_downtime: './audio/s3/avengers_theme.mp3',
+          s3_marvel: './audio/s3/avengers_theme.mp3',
+          s3_event: './audio/s3/avengers_theme.mp3',
         };
         (Object.keys(urls) as MusicTrackMode[]).forEach((key) => {
-          const el = new Audio(urls[key]);
+          const url = urls[key];
+          if (!url) return;
+          const el = new Audio(url);
           el.loop = true;
-          el.preload = key === 's2_winter' || key === 's2_cutscene' ? 'auto' : 'metadata';
+          el.preload = key === 's3_marvel' || key === 's3_downtime' ? 'auto' : 'metadata';
           this.tracks[key] = el;
           this.trackMultipliers[key] = key === this.currentTrackMode ? 1 : 0;
         });
@@ -121,16 +139,145 @@ class SoundManager {
     this.fadeRafId = requestAnimationFrame(step);
   }
 
+  private stopS3SynthLoop() {
+    if (this.s3MusicTimer !== null) {
+      clearInterval(this.s3MusicTimer);
+      this.s3MusicTimer = null;
+    }
+  }
+
+  private playSynthTone(
+    freq: number,
+    durationSec: number,
+    type: OscillatorType,
+    gainVal: number,
+    filterCutoff?: number,
+    attackSec = 0.16,
+    detuneCents = 0
+  ) {
+    if (!this.ctx || !this.masterGain || this.isMuted || this.musicVolume <= 0) return;
+    const now = this.ctx.currentTime;
+    const osc1 = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc1.type = type;
+    osc1.frequency.setValueAtTime(freq, now);
+
+    const scaledGain = Math.max(0.0001, gainVal * this.musicVolume * 0.35);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(scaledGain, now + attackSec);
+    g.gain.setValueAtTime(scaledGain * 0.85, now + Math.max(attackSec, durationSec * 0.55));
+    g.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
+
+    const targetNode: AudioNode = (() => {
+      if (!filterCutoff || !this.ctx) return g;
+      const filt = this.ctx.createBiquadFilter();
+      filt.type = 'lowpass';
+      filt.Q.setValueAtTime(1.2, now);
+      filt.frequency.setValueAtTime(filterCutoff * 0.6, now);
+      filt.frequency.linearRampToValueAtTime(filterCutoff, now + attackSec);
+      filt.frequency.exponentialRampToValueAtTime(Math.max(220, filterCutoff * 0.55), now + durationSec);
+      filt.connect(g);
+      return filt;
+    })();
+
+    osc1.connect(targetNode);
+    if (detuneCents !== 0) {
+      const osc2 = this.ctx.createOscillator();
+      osc2.type = type;
+      osc2.frequency.setValueAtTime(freq, now);
+      osc2.detune.setValueAtTime(detuneCents, now);
+      osc2.connect(targetNode);
+      osc2.start(now);
+      osc2.stop(now + durationSec + 0.05);
+    }
+
+    g.connect(this.masterGain);
+    osc1.start(now);
+    osc1.stop(now + durationSec + 0.05);
+  }
+
+  private playTimpaniHit(freqStart = 115, gainVal = 0.32) {
+    if (!this.ctx || !this.masterGain || this.isMuted || this.musicVolume <= 0) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freqStart, now);
+    osc.frequency.exponentialRampToValueAtTime(38, now + 0.24);
+    const vol = Math.max(0.0001, gainVal * this.musicVolume * 0.45);
+    g.gain.setValueAtTime(vol, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    osc.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.36);
+  }
+
+  private ensureS3SynthLoop() {
+    if (typeof window === 'undefined' || !this.ctx || this.ctx.state !== 'running') return;
+    if (this.s3MusicTimer !== null) return;
+
+    // Real Heroic Avengers-Style Marvel Anthem: driving 8th-note ostinato + sweeping French horn brass melody
+    const eighthMs = this.currentTrackMode === 's3_downtime' ? 290 : this.currentTrackMode === 's3_event' ? 200 : 235;
+
+    const bars = [
+      { bass: 82.41, stringRoot: 164.81, stringFifth: 246.94, melody: [329.63, 0, 0, 493.88, 0, 440.0, 392.0, 369.99] },
+      { bass: 98.0, stringRoot: 196.0, stringFifth: 293.66, melody: [329.63, 0, 0, 493.88, 0, 523.25, 587.33, 493.88] },
+      { bass: 73.42, stringRoot: 146.83, stringFifth: 220.0, melody: [440.0, 0, 392.0, 369.99, 0, 329.63, 392.0, 440.0] },
+      { bass: 65.41, stringRoot: 130.81, stringFifth: 196.0, melody: [493.88, 0, 523.25, 587.33, 0, 659.25, 587.33, 493.88] },
+    ];
+    const downtimeBars = [
+      { bass: 82.41, stringRoot: 164.81, stringFifth: 246.94, melody: [329.63, 0, 0, 0, 493.88, 0, 440.0, 0] },
+      { bass: 65.41, stringRoot: 130.81, stringFifth: 196.0, melody: [392.0, 0, 0, 0, 523.25, 0, 493.88, 0] },
+      { bass: 55.0, stringRoot: 110.0, stringFifth: 164.81, melody: [440.0, 0, 0, 0, 392.0, 0, 329.63, 0] },
+      { bass: 61.74, stringRoot: 123.47, stringFifth: 185.0, melody: [369.99, 0, 0, 0, 493.88, 0, 329.63, 0] },
+    ];
+
+    this.s3MusicTimer = setInterval(() => {
+      if (this.isMuted || !this.isMusicPlaying || this.isFadedOutPaused || !S3_MODES.has(this.currentTrackMode)) {
+        this.stopS3SynthLoop();
+        return;
+      }
+      if (!this.ctx || this.ctx.state !== 'running') return;
+      const mode = this.currentTrackMode;
+      const step = this.s3StepIndex++;
+      const list = mode === 's3_downtime' ? downtimeBars : bars;
+      const bar = list[Math.floor(step / 8) % list.length];
+      const sub = step % 8;
+
+      if (sub === 0) {
+        this.playSynthTone(bar.bass, eighthMs * 0.0085, 'sawtooth', 0.28, 360, 0.06, 6);
+        this.playTimpaniHit(115, mode === 's3_downtime' ? 0.24 : 0.42);
+      } else if (sub === 3 || sub === 6) {
+        this.playTimpaniHit(96, 0.22);
+      }
+
+      if (mode !== 's3_downtime' || sub % 2 === 0) {
+        const ostFreq = sub % 2 === 0 ? bar.stringRoot : bar.stringFifth;
+        this.playSynthTone(ostFreq, eighthMs * 0.0011, 'triangle', 0.11, 950, 0.02, 5);
+      }
+
+      const hornNote = bar.melody[sub];
+      if (hornNote > 0) {
+        const dur = sub === 0 || sub === 3 ? eighthMs * 0.0032 : eighthMs * 0.0018;
+        this.playSynthTone(hornNote, dur, 'sawtooth', 0.19, 1380, 0.04, 9);
+        this.playSynthTone(hornNote * 0.5, dur, 'sawtooth', 0.12, 920, 0.05, -7);
+      }
+    }, eighthMs);
+  }
+
   public ensureMusicPlaying(withFadeIn = false) {
     if (typeof window === 'undefined') return;
     if (this.isFadedOutPaused) return;
 
     if (!this.isMusicPlaying || this.isMuted) {
+      this.stopS3SynthLoop();
       this.syncAudioElementVolumes();
       Object.values(this.tracks).forEach((el) => el?.pause());
       return;
     }
 
+    this.stopS3SynthLoop();
     const active = this.tracks[this.currentTrackMode];
     if (!active) return;
 
@@ -187,6 +334,9 @@ class SoundManager {
       return;
     }
     this.currentTrackMode = mode;
+    if (S3_MODES.has(mode)) {
+      this.stopS3SynthLoop();
+    }
     this.ensureMusicPlaying(true);
   }
 
@@ -271,72 +421,75 @@ class SoundManager {
   public playClick(combo = 1) {
     this.initContext();
     if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
 
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    // Punchy Stark kinetic thump + crisp metallic tick
+    const sub = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+    const pitchJitter = 0.96 + Math.random() * 0.08;
+    const baseFreq = (220 + Math.min(combo * 10, 220)) * pitchJitter;
 
-    const pitchJitter = 0.95 + Math.random() * 0.1;
-    const baseFreq = (300 + Math.min(combo * 15, 300)) * pitchJitter;
+    sub.type = 'triangle';
+    sub.frequency.setValueAtTime(baseFreq, now);
+    sub.frequency.exponentialRampToValueAtTime(85, now + 0.065);
+    subGain.gain.setValueAtTime(0.24, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+    sub.connect(subGain);
+    subGain.connect(this.sfxGain);
+    sub.start(now);
+    sub.stop(now + 0.075);
 
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(baseFreq, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(120, this.ctx.currentTime + 0.08);
-
-    gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
-
-    osc.connect(gain);
-    gain.connect(this.sfxGain);
-
-    osc.start();
-    osc.stop(this.ctx.currentTime + 0.08);
+    const ping = this.ctx.createOscillator();
+    const pingGain = this.ctx.createGain();
+    ping.type = 'sine';
+    ping.frequency.setValueAtTime(baseFreq * 2.4, now);
+    ping.frequency.exponentialRampToValueAtTime(baseFreq * 1.4, now + 0.04);
+    pingGain.gain.setValueAtTime(0.11, now);
+    pingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
+    ping.connect(pingGain);
+    pingGain.connect(this.sfxGain);
+    ping.start(now);
+    ping.stop(now + 0.05);
   }
 
   public playCrit() {
     this.initContext();
     if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
 
-    const osc1 = this.ctx.createOscillator();
-    const osc2 = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc1.type = 'triangle';
-    osc1.frequency.setValueAtTime(580, this.ctx.currentTime);
-    osc1.frequency.exponentialRampToValueAtTime(1100, this.ctx.currentTime + 0.18);
-
-    osc2.type = 'sawtooth';
-    osc2.frequency.setValueAtTime(880, this.ctx.currentTime);
-    osc2.frequency.exponentialRampToValueAtTime(1600, this.ctx.currentTime + 0.18);
-
-    gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.22);
-
-    osc1.connect(gain);
-    osc2.connect(gain);
-    gain.connect(this.sfxGain);
-
-    osc1.start();
-    osc2.start();
-    osc1.stop(this.ctx.currentTime + 0.22);
-    osc2.stop(this.ctx.currentTime + 0.22);
+    // Repulsor energy blast + harmonic cosmic fifth shimmer
+    [523.25, 783.99, 1046.5].forEach((f, idx) => {
+      if (!this.ctx || !this.sfxGain) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = idx === 0 ? 'sawtooth' : 'triangle';
+      osc.frequency.setValueAtTime(f * 0.85, now);
+      osc.frequency.exponentialRampToValueAtTime(f * 1.45, now + 0.16);
+      gain.gain.setValueAtTime(idx === 0 ? 0.16 : 0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    });
   }
 
   public playBuy() {
     this.initContext();
     if (!this.ctx || !this.sfxGain) return;
 
-    const notes = [440, 554.37, 659.25, 880];
+    const notes = [587.33, 739.99, 880, 1174.66];
     notes.forEach((freq, idx) => {
       if (!this.ctx || !this.sfxGain) return;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
 
-      const startTime = this.ctx.currentTime + idx * 0.05;
-      osc.type = 'sine';
+      const startTime = this.ctx.currentTime + idx * 0.04;
+      osc.type = 'triangle';
       osc.frequency.setValueAtTime(freq, startTime);
 
-      gain.gain.setValueAtTime(0.2, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15);
+      gain.gain.setValueAtTime(0.18, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.14);
 
       osc.connect(gain);
       gain.connect(this.sfxGain);
@@ -349,24 +502,26 @@ class SoundManager {
   public playSkinUnlock() {
     this.initContext();
     if (!this.ctx || !this.sfxGain) return;
+    const now = this.ctx.currentTime;
 
-    const chord = [523.25, 659.25, 783.99, 1046.5];
-    chord.forEach((freq) => {
+    const chord = [261.63, 392.0, 523.25, 659.25, 783.99];
+    chord.forEach((freq, idx) => {
       if (!this.ctx || !this.sfxGain) return;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
+      const t0 = now + idx * 0.04;
+      osc.type = idx < 2 ? 'sawtooth' : 'triangle';
+      osc.frequency.setValueAtTime(freq, t0);
 
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-
-      gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.6);
+      gain.gain.setValueAtTime(0.001, t0);
+      gain.gain.linearRampToValueAtTime(0.22, t0 + 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.72);
 
       osc.connect(gain);
       gain.connect(this.sfxGain);
 
-      osc.start();
-      osc.stop(this.ctx.currentTime + 0.6);
+      osc.start(t0);
+      osc.stop(t0 + 0.75);
     });
   }
 

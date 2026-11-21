@@ -49,9 +49,13 @@ import {
 } from 'lucide-react';
 
 export type SandboxTestAction =
+  | 'replay_s3_intro'
   | 'replay_s2_intro'
   | 'toggle_sandbox_friday_storm'
-  | 'toggle_preview_midnight_downtime';
+  | 'toggle_preview_midnight_downtime'
+  | 'grant_all_stones'
+  | 'preview_snap_dust'
+  | 'test_snap_self';
 
 interface DevToolsModalProps {
   isOpen: boolean;
@@ -61,10 +65,14 @@ interface DevToolsModalProps {
   onNotify: (title: string, subtitle: string) => void;
   onRefreshMiniLeaderboard: () => void;
   onToggleSandboxS2?: () => void;
-  onTriggerZombieRaid?: () => void;
+  onTriggerInfinitySnap?: (targetUid?: string) => void;
   onPreviewGlobalEvent?: (spec: PlayerEventCostSpec) => void;
   onClearPreviewEvent?: () => void;
-  onSpawnGlobalEventForAll?: (spec: PlayerEventCostSpec) => void;
+  onSpawnGlobalEventForAll?: (
+    spec: PlayerEventCostSpec,
+    targetUid?: string,
+    targetUsername?: string
+  ) => void;
   onStopGlobalEventForAll?: () => void;
   onSpawnGoldenSwarmForAll?: (count?: number) => void;
   onSandboxTestAction?: (action: SandboxTestAction) => void;
@@ -87,7 +95,7 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
   onNotify,
   onRefreshMiniLeaderboard,
   onToggleSandboxS2,
-  onTriggerZombieRaid,
+  onTriggerInfinitySnap,
   onPreviewGlobalEvent,
   onClearPreviewEvent,
   onSpawnGlobalEventForAll,
@@ -135,10 +143,11 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
   const [playerSort, setPlayerSort] = useState<PlayerSortField>('score');
   const [inspectedEntry, setInspectedEntry] = useState<LeaderboardEntry | null>(null);
 
-  // Broadcast state
+  // Broadcast & Dev event target state
   const [broadcastInput, setBroadcastInput] = useState('');
   const [broadcastTheme, setBroadcastTheme] = useState<'gold' | 'red' | 'cyan' | 'purple'>('gold');
   const [activeBroadcast, setActiveBroadcast] = useState<ServerBroadcast | null>(null);
+  const [devAttackTargetUid, setDevAttackTargetUid] = useState<string>('everyone');
 
   const isMarshall = isVerifiedLiveDevSession(state.cloudAccount?.uid);
 
@@ -406,20 +415,59 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
         )}
 
         {onSpawnGlobalEventForAll && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {PLAYER_TRIGGERABLE_EVENTS.map((spec) => (
-              <button
-                key={`global-spawn-${spec.id}`}
-                type="button"
-                onClick={() => onSpawnGlobalEventForAll(spec)}
-                className="py-2.5 px-3.5 rounded-xl bg-amber-500/15 hover:bg-amber-400 text-amber-200 hover:text-slate-950 border border-amber-400/45 font-black text-[11px] uppercase cursor-pointer text-left transition flex items-center justify-between gap-2"
+          <div className="space-y-2">
+            <div className="p-2.5 rounded-xl bg-slate-950/80 border border-rose-400/40 space-y-1">
+              <label className="block text-[10px] font-black uppercase text-rose-300">
+                Villain Attack Target (Dev Global Spawn):
+              </label>
+              <select
+                value={devAttackTargetUid}
+                onChange={(e) => setDevAttackTargetUid(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-bold text-white"
               >
-                <span className="truncate">{spec.label}</span>
-                <span className="px-2 py-0.5 rounded-lg bg-emerald-400/20 text-emerald-200 text-[9px] font-black shrink-0">
-                  FREE
-                </span>
-              </button>
-            ))}
+                <option value="everyone">Everyone Else (All Opponents)</option>
+                {leaderboard
+                  .filter((p) => p.uid !== state.cloudAccount?.uid)
+                  .map((p) => (
+                    <option key={p.uid} value={p.uid}>
+                      {p.username} (Target Only)
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {PLAYER_TRIGGERABLE_EVENTS.map((spec) => {
+                const targetEntry =
+                  spec.kind === 'attack' && devAttackTargetUid !== 'everyone'
+                    ? leaderboard.find((p) => p.uid === devAttackTargetUid)
+                    : undefined;
+                return (
+                  <button
+                    key={`global-spawn-${spec.id}`}
+                    type="button"
+                    onClick={() =>
+                      onSpawnGlobalEventForAll(
+                        spec,
+                        targetEntry?.uid,
+                        targetEntry?.username
+                      )
+                    }
+                    className={`py-2.5 px-3.5 rounded-xl border font-black text-[11px] uppercase cursor-pointer text-left transition flex items-center justify-between gap-2 ${
+                      spec.kind === 'attack'
+                        ? 'bg-rose-500/15 hover:bg-rose-500 text-rose-200 hover:text-white border-rose-400/45'
+                        : 'bg-amber-500/15 hover:bg-amber-400 text-amber-200 hover:text-slate-950 border-amber-400/45'
+                    }`}
+                  >
+                    <span className="truncate">
+                      {spec.kind === 'attack' ? `[ATK] ${spec.label}` : `[EV] ${spec.label}`}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-lg bg-emerald-400/20 text-emerald-200 text-[9px] font-black shrink-0">
+                      FREE
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
@@ -1341,18 +1389,56 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                         }`}
                       >
                         {isSandboxActive
-                          ? 'Exit Season 2 Preview'
-                          : 'Enter Season 2 Preview'}
+                          ? 'Exit Season 3: Marvel Preview (Leaderboards Resumed)'
+                          : 'Enter Season 3: Marvel Preview (Leaderboards Off)'}
                       </button>
                     )}
 
-                      {onTriggerZombieRaid && isSandboxActive && (
-                      <button
-                        onClick={onTriggerZombieRaid}
-                        className="w-full py-3 px-4 rounded-2xl bg-rose-500/20 hover:bg-rose-500 text-rose-200 hover:text-white border border-rose-400/50 font-black text-xs uppercase cursor-pointer transition"
-                      >
-                        Trigger Zombie Raid
-                      </button>
+                    {/* INFINITY GAUNTLET & SNAP TESTING */}
+                    {(onSandboxTestAction || onTriggerInfinitySnap) && (
+                      <div className="p-3.5 rounded-2xl bg-gradient-to-br from-purple-950/60 to-amber-950/35 border border-amber-400/55 space-y-2">
+                        <h4 className="text-xs font-black uppercase text-amber-300">
+                          Infinity Gauntlet &amp; Snap Testing
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {onSandboxTestAction && (
+                            <button
+                              type="button"
+                              onClick={() => onSandboxTestAction('grant_all_stones')}
+                              className="py-2 px-3 rounded-xl bg-amber-400/20 hover:bg-amber-400 text-amber-200 hover:text-slate-950 border border-amber-400/50 font-black text-[11px] uppercase cursor-pointer transition"
+                            >
+                              Grant All 6 Stones
+                            </button>
+                          )}
+                          {onSandboxTestAction && (
+                            <button
+                              type="button"
+                              onClick={() => onSandboxTestAction('preview_snap_dust')}
+                              className="py-2 px-3 rounded-xl bg-purple-500/25 hover:bg-purple-400 text-purple-200 hover:text-slate-950 border border-purple-400/50 font-black text-[11px] uppercase cursor-pointer transition"
+                            >
+                              Preview Dust Cutscene
+                            </button>
+                          )}
+                          {onSandboxTestAction && (
+                            <button
+                              type="button"
+                              onClick={() => onSandboxTestAction('test_snap_self')}
+                              className="py-2 px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500 text-rose-200 hover:text-white border border-rose-400/50 font-black text-[11px] uppercase cursor-pointer transition"
+                            >
+                              Test Snap Cutscene on Self
+                            </button>
+                          )}
+                          {onTriggerInfinitySnap && (
+                            <button
+                              type="button"
+                              onClick={() => onTriggerInfinitySnap(devAttackTargetUid !== 'everyone' ? devAttackTargetUid : undefined)}
+                              className="py-2 px-3 rounded-xl bg-gradient-to-r from-amber-400 to-purple-500 text-slate-950 font-black text-[11px] uppercase cursor-pointer transition"
+                            >
+                              Trigger Real Snap ({devAttackTargetUid !== 'everyone' ? 'Target' : '50% Players'})
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     )}
 
                     {renderGlobalSpawnControls()}
@@ -1395,6 +1481,12 @@ export const DevToolsModal: React.FC<DevToolsModalProps> = ({
                                 className="py-2 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-400 text-amber-200 hover:text-slate-950 border border-amber-400/40 font-black text-[11px] uppercase cursor-pointer text-left transition"
                               >
                                 Midnight Downtime
+                              </button>
+                              <button
+                                onClick={() => onSandboxTestAction('replay_s3_intro')}
+                                className="py-2 px-3 rounded-xl bg-red-500/20 hover:bg-red-400 text-red-200 hover:text-slate-950 border border-red-400/40 font-black text-[11px] uppercase cursor-pointer text-left transition"
+                              >
+                                S3 Marvel Intro
                               </button>
                               <button
                                 onClick={() => onSandboxTestAction('replay_s2_intro')}

@@ -447,7 +447,7 @@ export const ClansAndTradingModal: React.FC<ClansAndTradingModalProps> = ({
                 <option value="">-- Offer 1× Sealed Egg (Optional) --</option>
                 {EGG_RARITY_ORDER.filter((r) => (state.sealedEggs?.[r] || 0) > 0).map((r) => (
                   <option key={r} value={r}>
-                    Offer 1× Sealed {r} (Owned: {state.sealedEggs[r]})
+                    Offer 1× Sealed {r} (Owned: {state.sealedEggs?.[r] || 0})
                   </option>
                 ))}
               </select>

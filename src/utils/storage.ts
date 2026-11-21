@@ -1,13 +1,12 @@
-import { GameState, RealmId, PetInstance, EggRarity, FoodId } from '../types/game';
+import { GameState, InfinityStoneId, RealmId } from '../types/game';
 import { calculateCPS, clampFiniteCoinAmount, MAX_SAFE_SEASON_COINS } from './calculations';
-import { isValidSkinId, isSeason2OnlySkinId, checkAndApplyMilestoneUnlocks } from '../data/skins';
 import {
-  createEmptySealedEggs,
-  createDefaultFoodInventory,
-  getPetSpeciesDefinition,
-  normalizeEggRarity,
-  normalizePetSpeciesId,
-} from '../data/petsAndEggs';
+  isValidSkinId,
+  isSeason2OnlySkinId,
+  isSeason3OnlySkinId,
+  checkAndApplyMilestoneUnlocks,
+} from '../data/skins';
+import { ALL_INFINITY_STONE_IDS } from '../data/infinityGauntlet';
 import { COSMETIC_ITEMS } from '../data/cosmetics';
 import { ITEM_SHOP_SKINS, MATTHEW_VAULT_SKINS } from '../data/season2Skins';
 import { CRATE_DEFINITIONS } from '../data/crates';
@@ -17,27 +16,40 @@ import {
   MATTHEW_STORM_CONFIG,
   BETA_RESET_CONFIG,
   SEASON_2_CONFIG,
+  SEASON_3_CONFIG,
   TEST_ISOLATION_CONFIG,
   isSandboxSeason2Context,
+  isSandboxSeason3Context,
 } from '../config/gameConfig';
 
 const SAVE_KEY = 'matthew_clicker_save_v1';
 
 const VALID_REALMS: RealmId[] = ['earth', 'under', 'ocean', 'space', 'uper'];
 const VALID_COSMETIC_IDS = new Set(COSMETIC_ITEMS.map((c) => c.id));
+const VALID_INFINITY_STONES = new Set<string>(ALL_INFINITY_STONE_IDS);
 
 /**
  * Returns all Item Shop, Vault, and Crate skins unlocked permanently for Matthew Shop Token holders.
  */
-export function getPermanentTokenFreeSkinIds(preLaunchLive = false): string[] {
+export function getPermanentTokenFreeSkinIds(
+  preLaunchS2Live = false,
+  preLaunchS3Live = false
+): string[] {
   return Array.from(
     new Set([
       ...ITEM_SHOP_SKINS.map((s) => s.id),
       ...MATTHEW_VAULT_SKINS.map((s) => s.id),
       ...CRATE_DEFINITIONS.normal.skins.map((s) => s.skinId),
-      ...CRATE_DEFINITIONS.frost.skins.map((s) => s.skinId),
+      ...CRATE_DEFINITIONS.stark.skins.map((s) => s.skinId),
+      ...CRATE_DEFINITIONS.wakanda.skins.map((s) => s.skinId),
+      ...CRATE_DEFINITIONS.infinity.skins.map((s) => s.skinId),
     ])
-  ).filter((id) => isValidSkinId(id) && (!preLaunchLive || !isSeason2OnlySkinId(id)));
+  ).filter(
+    (id) =>
+      isValidSkinId(id) &&
+      (!preLaunchS2Live || !isSeason2OnlySkinId(id)) &&
+      (!preLaunchS3Live || !isSeason3OnlySkinId(id))
+  );
 }
 
 export function getDefaultGameState(): GameState {
@@ -93,12 +105,15 @@ export function getDefaultGameState(): GameState {
 
     pets: [],
     equippedPetIds: [],
-    sealedEggs: createEmptySealedEggs(),
-    foodInventory: createDefaultFoodInventory(),
+    sealedEggs: {} as any,
+    foodInventory: {} as any,
     ownedCosmetics: [],
     equippedCosmetics: { hat: null, glasses: null },
     hasMatthewShopToken: false,
     matthewShopTokens: 0,
+    infinityStones: [],
+    lastProcessedSnapId: null,
+    lastEventSummonAtMs: 0,
     unlockedCursors: [STARTER_CURSOR_ID],
     equippedCursorId: STARTER_CURSOR_ID,
     cratesOpened: 0,
@@ -107,10 +122,12 @@ export function getDefaultGameState(): GameState {
     zombiesStolenCoins: 0,
     zombieHitsTaken: 0,
     season2IntroSeen: false,
+    season3IntroSeen: false,
     winnerBadges: [],
     clanId: null,
     clanName: null,
     sandboxS2Enabled: false,
+    sandboxS3Enabled: false,
 
     lastSaveTime: Date.now(),
     totalPlaytimeSeconds: 0,
@@ -174,9 +191,13 @@ export function performSeasonalRollover(
   return {
     ...state,
     sandboxS2Enabled: false,
+    sandboxS3Enabled: false,
     coins: 0,
     lifetimeCoins: 0,
     seasonalScore: 0,
+    krillionCoins: 0,
+    krillionLifetime: 0,
+    krillionSeasonalScore: 0,
     clicks: 0,
     criticalClicks: 0,
     combo: 0,
@@ -218,8 +239,11 @@ export function performSeasonalRollover(
     },
     pets: [],
     equippedPetIds: [],
-    sealedEggs: createEmptySealedEggs(),
-    foodInventory: createDefaultFoodInventory(),
+    sealedEggs: {} as any,
+    foodInventory: {} as any,
+    infinityStones: (state.infinityStones || []).filter((id) => VALID_INFINITY_STONES.has(id)),
+    lastProcessedSnapId: state.lastProcessedSnapId || null,
+    lastEventSummonAtMs: 0,
     ...(() => {
       const keepShopToken = Boolean(
         state.hasMatthewShopToken || (state.matthewShopTokens || 0) > 0
@@ -239,6 +263,7 @@ export function performSeasonalRollover(
 
     winnerBadges: nextWinnerBadges,
     season2IntroSeen: newSeasonId === 'season_2' ? false : state.season2IntroSeen,
+    season3IntroSeen: newSeasonId === 'season_3' ? false : state.season3IntroSeen,
 
     lifetimeAllSeasonsCoins: Math.max(
       state.lifetimeAllSeasonsCoins || 0,
@@ -285,10 +310,9 @@ export function saveGame(
     if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
       return false;
     }
-    const isSandbox = isSandboxSeason2Context(
-      state.cloudAccount?.uid,
-      state.sandboxS2Enabled
-    );
+    const isSandbox =
+      isSandboxSeason2Context(state.cloudAccount?.uid, state.sandboxS2Enabled) ||
+      isSandboxSeason3Context(state.cloudAccount?.uid, state.sandboxS3Enabled);
     if (isSandbox) {
       // Dev Season 2 preview before Monday launch is strictly ephemeral (never persists across reloads)
       window.localStorage.removeItem(TEST_ISOLATION_CONFIG.sandboxStorageKey);
@@ -552,51 +576,26 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
         ? { ...def.eventStats, ...parsed.eventStats }
         : def.eventStats,
 
-    pets: Array.isArray(parsed.pets)
-      ? parsed.pets
-          .filter((p: unknown): p is PetInstance => Boolean(p && typeof p === 'object' && (p as PetInstance).instanceId))
-          .map((p: PetInstance) => {
-            const normRarity = normalizeEggRarity(p.rarity);
-            const normSpecies = normalizePetSpeciesId(p.speciesId);
-            const spec = getPetSpeciesDefinition(normSpecies, normRarity);
-            return {
-              ...p,
-              rarity: normRarity,
-              speciesId: spec.speciesId,
-              name: spec.name,
-              level: Math.max(1, Math.floor(p.level || 1)),
-              hunger: 100,
-            };
-          })
+    pets: [],
+    equippedPetIds: [],
+    sealedEggs: {} as any,
+    foodInventory: {} as any,
+    infinityStones: Array.isArray(parsed.infinityStones)
+      ? Array.from(
+          new Set(
+            parsed.infinityStones.filter(
+              (id: unknown): id is InfinityStoneId =>
+                typeof id === 'string' && VALID_INFINITY_STONES.has(id)
+            )
+          )
+        )
       : [],
-    equippedPetIds: Array.isArray(parsed.equippedPetIds)
-      ? parsed.equippedPetIds
-          .filter((id: unknown): id is string => typeof id === 'string')
-          .slice(0, SEASON_2_CONFIG.maxEquippedPets)
-      : [],
-    sealedEggs: (() => {
-      const base = createEmptySealedEggs();
-      if (parsed.sealedEggs && typeof parsed.sealedEggs === 'object') {
-        for (const [rawKey, rawVal] of Object.entries(parsed.sealedEggs as Record<string, unknown>)) {
-          const val = Math.max(0, typeof rawVal === 'number' && !isNaN(rawVal) ? Math.floor(rawVal) : 0);
-          if (val > 0) {
-            const normKey = normalizeEggRarity(rawKey);
-            base[normKey] = (base[normKey] || 0) + val;
-          }
-        }
-      }
-      return base;
-    })(),
-    foodInventory: (() => {
-      const base = createDefaultFoodInventory();
-      if (parsed.foodInventory && typeof parsed.foodInventory === 'object') {
-        for (const k of Object.keys(base) as FoodId[]) {
-          const val = (parsed.foodInventory as Record<string, unknown>)[k];
-          base[k] = Math.max(0, typeof val === 'number' && !isNaN(val) ? Math.floor(val) : base[k]);
-        }
-      }
-      return base;
-    })(),
+    lastProcessedSnapId:
+      typeof parsed.lastProcessedSnapId === 'string' ? parsed.lastProcessedSnapId : null,
+    lastEventSummonAtMs:
+      typeof parsed.lastEventSummonAtMs === 'number' && Number.isFinite(parsed.lastEventSummonAtMs)
+        ? Math.max(0, parsed.lastEventSummonAtMs)
+        : 0,
     ownedCosmetics: hasPermanentToken
       ? COSMETIC_ITEMS.map((c) => c.id)
       : Array.isArray(parsed.ownedCosmetics)
@@ -667,10 +666,12 @@ export function sanitizeAndValidateGameState(parsed: any): GameState {
     zombiesStolenCoins: Math.max(0, Number(parsed.zombiesStolenCoins) || 0),
     zombieHitsTaken: Math.max(0, Number(parsed.zombieHitsTaken) || 0),
     season2IntroSeen: Boolean(parsed.season2IntroSeen),
+    season3IntroSeen: Boolean(parsed.season3IntroSeen),
     winnerBadges: Array.isArray(parsed.winnerBadges) ? parsed.winnerBadges : [],
     clanId: typeof parsed.clanId === 'string' ? parsed.clanId : null,
     clanName: typeof parsed.clanName === 'string' ? parsed.clanName : null,
     sandboxS2Enabled: Boolean(parsed.sandboxS2Enabled),
+    sandboxS3Enabled: Boolean(parsed.sandboxS3Enabled),
     activeSessionToken: typeof parsed.activeSessionToken === 'string' ? parsed.activeSessionToken : undefined,
 
     lastSaveTime,

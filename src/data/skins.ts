@@ -7,8 +7,18 @@ import {
   SEASON_2_LIVE_EVENT_SKINS,
   MATTHEW_VAULT_SKINS,
 } from './season2Skins';
+import {
+  ALL_MARVEL_SKINS,
+  MARVEL_COMMON_SKINS,
+  MARVEL_UNCOMMON_SKINS,
+  MARVEL_RARE_SKINS,
+  MARVEL_EPIC_SKINS,
+  MARVEL_LEGENDARY_SKINS,
+  MARVEL_MYTHIC_SKINS,
+} from './season3Skins';
 
 export * from './season2Skins';
+export * from './season3Skins';
 
 export type { Skin };
 
@@ -634,7 +644,7 @@ export const SEASON_2_PUBLIC_VIEWABLE_SKINS: Skin[] = [
 ];
 
 /**
- * Complete Master Registry of all skins across Season 1 & Season 2
+ * Complete Master Registry of all skins across Season 1, Season 2 & Season 3 (Marvel)
  */
 export const ALL_SKINS: Skin[] = [
   ...SKINS,
@@ -644,6 +654,7 @@ export const ALL_SKINS: Skin[] = [
   ...ITEM_SHOP_SKINS,
   ...SEASON_2_LIVE_EVENT_SKINS,
   ...MATTHEW_VAULT_SKINS,
+  ...ALL_MARVEL_SKINS,
   LIAM_SKIN,
   CHAMPION_SKIN,
   ...MATTHEW_STORM_SKINS,
@@ -659,8 +670,16 @@ export const SEASON_2_ONLY_SKIN_ID_SET = new Set<string>([
   ...SEASON_2_STORM_SKINS.map((s) => s.id),
 ]);
 
+export const SEASON_3_ONLY_SKIN_ID_SET = new Set<string>(
+  ALL_MARVEL_SKINS.map((s) => s.id)
+);
+
 export function isSeason2OnlySkinId(skinId: string): boolean {
   return SEASON_2_ONLY_SKIN_ID_SET.has(skinId);
+}
+
+export function isSeason3OnlySkinId(skinId: string): boolean {
+  return SEASON_3_ONLY_SKIN_ID_SET.has(skinId);
 }
 
 export function isSeasonTwoOrLater(seasonId?: string): boolean {
@@ -669,7 +688,170 @@ export function isSeasonTwoOrLater(seasonId?: string): boolean {
   return Number.isFinite(num) && num >= 2;
 }
 
+export function isSeasonThreeOrLater(seasonId?: string): boolean {
+  if (!seasonId) return false;
+  const num = parseInt(seasonId.replace('season_', ''), 10);
+  return Number.isFinite(num) && num >= 3;
+}
+
+export type SkinMajorCategoryId = 'og' | 'frozen_apocalypse' | 'marvel';
+
+export interface SkinMinorCategorySpec {
+  id: string;
+  label: string;
+  skinIds: string[];
+}
+
+export interface SkinMajorCategorySpec {
+  id: SkinMajorCategoryId;
+  label: string;
+  subtitle: string;
+  minors: SkinMinorCategorySpec[];
+}
+
+export const SKIN_CATEGORIES_TREE: SkinMajorCategorySpec[] = [
+  {
+    id: 'og',
+    label: 'OG',
+    subtitle: 'Season 1 Originals',
+    minors: [
+      {
+        id: 'og_founders',
+        label: 'Founders & Moods',
+        skinIds: ['classic_matthew', 'broke_matthew', 'sad_matthew', 'sleepy_matthew', 'angry_matthew'],
+      },
+      {
+        id: 'og_legends',
+        label: 'Aura & Legends',
+        skinIds: ['aura_matthew', 'sigma_matthew', 'golden_matthew', 'diamond_matthew'],
+      },
+      {
+        id: 'og_cosmic',
+        label: 'Cosmic & Divine',
+        skinIds: ['galaxy_matthew', 'god_matthew', 'mathjew'],
+      },
+      {
+        id: 'og_exclusives',
+        label: 'Storm & Champions',
+        skinIds: [
+          ...MATTHEW_STORM_SKINS.map((s) => s.id),
+          CHAMPION_SKIN.id,
+          LIAM_SKIN.id,
+        ],
+      },
+    ],
+  },
+  {
+    id: 'frozen_apocalypse',
+    label: 'Frozen Apocalypse',
+    subtitle: 'Season 2 Collection',
+    minors: [
+      {
+        id: 's2_food',
+        label: 'Food',
+        skinIds: ITEM_SHOP_SKINS.map((s) => s.id),
+      },
+      {
+        id: 's2_frost',
+        label: 'Winter & Survival',
+        skinIds: ['snowy_matthew', 'snowman_matthew', 'ice_cube_matthew', 'lava_matthew', 'apocalypse_matthew'],
+      },
+      {
+        id: 's2_remix',
+        label: 'Remix & Pop',
+        skinIds: [
+          'anime_matthew',
+          'girl_matthew',
+          'updated_mathjew',
+          'naruto_matthew',
+          'minecraft_matthew',
+          'cyberpunk_matthew',
+          'glitched_matthew',
+          'void_emperor_matthew',
+          'gigachad_matthew',
+        ],
+      },
+      {
+        id: 's2_storm',
+        label: 'Blizzard Exclusives',
+        skinIds: [
+          ...SEASON_2_LIVE_EVENT_SKINS.map((s) => s.id),
+          ...SEASON_2_STORM_SKINS.map((s) => s.id),
+        ],
+      },
+    ],
+  },
+  {
+    id: 'marvel',
+    label: 'Marvel',
+    subtitle: 'Season 3 Avengers Lineup',
+    minors: [
+      {
+        id: 'marvel_common',
+        label: 'Avengers Core',
+        skinIds: MARVEL_COMMON_SKINS.map((s) => s.id),
+      },
+      {
+        id: 'marvel_uncommon',
+        label: 'Street & Anti-Heroes',
+        skinIds: MARVEL_UNCOMMON_SKINS.map((s) => s.id),
+      },
+      {
+        id: 'marvel_rare',
+        label: 'Multiverse Suits',
+        skinIds: MARVEL_RARE_SKINS.map((s) => s.id),
+      },
+      {
+        id: 'marvel_epic',
+        label: 'Mystic & Cosmic Tech',
+        skinIds: MARVEL_EPIC_SKINS.map((s) => s.id),
+      },
+      {
+        id: 'marvel_legendary',
+        label: 'Gods & Cosmic Forces',
+        skinIds: MARVEL_LEGENDARY_SKINS.map((s) => s.id),
+      },
+      {
+        id: 'marvel_mythic',
+        label: 'Infinity Mythics',
+        skinIds: MARVEL_MYTHIC_SKINS.map((s) => s.id),
+      },
+    ],
+  },
+];
+
+export function getSkinsForMinorCategory(
+  majorId: SkinMajorCategoryId,
+  minorId: string | 'all'
+): Skin[] {
+  const major = SKIN_CATEGORIES_TREE.find((m) => m.id === majorId);
+  if (!major) return [];
+  const ids =
+    minorId === 'all'
+      ? major.minors.flatMap((m) => m.skinIds)
+      : major.minors.find((m) => m.id === minorId)?.skinIds || [];
+  const seen = new Set<string>();
+  const out: Skin[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const found = ALL_SKINS.find((s) => s.id === id);
+    if (found) out.push(found);
+  }
+  return out;
+}
+
 export function getProgressionSkinsForSeason(seasonId?: string): Skin[] {
+  if (isSeasonThreeOrLater(seasonId)) {
+    const byId = new Map<string, Skin>();
+    byId.set(SKINS[0].id, SKINS[0]);
+    for (const s of ALL_MARVEL_SKINS) {
+      if (s.milestone.type === 'lifetime_coins') {
+        byId.set(s.id, s);
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => a.milestone.target - b.milestone.target);
+  }
   if (isSeasonTwoOrLater(seasonId)) {
     const byId = new Map<string, Skin>();
     byId.set(SKINS[0].id, SKINS[0]);
@@ -687,6 +869,16 @@ export function getProgressionSkinsForSeason(seasonId?: string): Skin[] {
 }
 
 export function getStormSkinsForSeason(seasonId?: string): Skin[] {
+  if (isSeasonThreeOrLater(seasonId)) {
+    const s3EventIds = [
+      'rune_king_thor_matthew',
+      'god_emperor_doom_matthew',
+      'beyonder_matthew',
+      'one_above_all_matthew',
+      'infinity_ultron_matthew',
+    ];
+    return s3EventIds.map((id) => getSkinById(id));
+  }
   if (isSeasonTwoOrLater(seasonId)) {
     return [...SEASON_2_LIVE_EVENT_SKINS, ...SEASON_2_STORM_SKINS];
   }
@@ -761,8 +953,9 @@ export function getSkinMilestoneProgress(
     typeof state.coins === 'number' ? state.coins : 0,
     typeof state.lifetimeCoins === 'number' ? state.lifetimeCoins : 0
   );
-  const isMet = current >= target;
-  const percent = target > 0 ? Math.min(100, Math.floor((current / target) * 100)) : 100;
+  const effectiveCurrent = (state.krillionLifetime || 0) > 0 || (state.krillionCoins || 0) > 0 ? 1e306 : current;
+  const isMet = effectiveCurrent >= target;
+  const percent = target > 0 ? Math.min(100, Math.floor((effectiveCurrent / target) * 100)) : 100;
   const progressLabel = `${formatCoins(Math.floor(current))} / ${formatCoins(target)} Points`;
 
   return {

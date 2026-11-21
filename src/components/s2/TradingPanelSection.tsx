@@ -165,7 +165,7 @@ export const TradingPanelSection: React.FC<TradingPanelSectionProps> = ({
           <option value="">-- Offer Sealed Egg --</option>
           {EGG_RARITY_ORDER.filter((r) => (state.sealedEggs?.[r] || 0) > 0).map((r) => (
             <option key={r} value={r}>
-              {r} ({state.sealedEggs[r]})
+              {r} ({state.sealedEggs?.[r] || 0})
             </option>
           ))}
         </select>

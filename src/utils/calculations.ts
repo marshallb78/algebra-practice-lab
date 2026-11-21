@@ -1,10 +1,9 @@
 import { getUpgradesForSeason } from '../data/upgrades';
 import { getAscensionMultiplier } from '../data/prestige';
 import { BALANCE } from '../data/balance';
-import { FRIDAY_BONUS_CONFIG, SEASON_2_CONFIG } from '../config/gameConfig';
-import { getPetClickMultiplierBonus } from '../data/petsAndEggs';
-import { isSeasonTwoOrLater } from '../data/skins';
+import { FRIDAY_BONUS_CONFIG } from '../config/gameConfig';
 import { getCursorById } from '../data/cursors';
+import { getHeroSquadSummary } from '../data/heroSquad';
 import { GameState } from '../types/game';
 
 /** Threshold at which coins roll over into Krillion units (1 Krillion = 1e306 coins, scaling infinitely). */
@@ -198,15 +197,12 @@ export function calculateClickPower(
   // Multiplicative Live Event & Friday 2x Stacking
   const { combinedMult: liveMultiplier } = getCombinedLiveMultiplier(liveOptions);
 
-  // Season 2: Equipped pets multiply clicking power
-  let petMultiplier = 1.0;
-  if (isSeasonTwoOrLater(state.currentSeasonId) && Array.isArray(state.equippedPetIds) && state.equippedPetIds.length > 0 && Array.isArray(state.pets)) {
-    const equippedSet = new Set(state.equippedPetIds.slice(0, SEASON_2_CONFIG.maxEquippedPets));
-    const bonusSum = state.pets
-      .filter((p) => equippedSet.has(p.instanceId))
-      .reduce((acc, p) => acc + getPetClickMultiplierBonus(p), 0);
-    petMultiplier = 1 + bonusSum;
-  }
+  // Pets removed in Season 3 (Marvel); top 3 unlocked skins form your Hero Strike Team!
+  const squadBonus =
+    state.currentSeasonId === 'season3_marvel'
+      ? getHeroSquadSummary(state.unlockedSkins, state.equippedSkin)
+      : null;
+  const squadClickMult = squadBonus ? 1 + squadBonus.clickBonusPct : 1.0;
 
   const rawTotalPower =
     basePower *
@@ -214,7 +210,7 @@ export function calculateClickPower(
     comboMultiplier *
     frenzyMult *
     liveMultiplier *
-    petMultiplier *
+    squadClickMult *
     cursorClickMult;
   const totalPower = Math.max(
     1,
@@ -261,11 +257,18 @@ export function calculateCPS(state: GameState, liveOptions?: LiveMultiplierOptio
   // Multiplicative Live Event & Friday 2x Stacking
   const { combinedMult: liveMultiplier } = getCombinedLiveMultiplier(liveOptions);
 
+  const squadBonus =
+    state.currentSeasonId === 'season3_marvel'
+      ? getHeroSquadSummary(state.unlockedSkins, state.equippedSkin)
+      : null;
+  const squadCpsMult = squadBonus ? 1 + squadBonus.cpsBonusPct : 1.0;
+
   return clampFiniteCoinAmount(
     rawCps *
       ascensionMultiplier *
       frenzyMult *
       liveMultiplier *
+      squadCpsMult *
       cursorCpsMult,
     MAX_SAFE_SEASON_COINS
   );
@@ -360,19 +363,7 @@ export function calculateKrillionProduction(
   const frenzyMult = state.frenzyTimer > 0 ? state.frenzyMultiplier : 1.0;
   const { combinedMult: liveMultiplier } = getCombinedLiveMultiplier(liveOptions);
 
-  let petMultiplier = 1.0;
-  if (
-    isSeasonTwoOrLater(state.currentSeasonId) &&
-    Array.isArray(state.equippedPetIds) &&
-    state.equippedPetIds.length > 0 &&
-    Array.isArray(state.pets)
-  ) {
-    const equippedSet = new Set(state.equippedPetIds.slice(0, SEASON_2_CONFIG.maxEquippedPets));
-    const bonusSum = state.pets
-      .filter((p) => equippedSet.has(p.instanceId))
-      .reduce((acc, p) => acc + getPetClickMultiplierBonus(p), 0);
-    petMultiplier = 1 + bonusSum;
-  }
+  const petMultiplier = 1.0;
 
   const shared = ascensionMultiplier * frenzyMult * liveMultiplier;
   return {

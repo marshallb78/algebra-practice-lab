@@ -6,11 +6,18 @@ import {
   getSkinMilestoneProgress,
   getSkinById,
   getSkinBackgroundTheme,
+  isSeasonThreeOrLater,
   isSeasonTwoOrLater,
 } from '../data/skins';
 import { AntiAutoclickerGuard } from '../utils/antiAutoclicker';
 import { FrozenBackground } from './s2/FrozenBackground';
-import { PetCombatStage, SnowLootDrop } from './s2/PetCombatStage';
+import { MarvelBackground } from './s3/MarvelBackground';
+import { getHeroSquadSummary } from '../data/heroSquad';
+import {
+  MarvelArenaHud,
+  MARVEL_BOSSES,
+  ActiveMarvelBoss,
+} from './s3/MarvelArenaHud';
 import { getAscensionMultiplier } from '../data/prestige';
 import { formatCoins, formatExtendedCoins, formatKrillion, formatTime } from '../utils/formatters';
 import {
@@ -21,7 +28,8 @@ import {
   LiveMultiplierOptions,
 } from '../utils/calculations';
 import { MatthewStormState } from '../utils/scheduleEngine';
-import { MATTHEW_STORM_CONFIG } from '../config/gameConfig';
+import { MATTHEW_STORM_CONFIG, isAuthorizedDevUid } from '../config/gameConfig';
+import { getCursorById } from '../data/cursors';
 import { soundManager } from '../audio/soundManager';
 import { particleEngine } from './ParticleCanvas';
 import { EnvironmentBackground } from './EnvironmentBackground';
@@ -67,18 +75,12 @@ interface ClickerAreaProps {
   stormState: MatthewStormState;
   seasonLabel: string;
   seasonRemainingSec: number;
-  isRaidActive?: boolean;
-  isBossRaidActive?: boolean;
-  raidSecondsRemaining?: number;
-  onZombieDefeated?: (coinsReward: number, gemsReward?: number) => void;
-  onZombieStealCoins?: (stolenAmount: number) => void;
-  onClaimSnowDrop?: (drop: SnowLootDrop) => void;
-  onOpenPetsModal?: () => void;
-  isCombatPaused?: boolean;
   onCheatProbationDetected?: (details: { reason: string; cps: number }) => void;
   onAutoBan50CpsDetected?: (cps: number) => void;
   probationAlertCount?: number;
   isProbationActive?: boolean;
+  isSandbox?: boolean;
+  onOpenDevTestMenu?: () => void;
 }
 
 export const ClickerArea: React.FC<ClickerAreaProps> = ({
@@ -98,22 +100,19 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
   stormState,
   seasonLabel,
   seasonRemainingSec,
-  isRaidActive = false,
-  isBossRaidActive = false,
-  raidSecondsRemaining = 0,
-  onZombieDefeated,
-  onZombieStealCoins,
-  onClaimSnowDrop,
-  onOpenPetsModal,
-  isCombatPaused = false,
   onCheatProbationDetected,
   onAutoBan50CpsDetected,
   probationAlertCount = 0,
   isProbationActive = false,
+  isSandbox = false,
+  onOpenDevTestMenu,
 }) => {
   const [floatingNumbers, setFloatingNumbers] = useState<FloatingNumber[]>([]);
   const [clickRipples, setClickRipples] = useState<
     { id: number; x: number; y: number; isCrit: boolean }[]
+  >([]);
+  const [cursorEffects, setCursorEffects] = useState<
+    { id: number; x: number; y: number; cursorId: string; accentColor: string }[]
   >([]);
   const [imgSrcOverride, setImgSrcOverride] = useState<string | null>(null);
   const [showSkinLadderModal, setShowSkinLadderModal] = useState<boolean>(false);
@@ -122,9 +121,16 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     clicks: 0,
   });
 
+  // Season 3 Marvel Arena Systems: Strike Team + Arc Overdrive (250 clicks, 3x) + Boss Encounters (15s)
+  const [arcCharge, setArcCharge] = useState<number>(0);
+  const [arcActiveSec, setArcActiveSec] = useState<number>(0);
+  const [bossCooldownSec, setBossCooldownSec] = useState<number>(0);
+  const [activeBoss, setActiveBoss] = useState<ActiveMarvelBoss | null>(null);
+  const bossIdxRef = useRef<number>(0);
+  const bossFlashOverlayRef = useRef<HTMLDivElement | null>(null);
+
   // Live CPS Counter (rolling 1-second click window) + Statistical Anti-Autoclicker Guard
   const [liveCps, setLiveCps] = useState<number>(0);
-  const [skinUnderAttackFlash, setSkinUnderAttackFlash] = useState<boolean>(false);
   const clickTimestampsRef = useRef<number[]>([]);
   const clickGuardRef = useRef(new AntiAutoclickerGuard());
   const highestCpsRef = useRef<number>(state.highestCps || 0);
@@ -172,6 +178,121 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
 
   const { totalPower, critChance, critMultiplier } = calculateClickPower(state, liveOpts);
   const cps = calculateCPS(state, liveOpts);
+  const isMarvelArena = isSeasonThreeOrLater(state.currentSeasonId);
+  const heroSquad = getHeroSquadSummary(state.unlockedSkins, state.equippedSkin);
+
+  const awardBossVictory = (boss: ActiveMarvelBoss) => {
+    const prodPerSec = Math.max(25, cps + totalPower * 5);
+    const bonusCoins = Math.floor(prodPerSec * boss.spec.coinSeconds);
+    onEarnCoins(bonusCoins, false, true);
+    setState((prev) => ({
+      ...prev,
+      gems: (prev.gems || 0) + boss.spec.gemReward,
+      lifetimeGems: (prev.lifetimeGems || 0) + boss.spec.gemReward,
+      frenzyMultiplier: Math.max(prev.frenzyMultiplier || 1, boss.spec.frenzyMult),
+      frenzyTimer: Math.max(prev.frenzyTimer || 0, boss.spec.frenzySec),
+    }));
+    soundManager.playSkinUnlock();
+    onNotify?.(
+      `${boss.spec.name.toUpperCase()} DEFEATED!`,
+      `+${boss.spec.gemReward} Gems, +${formatCoins(bonusCoins)} MC & ${boss.spec.frenzyMult}× Boost (${boss.spec.frenzySec}s)!`
+    );
+  };
+
+  const applyBossPunishment = (boss: ActiveMarvelBoss) => {
+    let coinsLost = 0;
+    setState((prev) => {
+      coinsLost = Math.floor((prev.coins || 0) * 0.15);
+      return {
+        ...prev,
+        coins: Math.max(0, (prev.coins || 0) - coinsLost),
+        frenzyMultiplier: 0.5,
+        frenzyTimer: 10,
+      };
+    });
+    soundManager.playThunder();
+    onNotify?.(
+      `${boss.spec.name.toUpperCase()} AMBUSH!`,
+      coinsLost > 0
+        ? `You failed in 15s! Lost ${formatCoins(coinsLost)} MC & 0.5× Production for 10s!`
+        : `You failed in 15s! 0.5× Production Ambush for 10s!`
+    );
+  };
+
+  const handleSummonBoss = () => {
+    if (!isMarvelArena || activeBoss || bossCooldownSec > 0) return;
+    const spec = MARVEL_BOSSES[bossIdxRef.current % MARVEL_BOSSES.length];
+    bossIdxRef.current += 1;
+    const baseDps = Math.max(30, totalPower * 10 + cps);
+    const maxHp = Math.floor(baseDps * (spec.hpMultiplier / 10));
+    setActiveBoss({ spec, hp: maxHp, maxHp, timeRemainingSec: 15 });
+    setBossCooldownSec(60);
+    soundManager.playStormWaveStart();
+    onNotify?.(`${spec.name.toUpperCase()} INCOMING!`, `Beat ${spec.name} in 15s or suffer a 15% Coin Ambush!`);
+  };
+
+  const handleActivateArc = () => {
+    if (!isMarvelArena || arcCharge < 250 || arcActiveSec > 0) return;
+    setArcCharge(0);
+    setArcActiveSec(10);
+    soundManager.playThunder();
+    onNotify?.('ARC REACTOR OVERDRIVE!', '3× Click Power + 10 Auto-Repulsors/s for 10s!');
+  };
+
+  const arenaRef = useRef({
+    cps,
+    totalPower,
+    arcActiveSec,
+    bossDamageMultiplier: heroSquad.bossDamageMultiplier,
+    onEarnCoins,
+    awardBossVictory,
+    applyBossPunishment,
+  });
+  arenaRef.current = {
+    cps,
+    totalPower,
+    arcActiveSec,
+    bossDamageMultiplier: heroSquad.bossDamageMultiplier,
+    onEarnCoins,
+    awardBossVictory,
+    applyBossPunishment,
+  };
+
+  // Smooth Chromebook-friendly 500ms tick (stable interval, zero teardown churn)
+  useEffect(() => {
+    if (!isMarvelArena) return;
+    const timer = setInterval(() => {
+      const dt = 0.5;
+      const snap = arenaRef.current;
+
+      setArcActiveSec((prev) => (prev > 0 ? Math.max(0, prev - dt) : 0));
+      if (snap.arcActiveSec > 0) {
+        snap.onEarnCoins(Math.max(1, Math.floor(snap.totalPower * 3 * 10 * dt)), false, false);
+      }
+
+      setBossCooldownSec((prev) => (prev > 0 ? Math.max(0, prev - dt) : 0));
+
+      setActiveBoss((prev) => {
+        if (!prev) return null;
+        const passiveDmg =
+          (snap.cps + (snap.arcActiveSec > 0 ? snap.totalPower * 30 : 0)) *
+          dt *
+          snap.bossDamageMultiplier;
+        const nextHp = prev.hp - passiveDmg;
+        const nextTime = prev.timeRemainingSec - dt;
+        if (nextHp <= 0) {
+          queueMicrotask(() => snap.awardBossVictory(prev));
+          return null;
+        }
+        if (nextTime <= 0) {
+          queueMicrotask(() => snap.applyBossPunishment(prev));
+          return null;
+        }
+        return { ...prev, hp: nextHp, timeRemainingSec: nextTime };
+      });
+    }, 500);
+    return () => clearInterval(timer);
+  }, [isMarvelArena]);
 
   useEffect(() => {
     setImgSrcOverride(null);
@@ -275,10 +396,38 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     }
 
     const isCrit = Math.random() < critChance;
-    const earned = isCrit ? Math.floor(totalPower * critMultiplier) : totalPower;
+    const arcMult = isMarvelArena && arcActiveSec > 0 ? 3 : 1;
+    const earned = isCrit
+      ? Math.floor(totalPower * critMultiplier * arcMult)
+      : Math.floor(totalPower * arcMult);
     const { krillionClickPower } = calculateKrillionProduction(state, liveOpts);
     const krillionEarned =
-      krillionClickPower > 0 ? (isCrit ? krillionClickPower * critMultiplier : krillionClickPower) : 0;
+      krillionClickPower > 0
+        ? (isCrit ? krillionClickPower * critMultiplier * arcMult : krillionClickPower * arcMult)
+        : 0;
+
+    let bossDmgDealt = 0;
+    if (isMarvelArena) {
+      if (arcActiveSec <= 0) {
+        setArcCharge((prev) => Math.min(250, prev + 1));
+      }
+      if (activeBoss) {
+        bossDmgDealt = Math.max(1, Math.floor(earned * heroSquad.bossDamageMultiplier));
+        if (bossFlashOverlayRef.current) {
+          bossFlashOverlayRef.current.animate(
+            [{ opacity: 0.65 }, { opacity: 0 }],
+            { duration: 140, easing: 'ease-out' }
+          );
+        }
+        const nextHp = activeBoss.hp - bossDmgDealt;
+        if (nextHp <= 0) {
+          awardBossVictory(activeBoss);
+          setActiveBoss(null);
+        } else {
+          setActiveBoss({ ...activeBoss, hp: nextHp });
+        }
+      }
+    }
 
     if (isCrit) {
       soundManager.playCrit();
@@ -294,7 +443,12 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
     const floatY = clientY - 42;
     const formattedEarned =
       krillionEarned > 0 ? formatKrillion(krillionEarned) : formatCoins(earned);
-    const floatValue = isCrit ? `⚡ CRIT! +${formattedEarned}` : `+${formattedEarned}`;
+    const floatValue =
+      bossDmgDealt > 0
+        ? `💥 -${formatCoins(bossDmgDealt)} DMG!`
+        : isCrit
+        ? `⚡ CRIT! +${formattedEarned}`
+        : `+${formattedEarned}`;
 
     setFloatingNumbers((prev) => [
       ...prev.slice(-9),
@@ -305,6 +459,23 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       ...prev.slice(-5),
       { id: floatId, x: clientX, y: clientY, isCrit },
     ]);
+
+    const activeCursor = getCursorById(state.equippedCursorId);
+    if (activeCursor) {
+      setCursorEffects((prev) => [
+        ...prev.slice(-7),
+        {
+          id: floatId,
+          x: clientX,
+          y: clientY,
+          cursorId: activeCursor.id,
+          accentColor: activeCursor.accentColor,
+        },
+      ]);
+      setTimeout(() => {
+        setCursorEffects((prev) => prev.filter((fx) => fx.id !== floatId));
+      }, 650);
+    }
 
     setTimeout(() => {
       setFloatingNumbers((prev) => prev.filter((f) => f.id !== floatId));
@@ -436,12 +607,13 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
       ? Math.max(0, MATTHEW_STORM_CONFIG.giantMatthewMaxClicksPerWave - giantWaveClicks.clicks)
       : 0;
 
+  const isSeason3 = isSeasonThreeOrLater(state.currentSeasonId);
   const isSeason2 = isSeasonTwoOrLater(state.currentSeasonId);
   const skinBgTheme = getSkinBackgroundTheme(equippedSkin);
 
   return (
     <div className="relative flex-1 flex flex-col items-center justify-between h-full p-2.5 sm:p-4 select-none overflow-hidden">
-      {/* 1. ATMOSPHERIC, SKIN-MATCHED & FROZEN APOCALYPSE BACKGROUND */}
+      {/* 1. ATMOSPHERIC, SKIN-MATCHED, SEASON 2 FROZEN OR SEASON 3 MARVEL BACKGROUND */}
       {!isSeason2 && (
         <EnvironmentBackground
           state={state}
@@ -449,37 +621,29 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           stormWaveActive={Boolean(currentWave)}
         />
       )}
-      <FrozenBackground
-        theme={skinBgTheme}
-        isFrozenApocalypse={isSeason2}
-        isRaidActive={isRaidActive || isBossRaidActive}
-        isStormActive={isStormActive}
-        stormWaveActive={Boolean(currentWave)}
-        combo={state.combo || 0}
-        unlockedSkinImages={(state.unlockedSkins?.length ? state.unlockedSkins : ['classic_matthew']).map(
-          (id) => getSkinById(id).image
-        )}
-        reducedMotion={state.settings.reducedMotion}
-      />
-      {/* FULL-SCREEN 3D-DEPTH FROZEN HOMESTEAD, FENCE & PET vs ZOMBIE DEFENSE ARENA */}
-      {isSeason2 && (
-        <PetCombatStage
-          pets={state.pets || []}
-          equippedPetIds={state.equippedPetIds || []}
-          isRaidActive={isRaidActive}
-          isBossRaidActive={isBossRaidActive}
-          raidSecondsRemaining={raidSecondsRemaining}
-          currentCoins={state.coins}
-          zombieHitsTaken={state.zombieHitsTaken || 0}
-          isPaused={isCombatPaused}
-          onZombieDefeated={(coins, gems) => onZombieDefeated?.(coins, gems)}
-          onZombieStealCoins={(stolen) => onZombieStealCoins?.(stolen)}
-          onClaimSnowDrop={(drop) => onClaimSnowDrop?.(drop)}
-          onSkinAttacked={() => {
-            setSkinUnderAttackFlash(true);
-            window.setTimeout(() => setSkinUnderAttackFlash(false), 300);
-          }}
-          onOpenPetsModal={() => onOpenPetsModal?.()}
+      {isSeason3 ? (
+        <MarvelBackground
+          theme={skinBgTheme}
+          isStormActive={isStormActive}
+          stormWaveActive={Boolean(currentWave)}
+          combo={state.combo || 0}
+          unlockedSkinImages={(state.unlockedSkins?.length ? state.unlockedSkins : ['classic_matthew']).map(
+            (id) => getSkinById(id).image
+          )}
+          reducedMotion={state.settings.reducedMotion}
+        />
+      ) : (
+        <FrozenBackground
+          theme={skinBgTheme}
+          isFrozenApocalypse={isSeason2}
+          isRaidActive={false}
+          isStormActive={isStormActive}
+          stormWaveActive={Boolean(currentWave)}
+          combo={state.combo || 0}
+          unlockedSkinImages={(state.unlockedSkins?.length ? state.unlockedSkins : ['classic_matthew']).map(
+            (id) => getSkinById(id).image
+          )}
+          reducedMotion={state.settings.reducedMotion}
         />
       )}
 
@@ -549,6 +713,22 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
                     {probationAlertCount}
                   </span>
                 )}
+              </button>
+            )}
+
+            {/* SINGLE UNIFIED DEV TEST MENU BUTTON (Devs Only During Testing) */}
+            {isSandbox && isAuthorizedDevUid(state.cloudAccount?.uid) && onOpenDevTestMenu && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenDevTestMenu();
+                }}
+                className="px-3 h-9 sm:h-10 rounded-xl bg-gradient-to-r from-amber-500/35 to-rose-500/35 border border-amber-300/80 text-amber-100 hover:text-white hover:brightness-110 flex items-center gap-1.5 text-xs font-black uppercase shadow-lg cursor-pointer"
+                title="Open Complete Season 3 Dev Test Menu"
+              >
+                <Wrench className="w-4 h-4 text-amber-300" />
+                <span>Dev Menu</span>
               </button>
             )}
 
@@ -744,81 +924,85 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           </div>
         )}
 
-        {/* GEMS COUNTER DIRECTLY ABOVE MATTHEW COINS COUNTER */}
-        <div className="mb-1 inline-flex items-center gap-1.5 px-3 py-0.5 rounded-lg bg-black/45 backdrop-blur-md shadow-[0_0_20px_rgba(232,121,249,0.22)]">
-          <Gem className="w-3.5 h-3.5 text-fuchsia-400" />
-          <span className="text-xs sm:text-sm font-black text-fuchsia-200">{state.gems}</span>
-          <span className="text-[10px] font-bold text-fuchsia-300/80 uppercase">Gems</span>
-        </div>
-
-        <div className="flex items-center justify-center gap-3 flex-wrap">
-          {/* MATTHEW COINS COUNTER */}
-          <div className="flex items-center gap-2.5 drop-shadow-[0_6px_18px_rgba(251,191,36,0.35)]">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-tr from-amber-500 via-yellow-300 to-amber-200 flex items-center justify-center text-slate-950 font-black text-xl sm:text-2xl shadow-[0_0_22px_rgba(251,191,36,0.6)] rotate-[-4deg]">
-              M
-            </div>
-            <span className="text-4xl sm:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-yellow-100 via-yellow-300 to-amber-400 tracking-tight font-chunky drop-shadow-[0_4px_0_#78350f]">
-              {formatExtendedCoins(state.coins, state.krillionCoins || 0)}
-            </span>
+        {/* STARK COMMAND MONEY & GEMS HUD OVERHAUL (Chromebook-Responsive) */}
+        <div className="mb-1.5 px-4 py-2 xl:px-5 xl:py-3 rounded-3xl bg-gradient-to-b from-slate-950/90 via-[#1a0b16]/85 to-slate-950/90 border-2 border-amber-400/45 shadow-[0_0_28px_rgba(220,38,38,0.25)] flex flex-col items-center">
+          <div className="mb-1 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-fuchsia-950/60 border border-fuchsia-400/40">
+            <Gem className="w-3.5 h-3.5 text-fuchsia-300" />
+            <span className="text-xs font-black text-fuchsia-100">{state.gems}</span>
+            <span className="text-[10px] font-bold text-fuchsia-300/90 uppercase">Gems</span>
           </div>
 
-          {/* LIVE CPS COUNTER BESIDE (TO THE RIGHT OF) MATTHEW COINS COUNTER */}
-          <div
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl backdrop-blur-md transition-all shadow-lg ${
-              liveCps >= 12
-                ? 'bg-rose-950/75 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.4)] scale-105'
-                : liveCps > 0
-                ? 'bg-cyan-950/75 text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.28)]'
-                : 'bg-black/45 text-slate-300'
-            }`}
-            title="Your live real-time Clicks Per Second (CPS)"
-          >
-            <Gauge
-              className={`w-4 h-4 sm:w-5 sm:h-5 ${
-                liveCps >= 12
-                  ? 'text-rose-400 animate-pulse'
-                  : liveCps > 0
-                  ? 'text-cyan-400'
-                  : 'text-slate-400'
-              }`}
-            />
-            <div className="flex flex-col leading-none">
-              <span className="text-sm sm:text-lg font-black font-mono">
-                {liveCps} <span className="text-[11px] uppercase">CPS</span>
+          <div className="flex items-center justify-center gap-2.5 flex-wrap">
+            {/* ARC REACTOR MATTHEW COINS COUNTER */}
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 xl:w-12 xl:h-12 rounded-2xl bg-gradient-to-br from-rose-600 via-amber-400 to-yellow-200 p-0.5 shadow-[0_0_18px_rgba(251,191,36,0.5)]">
+                <div className="w-full h-full rounded-[13px] bg-slate-950 flex items-center justify-center font-marvel text-lg xl:text-2xl font-black text-amber-300">
+                  M
+                </div>
+              </div>
+              <span className="text-3xl sm:text-5xl xl:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-b from-yellow-100 via-amber-300 to-rose-400 tracking-wide font-marvel drop-shadow-[0_3px_0_#450a0a]">
+                {formatExtendedCoins(state.coins, state.krillionCoins || 0)}
               </span>
-              <span className="text-[9px] font-bold text-slate-400 uppercase">Live Speed</span>
+            </div>
+
+            {/* LIVE CPS COUNTER */}
+            <div
+              className={`flex items-center gap-1.5 px-2.5 py-1 xl:px-3 xl:py-1.5 rounded-2xl border transition-all shadow-lg ${
+                liveCps >= 12
+                  ? 'bg-rose-950/80 border-rose-400/60 text-rose-100 shadow-[0_0_20px_rgba(244,63,94,0.45)] scale-105'
+                  : liveCps > 0
+                  ? 'bg-amber-950/60 border-amber-400/50 text-amber-100 shadow-[0_0_16px_rgba(251,191,36,0.28)]'
+                  : 'bg-slate-950/75 border-white/10 text-slate-300'
+              }`}
+              title="Your live real-time Clicks Per Second (CPS)"
+            >
+              <Gauge
+                className={`w-4 h-4 ${
+                  liveCps >= 12
+                    ? 'text-rose-400 animate-pulse'
+                    : liveCps > 0
+                    ? 'text-amber-300'
+                    : 'text-slate-400'
+                }`}
+              />
+              <div className="flex flex-col leading-none">
+                <span className="text-xs sm:text-base xl:text-lg font-black font-mono">
+                  {liveCps} <span className="text-[10px] uppercase">CPS</span>
+                </span>
+                <span className="text-[8px] font-bold text-slate-400 uppercase">Live Speed</span>
+              </div>
             </div>
           </div>
+
+          {/* CLICK POWER + PASSIVE CPS HUD */}
+          {(() => {
+            const krProd = calculateKrillionProduction(state, liveOpts);
+            return (
+              <div className="flex items-center justify-center gap-2 mt-1.5 flex-wrap">
+                <div className="flex items-center gap-1 px-2.5 py-0.5 xl:py-1 rounded-xl bg-slate-900/80 border border-amber-400/30 text-xs font-black text-amber-200 shadow-md">
+                  <Zap className="w-3 h-3 text-yellow-300 fill-yellow-300" />
+                  <span className="text-yellow-300">
+                    +{krProd.krillionClickPower > 0 ? formatKrillion(krProd.krillionClickPower) : formatCoins(totalPower)}
+                  </span>
+                  <span className="text-amber-100/80">per click</span>
+                </div>
+
+                <div className="flex items-center gap-1 px-2.5 py-0.5 xl:py-1 rounded-xl bg-slate-900/80 border border-rose-400/30 text-xs font-bold text-slate-200 shadow-md">
+                  <span className="text-rose-300 font-black">
+                    {krProd.krillionCps > 0 ? formatKrillion(krProd.krillionCps) : formatCoins(cps)}
+                  </span>
+                  <span className="text-slate-400">/ sec</span>
+                </div>
+
+                {(fridayBonusActive || stormWaveMultiplier > 1) && (
+                  <span className="px-2 py-0.5 rounded-lg bg-fuchsia-600/35 text-[10px] text-fuchsia-200 font-black">
+                    {(fridayBonusActive ? 2 : 1) * stormWaveMultiplier}× LIVE BOOST!
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </div>
-
-        {/* CLICK POWER + PASSIVE CPS HUD */}
-        {(() => {
-          const krProd = calculateKrillionProduction(state, liveOpts);
-          return (
-            <div className="flex items-center justify-center gap-2.5 mt-1.5 flex-wrap">
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-black/45 backdrop-blur-md text-xs sm:text-sm font-black text-cyan-200 shadow-md">
-                <Zap className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
-                <span className="text-yellow-300">
-                  +{krProd.krillionClickPower > 0 ? formatKrillion(krProd.krillionClickPower) : formatCoins(totalPower)}
-                </span>
-                <span className="text-cyan-200">per click</span>
-              </div>
-
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-black/45 backdrop-blur-md text-xs font-bold text-slate-300 shadow-md">
-                <span className="text-amber-300 font-black">
-                  {krProd.krillionCps > 0 ? formatKrillion(krProd.krillionCps) : formatCoins(cps)}
-                </span>
-                <span className="text-slate-400">/ sec</span>
-              </div>
-
-              {(fridayBonusActive || stormWaveMultiplier > 1) && (
-                <span className="px-2.5 py-0.5 rounded-lg bg-fuchsia-600/35 text-[11px] text-fuchsia-200 font-black">
-                  {(fridayBonusActive ? 2 : 1) * stormWaveMultiplier}× LIVE BOOST!
-                </span>
-              )}
-            </div>
-          );
-        })()}
 
         {/* CRIT STAT BADGE */}
         <div className="mt-2 flex items-center justify-center bg-black/45 backdrop-blur-md px-3.5 py-1 rounded-xl shadow-lg text-[11px] font-black text-amber-300 font-mono">
@@ -851,10 +1035,10 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
         </button>
       </div>
 
-      {/* 4. CENTRAL HERO MATTHEW CHARACTER + GIANT STORM MATTHEW */}
+      {/* 4. CENTRAL HERO MATTHEW CHARACTER (Sized cleanly for Chromebooks + Desktop) */}
       <div
-        className={`relative flex-1 flex items-center justify-center w-full py-2 ${
-          isSeason2 ? 'z-[12] pb-8 sm:pb-10' : 'z-10'
+        className={`relative flex-1 min-h-0 flex flex-col items-center justify-center w-full py-1 ${
+          isSeason2 ? 'z-[12] pb-2 xl:pb-4' : 'z-10'
         }`}
       >
 
@@ -965,42 +1149,60 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
           >
             <div
               ref={spriteContainerRef}
-              className={`relative w-56 h-56 sm:w-76 sm:h-76 md:w-88 md:h-88 max-w-[82vw] ${
-                isSeason2 ? 'max-h-[42vh]' : 'max-h-[48vh]'
+              className={`relative w-44 h-44 sm:w-56 sm:h-56 md:w-60 md:h-60 xl:w-72 xl:h-72 max-w-[74vw] ${
+                isMarvelArena
+                  ? 'max-h-[32vh] xl:max-h-[38vh]'
+                  : isSeason2
+                  ? 'max-h-[36vh] xl:max-h-[44vh]'
+                  : 'max-h-[42vh] xl:max-h-[48vh]'
               } flex items-center justify-center group-hover:scale-105 transition-transform duration-150 will-change-transform ${
-                skinUnderAttackFlash ? '-translate-x-2 rotate-[-3deg]' : ''
+                activeBoss ? 'rounded-full border-2 border-rose-500/80 bg-rose-950/25' : ''
               }`}
               style={{ transformOrigin: '49.3% 50.1%' }}
             >
+              {activeBoss && (
+                <>
+                  <div className="absolute -top-3 z-20 px-3 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-widest border border-rose-200 shadow">
+                    ⚔️ HIT {activeBoss.spec.name}!
+                  </div>
+                  <div
+                    ref={bossFlashOverlayRef}
+                    className="absolute inset-0 rounded-full bg-rose-500 opacity-0 pointer-events-none z-10"
+                  />
+                </>
+              )}
               <img
-                src={activeSpriteUrl}
-                alt={equippedSkin.name}
+                src={activeBoss ? activeBoss.spec.image : activeSpriteUrl}
+                alt={activeBoss ? activeBoss.spec.name : equippedSkin.name}
                 draggable={false}
                 onError={() => {
                   const fallback =
                     equippedSkin.fallbackImage || './images/skins/classic_matthew.png';
-                  if (activeSpriteUrl !== fallback) {
+                  if (!activeBoss && activeSpriteUrl !== fallback) {
                     setImgSrcOverride(fallback);
                   }
                 }}
-                style={
-                  skinUnderAttackFlash
-                    ? {
-                        filter:
-                          'brightness(1.35) drop-shadow(0 0 28px rgba(244,63,94,0.95))',
-                      }
-                    : undefined
-                }
-                className="w-full h-full object-contain pointer-events-none transition-all duration-150"
+                className="w-full h-full object-contain pointer-events-none"
               />
-              {skinUnderAttackFlash && (
-                <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-32 h-1.5 bg-gradient-to-r from-transparent via-rose-400 to-transparent rotate-[-28deg] shadow-[0_0_18px_#f43f5e]" />
-                </div>
-              )}
             </div>
           </div>
         </div>
+
+        {/* SEASON 3 MARVEL ARENA HUD (STRIKE TEAM + BOSS ENCOUNTERS + ARC REACTOR) */}
+        {isMarvelArena && (
+          <div className="mt-5 sm:mt-7 w-full">
+            <MarvelArenaHud
+              squad={heroSquad}
+              arcCharge={arcCharge}
+              arcMaxCharge={250}
+              arcActiveSec={arcActiveSec}
+              activeBoss={activeBoss}
+              bossCooldownSec={bossCooldownSec}
+              onActivateArc={handleActivateArc}
+              onSummonBoss={handleSummonBoss}
+            />
+          </div>
+        )}
 
         {/* FRIDAY MATTHEW STORM AMBIENT ATMOSPHERE & ELECTRIC VIGNETTE */}
         {isStormActive && (
@@ -1039,7 +1241,62 @@ export const ClickerArea: React.FC<ClickerAreaProps> = ({
         )}
       </div>
 
-      {/* 5. CLICK SHOCKWAVE RIPPLES (ENHANCED FROST SHATTER IN S2) */}
+      {/* 5. CLICK SHOCKWAVE RIPPLES + PER-CURSOR CLICK EFFECTS */}
+      {cursorEffects.map((fx) => (
+        <div
+          key={`cursor-fx-${fx.id}`}
+          className="fixed pointer-events-none z-40"
+          style={{
+            left: fx.x,
+            top: fx.y,
+            animation: 'cursorFxBurst 0.65s ease-out forwards',
+          }}
+        >
+          {fx.cursorId === 'web_shooter_cursor' ? (
+            <svg viewBox="0 0 100 100" className="w-24 h-24 drop-shadow-[0_0_8px_rgba(255,255,255,0.85)]">
+              <g stroke="#ffffff" strokeWidth="2.2" fill="none" opacity="0.92">
+                <line x1="50" y1="50" x2="50" y2="4" />
+                <line x1="50" y1="50" x2="82" y2="18" />
+                <line x1="50" y1="50" x2="96" y2="50" />
+                <line x1="50" y1="50" x2="82" y2="82" />
+                <line x1="50" y1="50" x2="50" y2="96" />
+                <line x1="50" y1="50" x2="18" y2="82" />
+                <line x1="50" y1="50" x2="4" y2="50" />
+                <line x1="50" y1="50" x2="18" y2="18" />
+                <circle cx="50" cy="50" r="14" />
+                <circle cx="50" cy="50" r="28" />
+                <circle cx="50" cy="50" r="42" />
+              </g>
+            </svg>
+          ) : fx.cursorId === 'mjolnir_cursor' || fx.cursorId === 'stormbreaker_cursor' ? (
+            <svg viewBox="0 0 100 100" className="w-24 h-24 drop-shadow-[0_0_12px_#38bdf8]">
+              <path
+                d="M55 6 L30 48 L48 48 L38 94 L74 44 L54 44 Z"
+                fill="#7dd3fc"
+                stroke="#ffffff"
+                strokeWidth="2.5"
+              />
+            </svg>
+          ) : fx.cursorId === 'vibranium_shield_cursor' ? (
+            <div className="w-20 h-20 rounded-full border-4 border-rose-500 flex items-center justify-center shadow-[0_0_18px_rgba(239,68,68,0.8)]">
+              <div className="w-12 h-12 rounded-full border-4 border-white flex items-center justify-center">
+                <div className="w-6 h-6 rounded-full bg-blue-600" />
+              </div>
+            </div>
+          ) : fx.cursorId === 'infinity_gauntlet_cursor' ? (
+            <div className="w-24 h-24 rounded-full border-4 border-amber-300 shadow-[0_0_24px_#facc15,inset_0_0_16px_#a855f7]" />
+          ) : (
+            <div
+              className="w-20 h-20 rounded-full border-4"
+              style={{
+                borderColor: fx.accentColor,
+                boxShadow: `0 0 22px ${fx.accentColor}`,
+              }}
+            />
+          )}
+        </div>
+      ))}
+
       {clickRipples.map((r) => (
         <div
           key={`ripple-${r.id}`}

@@ -61,8 +61,12 @@ export const CursorVisual: React.FC<CursorVisualProps> = ({
           <stop
             offset="100%"
             stopColor={
-              cursor.crateType === 'frost'
-                ? '#0284c7'
+              cursor.crateType === 'wakanda'
+                ? '#a855f7'
+                : cursor.crateType === 'infinity'
+                ? '#eab308'
+                : cursor.crateType === 'stark'
+                ? '#ef4444'
                 : cursor.crateType === 'starter'
                 ? '#0369a1'
                 : '#9a3412'

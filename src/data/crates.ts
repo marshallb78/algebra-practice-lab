@@ -1,7 +1,13 @@
-import { CursorDefinition, FROST_CRATE_CURSORS, NORMAL_CRATE_CURSORS } from './cursors';
+import {
+  CursorDefinition,
+  INFINITY_CRATE_CURSORS,
+  NORMAL_CRATE_CURSORS,
+  STARK_CRATE_CURSORS,
+  WAKANDA_CRATE_CURSORS,
+} from './cursors';
 import { getSkinById, Skin } from './skins';
 
-export type CrateType = 'normal' | 'frost';
+export type CrateType = 'normal' | 'stark' | 'wakanda' | 'infinity';
 
 export interface CratePoolSkinEntry {
   skinId: string;
@@ -35,52 +41,84 @@ export interface CrateOpenResult {
 export const CRATE_DEFINITIONS: Record<CrateType, CrateDefinition> = {
   normal: {
     id: 'normal',
-    name: 'Normal Crate',
-    subtitle: '50 Gems • Normal Shop Skins (Rarest: Void Emperor Matthew) & 5 Cursors (Rarest: Fire Cursor!)',
-    image: './images/s2/crates/normal_crate.png',
-    gemCost: 50,
-    duplicateRefundGems: 20,
-    cursorDropChance: 0.55,
-    rarestSkinId: 'void_emperor_matthew',
+    name: 'Normal Avengers Crate',
+    subtitle: '60 Gems • Common & Uncommon Heroes (Black Widow, Deadpool, Venom, Wolverine!) & Classic Cursors',
+    image: './images/s3/crates/normal_crate.png',
+    gemCost: 60,
+    duplicateRefundGems: 24,
+    cursorDropChance: 0.45,
+    rarestSkinId: 'doctor_octopus_matthew',
     rarestCursorId: 'fire_cursor',
     skins: [
-      { skinId: 'potato_matthew', weight: 22 },
-      { skinId: 'fries_matthew', weight: 18 },
-      { skinId: 'pizza_matthew', weight: 14 },
-      { skinId: 'strawberry_matthew', weight: 12 },
-      { skinId: 'burger_matthew', weight: 10 },
-      { skinId: 'girl_matthew', weight: 8 },
-      { skinId: 'anime_matthew', weight: 7 },
-      { skinId: 'chocolate_matthew', weight: 6 },
-      { skinId: 'naruto_matthew', weight: 4.5 },
-      { skinId: 'cyberpunk_matthew', weight: 4 },
-      { skinId: 'gigachad_matthew', weight: 2.5 },
-      { skinId: 'glitched_matthew', weight: 2 },
-      { skinId: 'void_emperor_matthew', weight: 1.5, isRarest: true },
+      { skinId: 'black_widow_matthew', weight: 18 },
+      { skinId: 'hawkeye_matthew', weight: 16 },
+      { skinId: 'ant_man_matthew', weight: 15 },
+      { skinId: 'war_machine_matthew', weight: 14 },
+      { skinId: 'falcon_matthew', weight: 12 },
+      { skinId: 'black_panther_matthew', weight: 9 },
+      { skinId: 'deadpool_matthew', weight: 7 },
+      { skinId: 'wolverine_matthew', weight: 5 },
+      { skinId: 'green_goblin_matthew', weight: 2.5 },
+      { skinId: 'doctor_octopus_matthew', weight: 1.5, isRarest: true },
     ],
     cursors: NORMAL_CRATE_CURSORS,
   },
-  frost: {
-    id: 'frost',
-    name: 'Frost Crate',
-    subtitle: '75 Gems • All Winter, Zombie & Apocalypse Skins (Rarest: Apocalypse Matthew) & 5 Ice Cursors (Rarest: Frosty Cursor!)',
-    image: './images/s2/crates/frost_crate.png',
-    gemCost: 75,
-    duplicateRefundGems: 30,
-    cursorDropChance: 0.55,
-    rarestSkinId: 'apocalypse_matthew',
-    rarestCursorId: 'frosty_cursor',
+  stark: {
+    id: 'stark',
+    name: 'Stark Tech Crate',
+    subtitle: '95 Gems • Rare Multiverse Suits (Mark 85, Rescue, Endgame Cap, Red Hulk!) & Stark Cursors',
+    image: './images/s3/crates/stark_crate.png',
+    gemCost: 95,
+    duplicateRefundGems: 38,
+    cursorDropChance: 0.5,
+    rarestSkinId: 'red_hulk_matthew',
+    rarestCursorId: 'vibranium_shield_cursor',
     skins: [
-      { skinId: 'snowy_matthew', weight: 28 },
-      { skinId: 'snowman_matthew', weight: 24 },
-      { skinId: 'ice_cube_matthew', weight: 18 },
-      { skinId: 'mathjew', weight: 12 },
-      { skinId: 'minecraft_matthew', weight: 8 },
-      { skinId: 'zombie_matthew', weight: 5 },
-      { skinId: 'ghost_matthew', weight: 3 },
-      { skinId: 'apocalypse_matthew', weight: 2, isRarest: true },
+      { skinId: 'iron_man_mk85_matthew', weight: 28 },
+      { skinId: 'rescue_matthew', weight: 24 },
+      { skinId: 'thor_ragnarok_matthew', weight: 20 },
+      { skinId: 'endgame_cap_matthew', weight: 16 },
+      { skinId: 'red_hulk_matthew', weight: 12, isRarest: true },
     ],
-    cursors: FROST_CRATE_CURSORS,
+    cursors: STARK_CRATE_CURSORS,
+  },
+  wakanda: {
+    id: 'wakanda',
+    name: 'Wakanda Vibranium Crate',
+    subtitle: '150 Gems • Epic Mystic & Dark Variants (Strange Supreme, Kang, Loki!) & Magic Cursors',
+    image: './images/s3/crates/wakanda_crate.png',
+    gemCost: 150,
+    duplicateRefundGems: 60,
+    cursorDropChance: 0.5,
+    rarestSkinId: 'loki_god_of_stories_matthew',
+    rarestCursorId: 'chaos_hex_cursor',
+    skins: [
+      { skinId: 'dr_strange_supreme_matthew', weight: 26 },
+      { skinId: 'zombie_iron_man_matthew', weight: 22 },
+      { skinId: 'zombie_cap_matthew', weight: 20 },
+      { skinId: 'kang_matthew', weight: 18 },
+      { skinId: 'loki_god_of_stories_matthew', weight: 14, isRarest: true },
+    ],
+    cursors: WAKANDA_CRATE_CURSORS,
+  },
+  infinity: {
+    id: 'infinity',
+    name: 'Cosmic Infinity Crate',
+    subtitle: '235 Gems • Legendary & MYTHIC Cosmic Gods (Rune King Thor, Doom, Beyonder, Infinity Ultron!) & Stormbreaker/Gauntlet Cursors',
+    image: './images/s3/crates/infinity_crate.png',
+    gemCost: 235,
+    duplicateRefundGems: 95,
+    cursorDropChance: 0.45,
+    rarestSkinId: 'infinity_ultron_matthew',
+    rarestCursorId: 'infinity_gauntlet_cursor',
+    skins: [
+      { skinId: 'rune_king_thor_matthew', weight: 32 },
+      { skinId: 'god_emperor_doom_matthew', weight: 28 },
+      { skinId: 'beyonder_matthew', weight: 22 },
+      { skinId: 'one_above_all_matthew', weight: 13 },
+      { skinId: 'infinity_ultron_matthew', weight: 5, isRarest: true },
+    ],
+    cursors: INFINITY_CRATE_CURSORS,
   },
 };
 
@@ -103,10 +141,10 @@ export function rollCrateReward(
   ownedCursors: string[],
   rng: () => number = Math.random
 ): CrateOpenResult {
-  const spec = CRATE_DEFINITIONS[crateType];
+  const spec = CRATE_DEFINITIONS[crateType] || CRATE_DEFINITIONS.normal;
   const rollCursor = rng() < spec.cursorDropChance;
 
-  if (rollCursor) {
+  if (rollCursor && spec.cursors.length > 0) {
     const picked = pickWeighted(spec.cursors, rng);
     const isDuplicate = ownedCursors.includes(picked.id);
     return {
@@ -131,4 +169,3 @@ export function rollCrateReward(
     refundGems: isDuplicate ? spec.duplicateRefundGems : 0,
   };
 }
-

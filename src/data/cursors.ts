@@ -1,5 +1,5 @@
-export type CursorCrateType = 'normal' | 'frost' | 'starter';
-export type CursorRarity = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary';
+export type CursorCrateType = 'normal' | 'frost' | 'stark' | 'wakanda' | 'infinity' | 'starter';
+export type CursorRarity = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary' | 'Mythic';
 
 export interface CursorDefinition {
   id: string;
@@ -192,6 +192,133 @@ export const CURSORS: CursorDefinition[] = [
     critMultiplierBonus: 0.75,
     ascensionBonusPerShard: 0.016,
   },
+
+  // ================= SEASON 3: CUSTOM MARVEL CURSORS (GENERATED VIA COMFYUI) =================
+  {
+    id: 'web_shooter_cursor',
+    name: 'Web-Shooter Gauntlet',
+    crateType: 'stark',
+    rarity: 'Common',
+    dropWeight: 38,
+    description: 'Mechanical Spider-Man wrist web-shooter snapping rapid clicks.',
+    abilitySummary: '+20% Click Power • +16% CPS • +4% Crit',
+    image: './images/s3/cursors/web_shooter_cursor.png',
+    accentColor: '#ef4444',
+    glowColor: 'rgba(239, 68, 68, 0.75)',
+    clickMultiplierBonus: 0.2,
+    cpsMultiplierBonus: 0.16,
+    critChanceBonus: 0.04,
+  },
+  {
+    id: 'repulsor_cursor',
+    name: 'Arc Repulsor Pointer',
+    crateType: 'stark',
+    rarity: 'Uncommon',
+    dropWeight: 30,
+    description: 'Mark 85 Arc Reactor palm blaster accelerating Stark production.',
+    abilitySummary: '+30% Click Power • +28% CPS • +0.008/Shard Ascension',
+    image: './images/s3/cursors/repulsor_cursor.png',
+    accentColor: '#38bdf8',
+    glowColor: 'rgba(56, 189, 248, 0.85)',
+    clickMultiplierBonus: 0.3,
+    cpsMultiplierBonus: 0.28,
+    ascensionBonusPerShard: 0.008,
+  },
+  {
+    id: 'vibranium_shield_cursor',
+    name: 'Vibranium Star Shield',
+    crateType: 'stark',
+    rarity: 'Rare',
+    dropWeight: 18,
+    description: 'Unbreakable Captain America Vibranium shield bouncing across coins.',
+    abilitySummary: '+42% Click Power • +38% CPS • +6% Crit',
+    image: './images/s3/cursors/vibranium_shield_cursor.png',
+    accentColor: '#60a5fa',
+    glowColor: 'rgba(96, 165, 250, 0.85)',
+    clickMultiplierBonus: 0.42,
+    cpsMultiplierBonus: 0.38,
+    critChanceBonus: 0.06,
+  },
+  {
+    id: 'sling_ring_cursor',
+    name: 'Mystic Sling Ring',
+    crateType: 'wakanda',
+    rarity: 'Rare',
+    dropWeight: 32,
+    description: 'Doctor Strange twin-loop mystic relic opening portal multipliers.',
+    abilitySummary: '+48% CPS • +40% Click Power • +0.012/Shard Ascension',
+    image: './images/s3/cursors/sling_ring_cursor.png',
+    accentColor: '#fb923c',
+    glowColor: 'rgba(251, 146, 60, 0.88)',
+    cpsMultiplierBonus: 0.48,
+    clickMultiplierBonus: 0.4,
+    ascensionBonusPerShard: 0.012,
+  },
+  {
+    id: 'mjolnir_cursor',
+    name: 'Enchanted Mjolnir',
+    crateType: 'wakanda',
+    rarity: 'Epic',
+    dropWeight: 22,
+    description: 'Asgardian Uru hammer slamming lightning-charged critical strikes.',
+    abilitySummary: '+62% Click Power • +52% CPS • +0.7x Crit Damage',
+    image: './images/s3/cursors/mjolnir_cursor.png',
+    accentColor: '#7dd3fc',
+    glowColor: 'rgba(125, 211, 252, 0.9)',
+    clickMultiplierBonus: 0.62,
+    cpsMultiplierBonus: 0.52,
+    critMultiplierBonus: 0.7,
+  },
+  {
+    id: 'chaos_hex_cursor',
+    name: 'Scarlet Chaos Hex',
+    crateType: 'wakanda',
+    rarity: 'Epic',
+    dropWeight: 16,
+    description: 'Scarlet Witch reality-warping chaos magic sphere.',
+    abilitySummary: '+68% CPS • +58% Click Power • +8% Crit Chance',
+    image: './images/s3/cursors/chaos_hex_cursor.png',
+    accentColor: '#fb7185',
+    glowColor: 'rgba(251, 113, 133, 0.92)',
+    cpsMultiplierBonus: 0.68,
+    clickMultiplierBonus: 0.58,
+    critChanceBonus: 0.08,
+  },
+  {
+    id: 'stormbreaker_cursor',
+    name: 'Cosmic Stormbreaker',
+    crateType: 'infinity',
+    rarity: 'Legendary',
+    dropWeight: 28,
+    description: 'King’s Bifrost battle-axe tearing through endgame thresholds.',
+    abilitySummary: '+95% Click Power • +85% CPS • +9% Crit • +0.02/Shard Ascension',
+    image: './images/s3/cursors/stormbreaker_cursor.png',
+    accentColor: '#22d3ee',
+    glowColor: 'rgba(34, 211, 238, 0.95)',
+    clickMultiplierBonus: 0.95,
+    cpsMultiplierBonus: 0.85,
+    critChanceBonus: 0.09,
+    critMultiplierBonus: 0.85,
+    ascensionBonusPerShard: 0.02,
+  },
+  {
+    id: 'infinity_gauntlet_cursor',
+    name: 'Nano Infinity Gauntlet',
+    crateType: 'infinity',
+    rarity: 'Mythic',
+    dropWeight: 10,
+    description: 'Supreme 6-Stone Nano Gauntlet pointer — immune to Mirror Freeze!',
+    abilitySummary: '+140% Click Power • +125% CPS • +12% Crit • Freeze Immune!',
+    image: './images/s3/cursors/infinity_gauntlet_cursor.png',
+    accentColor: '#facc15',
+    glowColor: 'rgba(250, 204, 21, 0.98)',
+    clickMultiplierBonus: 1.4,
+    cpsMultiplierBonus: 1.25,
+    critChanceBonus: 0.12,
+    critMultiplierBonus: 1.15,
+    ascensionBonusPerShard: 0.03,
+    freezeImmune: true,
+  },
 ];
 
 const LEGACY_CURSOR_MIGRATION: Record<string, string> = {
@@ -212,6 +339,12 @@ export function resolveCursorId(cursorId?: string | null): string | null {
 export const ALL_CURSORS: CursorDefinition[] = [STARTER_CURSOR, ...CURSORS];
 export const NORMAL_CRATE_CURSORS = CURSORS.filter((c) => c.crateType === 'normal');
 export const FROST_CRATE_CURSORS = CURSORS.filter((c) => c.crateType === 'frost');
+export const STARK_CRATE_CURSORS = CURSORS.filter((c) => c.crateType === 'stark');
+export const WAKANDA_CRATE_CURSORS = CURSORS.filter((c) => c.crateType === 'wakanda');
+export const INFINITY_CRATE_CURSORS = CURSORS.filter((c) => c.crateType === 'infinity');
+export const MARVEL_CURSORS = CURSORS.filter(
+  (c) => c.crateType === 'stark' || c.crateType === 'wakanda' || c.crateType === 'infinity'
+);
 
 const CURSOR_MAP = new Map(ALL_CURSORS.map((c) => [c.id, c]));
 

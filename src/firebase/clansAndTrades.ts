@@ -399,7 +399,7 @@ export function applyTradeSwapToState(
       equippedSkin: nextEquippedSkin,
       pets: [...remainingPets, ...receivedPets],
       equippedPetIds: nextEquippedPets,
-      sealedEggs: nextEggs,
+      sealedEggs: nextEggs as Record<EggRarity, number>,
     },
   };
 }

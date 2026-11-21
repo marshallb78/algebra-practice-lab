@@ -23,7 +23,7 @@ import {
   submitGlobalEventScore,
   summonGlobalLiveEvent,
 } from '../../firebase/liveEvents';
-import { SEASON_2_LIVE_EVENT_SKINS } from '../../data/season2Skins';
+import { getStormSkinsForSeason, isSeasonThreeOrLater } from '../../data/skins';
 import { getServerNowMs } from '../../firebase/config';
 import { formatCoins, formatNumber } from '../../utils/formatters';
 import {
@@ -123,13 +123,15 @@ export const LiveEventsHubModal: React.FC<LiveEventsModalProps> = ({
           ))}
         </div>
 
-        {/* Preview of Next-Friday Live Event Exclusives (No Spoilers Until Unlocked!) */}
+        {/* Live Event Exclusives (No Spoilers Until Unlocked!) */}
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-purple-400/35">
           <h3 className="text-sm font-black uppercase text-purple-300 mb-3">
-            Friday Live Event Exclusives (No Spoilers Until Unlocked)
+            {isSeasonThreeOrLater(state.currentSeasonId)
+              ? 'Marvel Live Event Exclusives (No Spoilers Until Unlocked)'
+              : 'Friday Live Event Exclusives (No Spoilers Until Unlocked)'}
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {SEASON_2_LIVE_EVENT_SKINS.map((s) => {
+            {getStormSkinsForSeason(state.currentSeasonId).map((s) => {
               const isUnlocked = (state.unlockedSkins || []).includes(s.id);
               return (
                 <div
@@ -243,27 +245,24 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
   const lastScoreSubmitMsRef = useRef(0);
   const earnedEventGemsRef = useRef(0);
 
-  const isClickEvent =
-    event.type === 'click_marathon' ||
-    event.type === 'falling_matthews' ||
-    event.type === 'golden_rain';
+  const isClickEvent = event.type === 'golden_rain';
   const isNewInteractive = isNewInteractiveEventType(event.type);
   const isCompetitiveEvent = isClickEvent || isNewGoodCompetitiveEventType(event.type);
 
   const [newEventScore, setNewEventScore] = useState(0);
-  const myScore = isNewInteractive
-    ? newEventScore
-    : event.type === 'click_marathon'
-    ? marathonClicks
-    : caughtCount;
+  const myScore = isNewInteractive ? newEventScore : caughtCount;
   myScoreRef.current = myScore;
 
   const baseProd = Math.max(50, (currentCps || 0) + (currentClickPower || 1) * 4);
   const baseProdRef = useRef(baseProd);
   baseProdRef.current = baseProd;
 
-  const isAffected =
-    !event.excludeSummoner || (event.summonedByUid && event.summonedByUid !== currentUid);
+  // In sandbox / dev test mode, events affect you too so devs can test how every attack feels!
+  const isAffected = isSandbox
+    ? true
+    : event.targetUid
+    ? event.targetUid === currentUid
+    : !event.excludeSummoner || (event.summonedByUid && event.summonedByUid !== currentUid);
 
   const isCurrentlyFrozen =
     event.type === 'screen_freeze' && isAffected && secondsLeft > 0 && !hasFireCursor;
@@ -363,7 +362,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
             const myIdx = board.findIndex((entry) => entry.uid === currentUid);
             const myRank = myIdx >= 0 ? myIdx + 1 : 0;
             const didWin = Boolean(winner && winner.uid === currentUid && finalScore > 0);
-            const scoreLabel = event.type === 'click_marathon' ? 'clicks' : 'catches';
+            const scoreLabel = 'catches';
 
             setLeaders(board);
             setWinnerSummary({
@@ -380,8 +379,8 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
               );
             }
 
-            const winnerGems = event.type === 'click_marathon' ? 20 : 15;
-            const winnerCoinMult = event.type === 'click_marathon' ? 120 : 85;
+            const winnerGems = 15;
+            const winnerCoinMult = 85;
             if (didWin) {
               const reward = Math.max(5000, Math.floor(baseProdRef.current * winnerCoinMult));
               onAwardCoinsRef.current(
@@ -409,13 +408,13 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
     };
   }, [event.id, event.endsAtMs, event.type, isCompetitiveEvent, isSandbox, currentUid, currentUsername]);
 
-  // Smoothly animate Falling Matthews & 100 Golden Rain sprites inside the Click Event Pop-up Arena
+  // Smoothly animate 100 Golden Rain sprites inside the Click Event Pop-up Arena
   useEffect(() => {
-    if (event.type !== 'falling_matthews' && event.type !== 'golden_rain') {
+    if (event.type !== 'golden_rain') {
       setFallingItems([]);
       return;
     }
-    const isGolden = event.type === 'golden_rain';
+    const isGolden = true;
     setFallingItems(
       Array.from({ length: isGolden ? 14 : 9 }).map((_, i) => ({
         id: Date.now() + i + Math.random(),
@@ -520,15 +519,8 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
   const serverNow = getServerNowMs();
   if (serverNow > event.endsAtMs + 10_000) return null;
 
-  const elapsedSec = Math.max(1, (Date.now() - marathonStartMs) / 1000);
-  const marathonCps = (marathonClicks / elapsedSec).toFixed(1);
   const topLeader = leaders[0];
-  const scoreUnitLabel =
-    event.type === 'click_marathon'
-      ? 'taps'
-      : isNewInteractive
-      ? 'pts'
-      : 'catches';
+  const scoreUnitLabel = isNewInteractive ? 'pts' : 'catches';
   const showWinnerPodium =
     isCompetitiveEvent &&
     secondsLeft <= 0 &&
@@ -541,7 +533,11 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
       {secondsLeft > 0 && (
         <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[98] px-5 py-2 rounded-2xl bg-gradient-to-r from-amber-500/95 via-orange-500/95 to-rose-500/95 border border-yellow-200/70 shadow-[0_0_30px_rgba(245,158,11,0.55)] text-slate-950 font-black text-xs sm:text-sm uppercase tracking-wider flex items-center gap-2.5 max-w-[94vw]">
           <Flame className="w-4 h-4 shrink-0" />
-          <span className="truncate">{event.bannerText}</span>
+          <span className="truncate">
+            {event.targetUsername
+              ? `${event.bannerText} • Targeted on ${event.targetUsername}`
+              : event.bannerText}
+          </span>
           <span className="px-2 py-0.5 rounded-full bg-slate-950/25 text-white shrink-0 font-mono">
             {secondsLeft}s
           </span>
@@ -558,7 +554,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
         </div>
       )}
 
-      {/* 10 NEW INTERACTIVE GOOD & BAD EVENTS */}
+      {/* INTERACTIVE BOOSTS & VILLAIN ATTACKS */}
       {isNewInteractive && (
         <NewInteractiveEventView
           event={event}
@@ -579,19 +575,17 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
         />
       )}
 
-      {/* SUMMONER SAFEZONE STATUS BANNER DURING SCREEN FREEZE / BOSS RAID */}
-      {(event.type === 'screen_freeze' || event.type === 'zombie_boss_raid') &&
-        !isAffected &&
-        secondsLeft > 0 && (
-          <div className="fixed bottom-14 left-1/2 -translate-x-1/2 z-[72] px-5 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-500/95 to-emerald-500/95 border-2 border-white/80 text-slate-950 font-black text-xs sm:text-sm uppercase shadow-[0_0_32px_rgba(34,211,238,0.8)] flex items-center gap-2 pointer-events-none">
-            <Snowflake className="w-5 h-5 text-slate-950" />
-            <span>
-              {event.type === 'screen_freeze'
-                ? `Everyone Else Is Frozen (${secondsLeft}s) — Only You Can Play!`
-                : `Boss Raid Active on Everyone Else (${secondsLeft}s) — You Are Safe!`}
-            </span>
-          </div>
-        )}
+      {/* SUMMONER SAFEZONE STATUS BANNER DURING TIME FREEZE */}
+      {event.type === 'screen_freeze' && !isAffected && secondsLeft > 0 && (
+        <div className="fixed bottom-14 left-1/2 -translate-x-1/2 z-[72] px-5 py-2.5 rounded-2xl bg-gradient-to-r from-cyan-500/95 to-emerald-500/95 border-2 border-white/80 text-slate-950 font-black text-xs sm:text-sm uppercase shadow-[0_0_32px_rgba(34,211,238,0.8)] flex items-center gap-2 pointer-events-none">
+          <Snowflake className="w-5 h-5 text-slate-950" />
+          <span>
+            {event.targetUsername
+              ? `${event.targetUsername} Is Frozen (${secondsLeft}s) — You Keep Clicking!`
+              : `Everyone Else Is Frozen (${secondsLeft}s) — Only You Can Play!`}
+          </span>
+        </div>
+      )}
 
       {/* POP-UP INTERACTIVE CLICK EVENT ARENA (Click Marathon, Falling Matthews, Golden Rain) */}
       {isClickEvent && secondsLeft > 0 && !isPopupMinimized && (
@@ -608,9 +602,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
                 </div>
                 <div>
                   <h3 className="text-sm sm:text-lg font-black uppercase text-white tracking-wide">
-                    {event.type === 'click_marathon'
-                      ? 'Click Fast Marathon Arena'
-                      : event.type === 'golden_rain'
+                    {event.type === 'golden_rain'
                       ? '100 Golden Matthew Sky Catch'
                       : 'Falling Matthews Click Arena'}
                   </h3>
@@ -648,51 +640,7 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
             </div>
 
             {/* Arena Interactive Body */}
-            {event.type === 'click_marathon' ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-6 gap-5 relative overflow-hidden">
-                <div className="text-center">
-                  <div className="text-xs font-black uppercase tracking-widest text-amber-300">
-                    MASH MATTHEW AS FAST AS YOU CAN!
-                  </div>
-                  <div className="text-xs font-bold text-slate-300 mt-1">
-                    Winner Prize: {formatCoins(Math.max(5000, Math.floor(baseProd * 120)))} Coins &amp; +20 Gems!
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    handleMarathonTap();
-                  }}
-                  className="group relative w-44 h-44 sm:w-56 sm:h-56 rounded-full bg-gradient-to-br from-amber-400/25 via-orange-500/20 to-fuchsia-500/25 border-4 border-amber-300/80 shadow-[0_0_50px_rgba(251,191,36,0.65)] flex items-center justify-center cursor-pointer active:scale-90 hover:scale-105 transition-transform"
-                >
-                  <img
-                    src="./images/skins/golden_matthew.png"
-                    alt="Marathon Matthew"
-                    draggable={false}
-                    className="w-36 h-36 sm:w-44 sm:h-44 object-contain pointer-events-none"
-                  />
-                </button>
-
-                <div className="grid grid-cols-3 gap-3 w-full max-w-lg text-center">
-                  <div className="p-3 rounded-2xl bg-slate-900/90 border border-white/10">
-                    <div className="text-[10px] font-black uppercase text-slate-400">Your Taps</div>
-                    <div className="text-xl font-black text-amber-300">{marathonClicks}</div>
-                  </div>
-                  <div className="p-3 rounded-2xl bg-slate-900/90 border border-white/10">
-                    <div className="text-[10px] font-black uppercase text-slate-400">Tap Speed</div>
-                    <div className="text-xl font-black text-cyan-300">{marathonCps}/s</div>
-                  </div>
-                  <div className="p-3 rounded-2xl bg-slate-900/90 border border-white/10">
-                    <div className="text-[10px] font-black uppercase text-slate-400">#1 Leader</div>
-                    <div className="text-sm font-black text-emerald-300 truncate">
-                      {topLeader ? `${topLeader.username} (${topLeader.clicks})` : `${marathonClicks}`}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
+            {(
               <div className="flex-1 relative overflow-hidden bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.2),transparent_65%)]">
                 <div className="absolute top-3 left-4 z-10 flex items-center gap-2 flex-wrap">
                   <div className="px-3 py-1.5 rounded-xl bg-slate-950/85 border border-white/15 text-xs font-black text-white">
@@ -819,15 +767,15 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
         </div>
       )}
 
-      {/* SCREEN FREEZE OVERLAY — MELTED ONLY BY FIRE CURSOR */}
+      {/* DR. STRANGE DARK ICE OVERLAY — BREACHED BY CHAOS / GAUNTLET CURSOR */}
       {event.type === 'screen_freeze' && isAffected && secondsLeft > 0 && hasFireCursor && (
-        <div className="fixed bottom-14 left-1/2 -translate-x-1/2 z-[72] px-5 py-2.5 rounded-2xl bg-gradient-to-r from-orange-600/95 via-amber-500/95 to-rose-600/95 border-2 border-yellow-200 text-slate-950 font-black text-xs sm:text-sm uppercase shadow-[0_0_32px_rgba(249,115,22,0.85)] flex items-center gap-2 pointer-events-none">
-          <Flame className="w-5 h-5 text-yellow-100 animate-pulse" />
-          <span>Fire Cursor Melted the Screen Freeze ({secondsLeft}s immunity active!)</span>
+        <div className="fixed bottom-14 left-1/2 -translate-x-1/2 z-[72] px-5 py-2.5 rounded-2xl bg-gradient-to-r from-purple-700/95 via-amber-500/95 to-emerald-600/95 border-2 border-amber-200 text-white font-black text-xs sm:text-sm uppercase shadow-[0_0_24px_rgba(168,85,247,0.75)] flex items-center gap-2 pointer-events-none">
+          <Sparkles className="w-5 h-5 text-amber-200 animate-pulse" />
+          <span>Equipped Relic Pierced Dark Ice ({secondsLeft}s immunity active!)</span>
         </div>
       )}
 
-      {/* FULL-SCREEN ICE PRISON FOR FROZEN PLAYERS — BLOCKS ALL ACTIONS UNTIL TIMER HITS 0 */}
+      {/* FULL-SCREEN DR. STRANGE DARK ICE PRISON — BLOCKS ACTIONS UNTIL TIMER HITS 0 */}
       {isCurrentlyFrozen && (
         <div
           onPointerDown={(e) => {
@@ -838,35 +786,37 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
             e.preventDefault();
             e.stopPropagation();
           }}
-          className="fixed inset-0 z-[95] bg-gradient-to-b from-cyan-400/55 via-sky-300/45 to-blue-950/75 backdrop-blur-xl border-[12px] border-cyan-100/95 shadow-[inset_0_0_110px_rgba(165,243,252,0.9)] flex flex-col items-center justify-center cursor-not-allowed select-none overflow-hidden pointer-events-auto"
+          className="fixed inset-0 z-[95] bg-gradient-to-b from-[#0b031a]/88 via-[#1f0738]/82 to-[#041d19]/90 border-[10px] border-purple-500/80 shadow-[inset_0_0_95px_rgba(168,85,247,0.75)] flex flex-col items-center justify-center cursor-not-allowed select-none overflow-hidden pointer-events-auto"
         >
           <svg
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
-            className="absolute inset-0 w-full h-full pointer-events-none opacity-65"
+            className="absolute inset-0 w-full h-full pointer-events-none opacity-70"
           >
             <path
               d="M0 0 L35 28 L18 55 L0 70 M100 0 L68 30 L85 60 L100 78 M50 0 L48 25 L62 48 L45 78 L52 100 M0 42 L28 45 L50 52 L76 46 L100 40"
-              stroke="#e0f2fe"
-              strokeWidth={0.85}
+              stroke="#c084fc"
+              strokeWidth={0.9}
               fill="none"
             />
+            <circle cx="50" cy="50" r="28" stroke="#34d399" strokeWidth={0.55} strokeDasharray="3 2" fill="none" />
           </svg>
 
-          <Snowflake
-            className="w-24 h-24 text-white animate-spin mb-4 drop-shadow-[0_0_28px_rgba(165,243,252,0.95)]"
-            style={{ animationDuration: '4.5s' }}
+          <img
+            src="./images/s3/events/attack_time_freeze.png"
+            alt="Dr. Strange Dark Ice"
+            className="w-24 h-24 object-contain mb-3 drop-shadow-[0_0_24px_rgba(168,85,247,0.9)]"
           />
-          <div className="relative z-10 px-6 py-5 rounded-3xl bg-slate-950/92 border-2 border-cyan-300 text-white font-black text-center max-w-md w-[90vw] shadow-[0_0_45px_rgba(34,211,238,0.75)]">
-            <div className="text-xl tracking-wide text-cyan-200">
-              FROZEN BY {event.summonedByUsername.toUpperCase()}!
+          <div className="relative z-10 px-6 py-5 rounded-3xl bg-slate-950/94 border-2 border-purple-400 text-white font-black text-center max-w-md w-[90vw] shadow-[0_0_40px_rgba(168,85,247,0.65)]">
+            <div className="text-xl tracking-wide text-purple-300 font-marvel uppercase">
+              TRAPPED IN DARK ICE BY {event.summonedByUsername.toUpperCase()}!
             </div>
             <div className="text-base font-black text-white mt-2">
-              Thawing in <span className="text-cyan-300 font-mono text-2xl">{secondsLeft}s</span>
+              Mirror Dimension Shards Shatter in <span className="text-emerald-300 font-mono text-2xl">{secondsLeft}s</span>
             </div>
-            <div className="mt-3 w-full h-2.5 rounded-full bg-slate-800 border border-cyan-500/40 overflow-hidden">
+            <div className="mt-3 w-full h-2.5 rounded-full bg-slate-800 border border-purple-500/40 overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-cyan-400 via-sky-300 to-white transition-all duration-200"
+                className="h-full bg-gradient-to-r from-purple-500 via-emerald-400 to-amber-300 transition-all duration-200"
                 style={{
                   width: `${Math.max(
                     0,
@@ -875,23 +825,13 @@ export const ActiveGlobalEventOverlay: React.FC<ActiveGlobalEventOverlayProps> =
                 }}
               />
             </div>
-            <div className="text-xs text-cyan-100 mt-2.5">
-              Your screen is locked solid — only {event.summonedByUsername} can keep playing until it thaws!
-            </div>
-            <div className="text-[10px] text-orange-300 mt-1.5">
-              Tip: Equip the Fire Cursor from Normal Crates to melt Screen Freeze!
+            <div className="text-xs text-purple-100 mt-2.5">
+              Dark Ice locked your controls — wait for the eldritch seal to break!
             </div>
           </div>
         </div>
       )}
 
-      {/* ZOMBIE BOSS RAID BANNER FOR NON-SUMMONERS */}
-      {event.type === 'zombie_boss_raid' && isAffected && secondsLeft > 0 && (
-        <div className="fixed bottom-14 right-4 z-[72] px-4 py-2.5 rounded-xl bg-rose-600/95 border-2 border-rose-300 text-white text-xs font-black flex items-center gap-2 shadow-[0_0_25px_rgba(244,63,94,0.8)] animate-pulse">
-          <ShieldAlert className="w-4 h-4" />
-          <span>Cryo Titan Boss Raid Active ({secondsLeft}s)! Click Zombies or Let Pets Attack!</span>
-        </div>
-      )}
     </>
   );
 };

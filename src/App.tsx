@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { EggRarity, CosmeticSlot, GameState } from './types/game';
+import { CosmeticSlot, GameState } from './types/game';
 import {
   loadGame,
   loadSandboxGame,
@@ -17,6 +17,7 @@ import {
 import { ALL_CURSORS, getCursorById } from './data/cursors';
 import { CRATE_DEFINITIONS, CrateOpenResult, CrateType, rollCrateReward } from './data/crates';
 import { MATTHEW_VAULT_SKINS } from './data/season2Skins';
+import { ALL_MARVEL_SKINS } from './data/season3Skins';
 import { checkAndAutoClaimQuests } from './data/quests';
 import {
   addCoinsWithKrillionCarry,
@@ -37,7 +38,9 @@ import {
   MATTHEW_STORM_CONFIG,
   SEASON_CONFIG,
   SEASON_2_CONFIG,
+  SEASON_3_CONFIG,
   TEST_ISOLATION_CONFIG,
+  isAuthorizedDevUid,
   isSandboxSeason2Context,
 } from './config/gameConfig';
 import { getFirebaseServices, getServerNowMs, syncServerClockOffset } from './firebase/config';
@@ -81,36 +84,36 @@ import {
 } from './firebase/moderation';
 import {
   ActiveGlobalLiveEvent,
+  PLAYER_TRIGGERABLE_EVENTS,
   PlayerEventCostSpec,
+  SnapEventRecord,
   broadcastGlobalGoldenSwarm,
+  broadcastInfinitySnap,
   broadcastMatthewTokenPull,
   clearGlobalLiveEvent,
+  extractLatestPendingSnapFromStore,
   fetchLatestMatthewTokenBroadcast,
   subscribeToGlobalEventsRealtime,
   summonGlobalLiveEvent,
 } from './firebase/liveEvents';
 import {
   ChestLootResult,
-  createStarterFrostPup,
-  getEggDefinition,
-  getEggSellGemValue,
-  getPetSellGemValue,
-  getPetUpgradeGemCost,
-  pickWeightedEgg,
+  ALL_INFINITY_STONE_IDS,
+  getInfinityStoneDefinition,
+  hasAllInfinityStones,
   rollChestLoot,
-  rollHatchedPetSpecies,
-} from './data/petsAndEggs';
+} from './data/infinityGauntlet';
 import { COSMETIC_ITEMS, getCosmeticById } from './data/cosmetics';
-import { SnowLootDrop } from './components/s2/PetCombatStage';
 import { FrozenIntroCutsceneModal } from './components/s2/FrozenIntroCutsceneModal';
-import { EggHatchCutsceneModal } from './components/s2/EggHatchCutsceneModal';
-import { RaidIntroCutsceneModal } from './components/s2/RaidIntroCutsceneModal';
+import { MarvelIntroCutsceneModal } from './components/s3/MarvelIntroCutsceneModal';
+import { SnapDustCutsceneModal } from './components/s3/SnapDustCutsceneModal';
+import { ThanosResetCutsceneModal } from './components/s3/ThanosResetCutsceneModal';
+import { DevTestMenuModal } from './components/DevTestMenuModal';
 import { ChestOpenCutsceneModal } from './components/s2/ChestOpenCutsceneModal';
 import { CrateOpenCutsceneModal } from './components/s2/CrateOpenCutsceneModal';
 import { EquippedCursorFollower } from './components/s2/CursorVisual';
 import { TokenUnlockCutsceneModal } from './components/s2/TokenUnlockCutsceneModal';
 import { EventCutsceneModal, LiveEventCutsceneKind } from './components/s2/EventCutsceneModal';
-import { PetsAndInventoryModal } from './components/s2/PetsAndInventoryModal';
 import { GemItemShopModal } from './components/s2/GemItemShopModal';
 import {
   LiveEventsHubModal,
@@ -162,20 +165,32 @@ export function App() {
   const [showStormShop, setShowStormShop] = useState(false);
   const [showStormRecap, setShowStormRecap] = useState(false);
   const [showDevToolsModal, setShowDevToolsModal] = useState(false);
+  const [showDevTestMenu, setShowDevTestMenu] = useState(false);
+  const [forceSpawnChestCounter, setForceSpawnChestCounter] = useState(0);
   const [showIntroCutscene, setShowIntroCutscene] = useState<boolean>(true);
 
-  // Season 2: Frozen Apocalypse states
+  // Season 2 / Season 3 Preview states
   const [sandboxS2Enabled, setSandboxS2Enabled] = useState<boolean>(() =>
     Boolean(state.sandboxS2Enabled)
   );
   const sandboxS2EnabledRef = useRef<boolean>(Boolean(state.sandboxS2Enabled));
   sandboxS2EnabledRef.current = sandboxS2Enabled;
+  const [sandboxS3Enabled, setSandboxS3Enabled] = useState<boolean>(() =>
+    Boolean(state.sandboxS3Enabled)
+  );
+  const sandboxS3EnabledRef = useRef<boolean>(Boolean(state.sandboxS3Enabled));
+  sandboxS3EnabledRef.current = sandboxS3Enabled;
   const isGameplayPausedRef = useRef<boolean>(false);
   const [showFrozenIntro, setShowFrozenIntro] = useState(false);
-  const [showPetsModal, setShowPetsModal] = useState(false);
+  const [showMarvelIntro, setShowMarvelIntro] = useState(false);
+  const [showThanosReset, setShowThanosReset] = useState(false);
+  const [pendingSnapCutscene, setPendingSnapCutscene] = useState<{
+    snap: SnapEventRecord;
+    isPreview?: boolean;
+  } | null>(null);
+  const [isSnapBusy, setIsSnapBusy] = useState(false);
   const [showItemShopModal, setShowItemShopModal] = useState(false);
   const [showLiveEventsModal, setShowLiveEventsModal] = useState(false);
-  const [pendingRaidCutscene, setPendingRaidCutscene] = useState(false);
   const [pendingEventCutscene, setPendingEventCutscene] = useState<{
     id: string;
     kind: LiveEventCutsceneKind;
@@ -184,17 +199,11 @@ export function App() {
   const [chestCutsceneLoot, setChestCutsceneLoot] = useState<ChestLootResult | null>(null);
   const [crateCutsceneResult, setCrateCutsceneResult] = useState<CrateOpenResult | null>(null);
   const [showTokenCutscene, setShowTokenCutscene] = useState(false);
-  const [eggHatchCutscene, setEggHatchCutscene] = useState<{
-    rarity: EggRarity;
-    speciesId: string;
-    petName: string;
-  } | null>(null);
   const [sessionLockedByOtherDevice, setSessionLockedByOtherDevice] = useState(false);
   const [activeGlobalEvent, setActiveGlobalEvent] = useState<ActiveGlobalLiveEvent | null>(null);
   const activeGlobalEventRef = useRef<ActiveGlobalLiveEvent | null>(null);
   activeGlobalEventRef.current = activeGlobalEvent;
   const [evStoreSnapshot, setEvStoreSnapshot] = useState<Record<string, any>>({});
-  const [zombieRaidEndsAt, setZombieRaidEndsAt] = useState<number>(0);
   const [sandboxStormStartMs, setSandboxStormStartMs] = useState<number | null>(null);
   const [previewDowntimeOverride, setPreviewDowntimeOverride] = useState(false);
 
@@ -211,6 +220,7 @@ export function App() {
     null
   );
   const seenGoldenSwarmIdRef = useRef<string | null>(null);
+  const [allPlayersList, setAllPlayersList] = useState<LeaderboardEntry[]>([]);
   const [top3Players, setTop3Players] = useState<LeaderboardEntry[]>([]);
   const [onlinePlayersCount, setOnlinePlayersCount] = useState<number>(1);
   const [serverBroadcast, setServerBroadcast] = useState<ServerBroadcast | null>(null);
@@ -237,6 +247,7 @@ export function App() {
     ((uid: string, username: string, notifySync?: boolean) => Promise<void>) | null
   >(null);
   const frozenIntroSessionTriggeredRef = useRef<boolean>(false);
+  const marvelIntroSessionTriggeredRef = useRef<boolean>(false);
   const lastCutsceneEventIdRef = useRef<string | null>(null);
   const mondayRolloverTriggeredRef = useRef<boolean>(false);
 
@@ -247,10 +258,19 @@ export function App() {
   const activeUsername =
     state.cloudAccount?.displayUsername || state.cloudAccount?.username || null;
   const verifiedDevSandbox = isVerifiedLiveDevSession(activeUid) && sandboxS2Enabled;
-  const seasonInfo = getEffectiveSeasonInfo(activeUid, verifiedDevSandbox, nowMs);
+  const verifiedDevSandboxS3 = isVerifiedLiveDevSession(activeUid) && sandboxS3Enabled;
+  const seasonInfo = getEffectiveSeasonInfo(
+    activeUid,
+    verifiedDevSandbox,
+    nowMs,
+    verifiedDevSandboxS3
+  );
   const isSandbox = seasonInfo.isSandbox;
-  const isS2Active = seasonInfo.isFrozenApocalypseActive;
-  const seasonLabel = isS2Active
+  const isS3Active = Boolean(seasonInfo.isMarvelActive);
+  const isS2Active = seasonInfo.isFrozenApocalypseActive || isS3Active;
+  const seasonLabel = isS3Active
+    ? `Season #${seasonInfo.seasonNumber}: Marvel${isSandbox ? ' (PREVIEW)' : ''}`
+    : isS2Active
     ? `Season #${seasonInfo.seasonNumber}: Frozen Apocalypse${isSandbox ? ' (PREVIEW)' : ''}`
     : `Season #${seasonInfo.seasonNumber}`;
   const seasonRemainingSec = Math.max(0, Math.floor(seasonInfo.remainingMs / 1000));
@@ -269,25 +289,18 @@ export function App() {
     : 1;
 
   const serverNowMs = getServerNowMs();
-  const isRaidActive = isS2Active && zombieRaidEndsAt > nowMs;
-  const raidSecondsRemaining = isRaidActive ? Math.max(0, Math.ceil((zombieRaidEndsAt - nowMs) / 1000)) : 0;
-  const isBossRaidActive = Boolean(
-    isS2Active &&
-      activeGlobalEvent &&
-      activeGlobalEvent.type === 'zombie_boss_raid' &&
-      activeGlobalEvent.endsAtMs > serverNowMs &&
-      (!activeGlobalEvent.excludeSummoner ||
-        activeGlobalEvent.summonedByUid !== state.cloudAccount?.uid)
-  );
   const equippedCursor = getCursorById(state.equippedCursorId);
+  const isTargetedByActiveEvent = activeGlobalEvent?.targetUid
+    ? activeGlobalEvent.targetUid === state.cloudAccount?.uid
+    : !activeGlobalEvent?.excludeSummoner ||
+      activeGlobalEvent?.summonedByUid !== state.cloudAccount?.uid;
   const isScreenFrozen = Boolean(
     isS2Active &&
       !equippedCursor?.freezeImmune &&
       activeGlobalEvent &&
       activeGlobalEvent.type === 'screen_freeze' &&
       activeGlobalEvent.endsAtMs > serverNowMs &&
-      (!activeGlobalEvent.excludeSummoner ||
-        activeGlobalEvent.summonedByUid !== state.cloudAccount?.uid)
+      isTargetedByActiveEvent
   );
 
   const handleNotify = (title: string, subtitle: string) => {
@@ -313,7 +326,8 @@ export function App() {
     const eff = getEffectiveSeasonInfo(
       curr.cloudAccount?.uid,
       sandboxS2EnabledRef.current && isVerifiedLiveDevSession(curr.cloudAccount?.uid),
-      Date.now()
+      Date.now(),
+      sandboxS3EnabledRef.current && isVerifiedLiveDevSession(curr.cloudAccount?.uid)
     );
 
     setIsProbationActive(true);
@@ -357,9 +371,11 @@ export function App() {
       const eff = getEffectiveSeasonInfo(
         currUid,
         sandboxS2Enabled && isVerifiedLiveDevSession(currUid),
-        Date.now()
+        Date.now(),
+        sandboxS3Enabled && isVerifiedLiveDevSession(currUid)
       );
       const entries = await fetchWorldwideLeaderboard(eff.seasonId, 500, eff.isSandbox);
+      setAllPlayersList(entries);
       setTop3Players(entries.slice(0, 3));
       const onlineNow = entries.filter((e) => isLeaderboardPlayerOnline(e, currUid)).length;
       setOnlinePlayersCount(Math.max(currUid ? 1 : 0, onlineNow));
@@ -380,7 +396,8 @@ export function App() {
       const eff = getEffectiveSeasonInfo(
         uid,
         sandboxS2Enabled && isVerifiedLiveDevSession(uid),
-        Date.now()
+        Date.now(),
+        sandboxS3Enabled && isVerifiedLiveDevSession(uid)
       );
 
       const ban = await checkAccountBanStatus(uid, username, false);
@@ -439,17 +456,29 @@ export function App() {
     checkBanAndLeaderboard();
     const interval = setInterval(checkBanAndLeaderboard, 30000);
     return () => clearInterval(interval);
-  }, [state.cloudAccount?.uid, state.cloudAccount?.displayUsername, sandboxS2Enabled]);
+  }, [state.cloudAccount?.uid, state.cloudAccount?.displayUsername, sandboxS2Enabled, sandboxS3Enabled]);
 
   // At Monday midnight Season 2 launch, exit any active dev sandbox preview and reset to fresh Season 2
   useEffect(() => {
     if (nowMs < SEASON_2_CONFIG.launchTimeMs) return;
     if (mondayRolloverTriggeredRef.current) return;
+    if (
+      sandboxS3Enabled ||
+      state.currentSeasonId === 'season_3' ||
+      isS3Active ||
+      seasonInfo.isDowntime
+    ) {
+      return;
+    }
     if (!sandboxS2Enabled && state.currentSeasonId === 'season_2') return;
     mondayRolloverTriggeredRef.current = true;
 
     sandboxS2EnabledRef.current = false;
     setSandboxS2Enabled(false);
+    if (nowMs >= SEASON_3_CONFIG.launchTimeMs) {
+      sandboxS3EnabledRef.current = false;
+      setSandboxS3Enabled(false);
+    }
     setSandboxStormStartMs(null);
     setPreviewDowntimeOverride(false);
 
@@ -500,10 +529,6 @@ export function App() {
         setShowDevToolsModal(false);
         return;
       }
-      if (showPetsModal) {
-        setShowPetsModal(false);
-        return;
-      }
       if (showItemShopModal) {
         setShowItemShopModal(false);
         return;
@@ -532,7 +557,6 @@ export function App() {
     showIntroCutscene,
     activeBanRecord,
     showDevToolsModal,
-    showPetsModal,
     showItemShopModal,
     showLiveEventsModal,
     showSkinQualityModal,
@@ -548,17 +572,17 @@ export function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Always play season-appropriate music: Frozen Winter / Live Event Synth in S2, Chill / Techno in S1
+  // Always play season-appropriate music: S2/S3 Event Synth during events, Winter/Marvel or Chill in S1
   useEffect(() => {
     if (
       showIntroCutscene ||
       showFrozenIntro ||
-      pendingRaidCutscene ||
+      showMarvelIntro ||
+      Boolean(pendingSnapCutscene) ||
       pendingEventCutscene ||
       showTokenCutscene ||
       chestCutsceneLoot ||
-      crateCutsceneResult ||
-      eggHatchCutscene
+      crateCutsceneResult
     ) {
       return;
     }
@@ -567,34 +591,39 @@ export function App() {
     const isGlobalLiveEventActive = Boolean(
       activeGlobalEvent && activeGlobalEvent.endsAtMs > getServerNowMs()
     );
-    if (isS2Active) {
+    if (seasonInfo.isDowntime) {
+      soundManager.setMusicTrack('s3_downtime');
+    } else if (isS3Active) {
       soundManager.setMusicTrack(
-        isStormMusic || isGlobalLiveEventActive || isRaidActive ? 's2_event' : 's2_winter'
+        isStormMusic || isGlobalLiveEventActive ? 's3_event' : 's3_marvel'
+      );
+    } else if (isS2Active) {
+      soundManager.setMusicTrack(
+        isStormMusic || isGlobalLiveEventActive ? 's2_event' : 's2_winter'
       );
     } else {
       soundManager.setMusicTrack(isStormMusic ? 'storm' : 'chill');
     }
   }, [
+    seasonInfo.isDowntime,
+    isS3Active,
     isS2Active,
     stormState.status,
     activeGlobalEvent,
-    isRaidActive,
     showIntroCutscene,
     showFrozenIntro,
-    pendingRaidCutscene,
+    showMarvelIntro,
+    pendingSnapCutscene,
     pendingEventCutscene,
     showTokenCutscene,
     chestCutsceneLoot,
     crateCutsceneResult,
-    eggHatchCutscene,
   ]);
 
-  // Mandatory Sign-In: Only show the Sign In popup after cloud hydration completes if not signed in & not in Downtime
+  // Mandatory Sign-In: Must sign in BEFORE loading screen, downtime preview, or one-time cutscene
   useEffect(() => {
     if (
       !isInitialCloudHydrating &&
-      !seasonInfo.isDowntime &&
-      !showIntroCutscene &&
       !activeBanRecord &&
       !state.cloudAccount &&
       !showAccountModal &&
@@ -604,8 +633,6 @@ export function App() {
     }
   }, [
     isInitialCloudHydrating,
-    seasonInfo.isDowntime,
-    showIntroCutscene,
     activeBanRecord,
     state.cloudAccount,
     showAccountModal,
@@ -681,7 +708,8 @@ export function App() {
         const eff = getEffectiveSeasonInfo(
           uid,
           sandboxS2EnabledRef.current && isVerifiedLiveDevSession(uid),
-          Date.now()
+          Date.now(),
+          sandboxS3EnabledRef.current && isVerifiedLiveDevSession(uid)
         );
         const targetSandbox = eff.isSandbox;
 
@@ -698,11 +726,15 @@ export function App() {
 
         const liveInSandbox =
           targetSandbox &&
-          (stateRef.current.sandboxS2Enabled || stateRef.current.currentSeasonId === 'season_2');
+          (stateRef.current.sandboxS2Enabled ||
+            stateRef.current.sandboxS3Enabled ||
+            stateRef.current.currentSeasonId === 'season_2' ||
+            stateRef.current.currentSeasonId === 'season_3');
         const baseLocalState = targetSandbox
           ? {
               ...(liveInSandbox ? stateRef.current : loadSandboxGame()),
               sandboxS2Enabled: Boolean(sandboxS2EnabledRef.current || stateRef.current.sandboxS2Enabled),
+              sandboxS3Enabled: Boolean(sandboxS3EnabledRef.current || stateRef.current.sandboxS3Enabled),
             }
           : stateRef.current;
 
@@ -734,7 +766,11 @@ export function App() {
         let grantedNewS1Reward = false;
         setState((prev) => {
           const prevInSandbox =
-            targetSandbox && (prev.sandboxS2Enabled || prev.currentSeasonId === 'season_2');
+            targetSandbox &&
+            (prev.sandboxS2Enabled ||
+              prev.sandboxS3Enabled ||
+              prev.currentSeasonId === 'season_2' ||
+              prev.currentSeasonId === 'season_3');
           const sourceBase = targetSandbox
             ? prevInSandbox
               ? prev
@@ -803,11 +839,19 @@ export function App() {
             equippedSkin: nextEquippedSkin,
             currentSeasonId: eff.seasonId,
             sandboxS2Enabled: resolvedSandboxFlag,
+            sandboxS3Enabled: Boolean(
+              eff.isMarvelActive && eff.isSandbox && sandboxS3EnabledRef.current
+            ),
             activeSessionToken: sessionTokenRef.current || merged.activeSessionToken,
             season2IntroSeen: Boolean(
               checkedPrev.season2IntroSeen ||
                 merged.season2IntroSeen ||
                 frozenIntroSessionTriggeredRef.current
+            ),
+            season3IntroSeen: Boolean(
+              checkedPrev.season3IntroSeen ||
+                merged.season3IntroSeen ||
+                marvelIntroSessionTriggeredRef.current
             ),
             unlockedSkins: finalSkins,
             winnerBadges: nextBadges,
@@ -926,7 +970,8 @@ export function App() {
       const eff = getEffectiveSeasonInfo(
         curr.cloudAccount.uid,
         sandboxS2EnabledRef.current && isVerifiedLiveDevSession(curr.cloudAccount.uid),
-        now
+        now,
+        sandboxS3EnabledRef.current && isVerifiedLiveDevSession(curr.cloudAccount.uid)
       );
       const foreignNewer = await hasForeignDeviceSavedMoreRecently(
         curr.cloudAccount.uid,
@@ -985,7 +1030,8 @@ export function App() {
       const eff = getEffectiveSeasonInfo(
         uid,
         sandboxS2EnabledRef.current && isVerifiedLiveDevSession(uid),
-        Date.now()
+        Date.now(),
+        sandboxS3EnabledRef.current && isVerifiedLiveDevSession(uid)
       );
       const res = await verifySingleDeviceSession(uid, sessionTokenRef.current, eff.isSandbox);
       if (!res.valid) {
@@ -1120,12 +1166,13 @@ export function App() {
     sessionLockedByOtherDevice ||
     showIntroCutscene ||
     showFrozenIntro ||
-    pendingRaidCutscene ||
+    showMarvelIntro ||
+    showThanosReset ||
+    Boolean(pendingSnapCutscene) ||
     Boolean(pendingEventCutscene) ||
     Boolean(chestCutsceneLoot) ||
     Boolean(crateCutsceneResult) ||
     showTokenCutscene ||
-    Boolean(eggHatchCutscene) ||
     Boolean(offlineData);
   isGameplayPausedRef.current = isGameplayPaused;
 
@@ -1141,19 +1188,34 @@ export function App() {
     enabled: !isGameplayPaused && !isScreenFrozen,
   });
 
-  // Trigger 3D widescreen cutscene once per active global live event ID
+  // Season 3 Periodic Thanos Coin-Reset Event (every 5-10 minutes)
+  useEffect(() => {
+    if (!isS3Active || isGameplayPaused) return;
+    const delayMs = 300_000 + Math.floor(Math.random() * 300_000);
+    const timer = window.setTimeout(() => {
+      setShowThanosReset(true);
+    }, delayMs);
+    return () => window.clearTimeout(timer);
+  }, [isS3Active, isGameplayPaused]);
+
+  // Trigger 3D widescreen cutscene ONLY for necessary events (Time Freeze)
   useEffect(() => {
     if (
       seasonInfo.isDowntime ||
       showIntroCutscene ||
       showFrozenIntro ||
+      showMarvelIntro ||
+      Boolean(pendingSnapCutscene) ||
       activeBanRecord ||
       !activeGlobalEvent ||
       activeGlobalEvent.endsAtMs <= getServerNowMs()
     ) {
       return;
     }
-    if (lastCutsceneEventIdRef.current !== activeGlobalEvent.id) {
+    if (
+      activeGlobalEvent.type === 'screen_freeze' &&
+      lastCutsceneEventIdRef.current !== activeGlobalEvent.id
+    ) {
       lastCutsceneEventIdRef.current = activeGlobalEvent.id;
       setPendingEventCutscene({
         id: activeGlobalEvent.id,
@@ -1167,40 +1229,12 @@ export function App() {
     nowMs,
     showIntroCutscene,
     showFrozenIntro,
+    showMarvelIntro,
+    pendingSnapCutscene,
     activeBanRecord,
   ]);
 
-  // Season 2: Guarantee starter Frost Pup exists & is equipped so pets never disappear
-  const petCount = state.pets?.length || 0;
-  const equippedPetCount = state.equippedPetIds?.length || 0;
-
-  useEffect(() => {
-    if (!isS2Active || isGameplayPaused || (petCount > 0 && equippedPetCount > 0)) return;
-    setState((prev) => {
-      const pets = prev.pets || [];
-      if (pets.length === 0) {
-        const starterPet = createStarterFrostPup();
-        const next: GameState = {
-          ...prev,
-          pets: [starterPet],
-          equippedPetIds: [starterPet.instanceId],
-        };
-        saveGame(next);
-        return next;
-      }
-      if ((prev.equippedPetIds || []).length === 0) {
-        const next: GameState = {
-          ...prev,
-          equippedPetIds: [pets[0].instanceId],
-        };
-        saveGame(next);
-        return next;
-      }
-      return prev;
-    });
-  }, [isS2Active, isGameplayPaused, petCount, equippedPetCount]);
-
-  // Sub-second real-time stream + fast fallback sync for global summoned live events, Flying Golden Matthew swarms & scoreboards
+  // Sub-second real-time stream + fast fallback sync for global events, Golden Swarms & Infinity Snaps (live + next-login victims)
   useEffect(() => {
     if (seasonInfo.isDowntime || isInitialCloudHydrating || activeBanRecord) {
       setActiveGlobalEvent(null);
@@ -1218,6 +1252,23 @@ export function App() {
           }
           return snap.activeEvent;
         });
+      }
+
+      const currUid = stateRef.current.cloudAccount?.uid || '';
+      const lastSnapProcessed = stateRef.current.lastProcessedSnapId || null;
+      const pendingSnap = extractLatestPendingSnapFromStore(
+        snap.store,
+        currUid,
+        lastSnapProcessed,
+        isSandbox,
+        getServerNowMs()
+      );
+      if (pendingSnap) {
+        setPendingSnapCutscene((existing) =>
+          existing?.snap.snapId === pendingSnap.snapId
+            ? existing
+            : { snap: pendingSnap, isPreview: false }
+        );
       }
 
       if (snap.latestSwarm && seenGoldenSwarmIdRef.current !== snap.latestSwarm.id) {
@@ -1256,40 +1307,12 @@ export function App() {
     };
   }, [seasonInfo.isDowntime, isSandbox, isInitialCloudHydrating, activeBanRecord]);
 
-  // Season 2: Random 10-15 minute ZOMBIE RAID! waves
-  useEffect(() => {
-    if (
-      !isS2Active ||
-      seasonInfo.isDowntime ||
-      showIntroCutscene ||
-      showFrozenIntro ||
-      activeBanRecord ||
-      sessionLockedByOtherDevice
-    ) {
-      return;
-    }
-    const minMs = SEASON_2_CONFIG.raidIntervalMinSeconds * 1000;
-    const maxMs = SEASON_2_CONFIG.raidIntervalMaxSeconds * 1000;
-    const delayMs = minMs + Math.random() * Math.max(1000, maxMs - minMs);
-    const t = setTimeout(() => {
-      setPendingRaidCutscene(true);
-    }, delayMs);
-    return () => clearTimeout(t);
-  }, [
-    isS2Active,
-    seasonInfo.isDowntime,
-    showIntroCutscene,
-    showFrozenIntro,
-    activeBanRecord,
-    sessionLockedByOtherDevice,
-    zombieRaidEndsAt,
-  ]);
-
   // Season 2: Trigger animated Frozen Apocalypse launch cutscene ONCE on first entry
   useEffect(() => {
     if (
       !frozenIntroSessionTriggeredRef.current &&
       isS2Active &&
+      !isS3Active &&
       !isInitialCloudHydrating &&
       !showIntroCutscene &&
       !activeBanRecord &&
@@ -1300,10 +1323,32 @@ export function App() {
     }
   }, [
     isS2Active,
+    isS3Active,
     isInitialCloudHydrating,
     showIntroCutscene,
     activeBanRecord,
     state.season2IntroSeen,
+  ]);
+
+  // Season 3: Trigger Marvel Multiverse intro cutscene showcasing all 50 skins ONCE on first entry
+  useEffect(() => {
+    if (
+      !marvelIntroSessionTriggeredRef.current &&
+      isS3Active &&
+      !isInitialCloudHydrating &&
+      !showIntroCutscene &&
+      !activeBanRecord &&
+      !state.season3IntroSeen
+    ) {
+      marvelIntroSessionTriggeredRef.current = true;
+      setShowMarvelIntro(true);
+    }
+  }, [
+    isS3Active,
+    isInitialCloudHydrating,
+    showIntroCutscene,
+    activeBanRecord,
+    state.season3IntroSeen,
   ]);
 
   const handleEarnCoins = (
@@ -1438,18 +1483,9 @@ export function App() {
     setShowFrozenIntro(false);
     let persistedNext: GameState | null = null;
     setState((prev) => {
-      const hasPets = (prev.pets || []).length > 0;
-      const starterPet = createStarterFrostPup();
-      const nextPets = hasPets ? prev.pets : [starterPet];
-      const nextEquipped =
-        (prev.equippedPetIds || []).length > 0
-          ? prev.equippedPetIds
-          : [nextPets[0].instanceId];
       const next: GameState = {
         ...prev,
         season2IntroSeen: true,
-        pets: nextPets,
-        equippedPetIds: nextEquipped,
         lastSaveTime: Date.now(),
         lastActiveInputTimestamp: Date.now(),
       };
@@ -1466,13 +1502,105 @@ export function App() {
         true
       ).catch(() => {});
     }
-    handleNotify('FROST PUP JOINED!', 'Starter Uncommon Pet equipped to defend against Zombies!');
+  };
+
+  const handleCompleteMarvelIntro = () => {
+    marvelIntroSessionTriggeredRef.current = true;
+    setShowMarvelIntro(false);
+    let persistedNext: GameState | null = null;
+    setState((prev) => {
+      const next: GameState = {
+        ...prev,
+        season3IntroSeen: true,
+        lastSaveTime: Date.now(),
+        lastActiveInputTimestamp: Date.now(),
+      };
+      persistedNext = next;
+      saveGame(next);
+      return next;
+    });
+    const toPush = persistedNext || { ...stateRef.current, season3IntroSeen: true };
+    if (toPush.cloudAccount) {
+      saveStateToCloud(
+        toPush.cloudAccount.uid,
+        toPush.cloudAccount.displayUsername,
+        toPush,
+        true
+      ).catch(() => {});
+    }
+    handleNotify('SEASON 3: MARVEL!', '50 Marvel Matthews & the Infinity Gauntlet await!');
+  };
+
+  const handleTriggerInfinitySnap = async (explicitTargetUid?: string) => {
+    const curr = stateRef.current;
+    const currUid = curr.cloudAccount?.uid || 'local_player';
+    const currUsername =
+      curr.cloudAccount?.displayUsername || curr.cloudAccount?.username || 'Player';
+    const isDev = isAuthorizedDevUid(currUid);
+    if (!isDev && !hasAllInfinityStones(curr.infinityStones)) {
+      handleNotify('STONES INCOMPLETE', 'Collect all 6 Infinity Stones from Chests first!');
+      return;
+    }
+
+    setIsSnapBusy(true);
+    try {
+      const entries =
+        allPlayersList.length > 0
+          ? allPlayersList
+          : await fetchWorldwideLeaderboard(seasonInfo.seasonId, 500, isSandbox);
+      let victimUids: string[] = [];
+      if (explicitTargetUid) {
+        victimUids = [explicitTargetUid];
+      } else {
+        const candidates = entries.filter((e) => e.uid !== currUid);
+        const shuffled = [...candidates].sort(() => Math.random() - 0.5);
+        const halfCount = Math.max(1, Math.ceil(shuffled.length / 2));
+        victimUids = shuffled.slice(0, halfCount).map((c) => c.uid);
+      }
+
+      if (victimUids.length === 0) {
+        handleNotify('NO OTHER PLAYERS FOUND', 'No eligible opponent players found to snap.');
+        return;
+      }
+
+      const snapRec = await broadcastInfinitySnap({
+        uid: currUid,
+        username: currUsername,
+        victimUids,
+        isSandbox,
+        allowSelfVictimForTest: explicitTargetUid === currUid,
+      });
+
+      setState((prev) => {
+        const next: GameState = {
+          ...prev,
+          infinityStones: [],
+          lastSaveTime: Date.now(),
+        };
+        saveGame(next);
+        if (next.cloudAccount) {
+          saveStateToCloud(next.cloudAccount.uid, next.cloudAccount.displayUsername, next, true).catch(
+            () => {}
+          );
+        }
+        return next;
+      });
+      handleNotify(
+        'INFINITY SNAP UNLEASHED!',
+        `${snapRec.victimUids.length} player${snapRec.victimUids.length === 1 ? '' : 's'} turned to dust!`
+      );
+      refreshMiniLeaderboard();
+    } finally {
+      setIsSnapBusy(false);
+    }
   };
 
   const handleToggleSandboxS2 = async () => {
     const currUid = stateRef.current.cloudAccount?.uid;
     if (!isVerifiedLiveDevSession(currUid)) return;
-    if (Date.now() >= SEASON_2_CONFIG.launchTimeMs) {
+    if (Date.now() >= SEASON_3_CONFIG.launchTimeMs) {
+      sandboxS3EnabledRef.current = false;
+      setSandboxS3Enabled(false);
       sandboxS2EnabledRef.current = false;
       setSandboxS2Enabled(false);
       setPreviewDowntimeOverride(false);
@@ -1480,35 +1608,35 @@ export function App() {
     }
     if (previewDowntimeOverride) {
       setPreviewDowntimeOverride(false);
-      if (sandboxS2Enabled) return;
+      if (sandboxS3Enabled) return;
     }
-    const turningOn = !sandboxS2Enabled;
-    // Save live Season 1 / Downtime progress before switching into ephemeral Season 2 preview
+    const turningOn = !sandboxS3Enabled;
+    // Save live progress before switching into Season 3 Dev Preview (leaderboards off)
     if (turningOn) {
-      saveGame({ ...stateRef.current, sandboxS2Enabled: false }, true);
+      saveGame({ ...stateRef.current, sandboxS2Enabled: false, sandboxS3Enabled: false }, true);
     }
-    sandboxS2EnabledRef.current = turningOn;
-    setSandboxS2Enabled(turningOn);
+    sandboxS2EnabledRef.current = false;
+    setSandboxS2Enabled(false);
+    sandboxS3EnabledRef.current = turningOn;
+    setSandboxS3Enabled(turningOn);
     if (turningOn) {
-      const s2Fresh = loadSandboxGame();
-      if (!s2Fresh.introCutsceneSeen && !s2Fresh.season2IntroSeen) {
+      marvelIntroSessionTriggeredRef.current = false;
+      const s3Fresh = loadSandboxGame();
+      if (!s3Fresh.introCutsceneSeen && !s3Fresh.season3IntroSeen) {
         setShowIntroCutscene(true);
       }
       setState((prev) => {
         const allowChamp =
           (prev.cloudAccount?.displayUsername || '').trim().toLowerCase() === 'liamkd3' ||
           (prev.winnerBadges || []).some((b) => b.seasonNumber >= 2);
-        // Only carry over legitimate pre-Season-2 live items (never leaked Season 2 skins/coins/pets)
         const carrySkins = Array.from(
           new Set(['classic_matthew', ...(prev.unlockedSkins || [])])
-        ).filter(
-          (id) => !isSeason2OnlySkinId(id) && (id !== 'champion_matthew' || allowChamp)
-        );
+        ).filter((id) => id !== 'champion_matthew' || allowChamp);
         const carryEquipped = carrySkins.includes(prev.equippedSkin)
           ? prev.equippedSkin
           : 'classic_matthew';
         const next: GameState = {
-          ...s2Fresh,
+          ...s3Fresh,
           gems: prev.gems || 0,
           lifetimeGems: prev.lifetimeGems || 0,
           unlockedSkins: carrySkins,
@@ -1518,51 +1646,37 @@ export function App() {
             ? prev.permanentAchievements
             : [],
           seasonHistory: Array.isArray(prev.seasonHistory) ? prev.seasonHistory : [],
-          settings: prev.settings || s2Fresh.settings,
-          currentSeasonId: 'season_2',
-          sandboxS2Enabled: true,
+          settings: prev.settings || s3Fresh.settings,
+          currentSeasonId: 'season_3',
+          sandboxS2Enabled: false,
+          sandboxS3Enabled: true,
+          season3IntroSeen: false,
           lastOwnerUid: prev.lastOwnerUid,
           lastSaveTime: Date.now(),
           cloudAccount: prev.cloudAccount,
         };
         return next;
       });
-      handleNotify('SEASON 2 PREVIEW ON', 'Entered ephemeral Season 2 preview (resets on reload).');
+      handleNotify(
+        'SEASON 3: MARVEL PREVIEW ON',
+        'Downtime skipped for dev testing (Leaderboards isolated to Sandbox).'
+      );
+      setTimeout(() => refreshMiniLeaderboard(), 80);
     } else {
-      const s1Local = loadGame();
+      const liveLocal = loadGame();
       setState((prev) => {
-        const allowChamp =
-          (prev.cloudAccount?.displayUsername || '').trim().toLowerCase() === 'liamkd3' ||
-          (prev.winnerBadges || []).some((b) => b.seasonNumber >= 2);
-        const stripS2 = Date.now() < SEASON_2_CONFIG.launchTimeMs;
-        // Never copy Season 2 preview skins or scores back into live Season 1 / Downtime state
-        const cleanS1Skins = Array.from(
-          new Set(['classic_matthew', ...(s1Local.unlockedSkins || [])])
-        ).filter(
-          (id) =>
-            (id !== 'champion_matthew' || allowChamp) &&
-            (!stripS2 || !isSeason2OnlySkinId(id))
-        );
         const next: GameState = {
-          ...s1Local,
-          unlockedSkins: cleanS1Skins,
-          equippedSkin: cleanS1Skins.includes(s1Local.equippedSkin)
-            ? s1Local.equippedSkin
-            : 'classic_matthew',
+          ...liveLocal,
           sandboxS2Enabled: false,
+          sandboxS3Enabled: false,
           lastSaveTime: Date.now(),
           cloudAccount: prev.cloudAccount,
         };
         saveGame(next, true);
         return next;
       });
-      handleNotify('SEASON 2 PREVIEW OFF', 'Returned to Season Downtime.');
+      handleNotify('SEASON 3 PREVIEW OFF', 'Returned to Season Downtime.');
     }
-  };
-
-  const handleTriggerZombieRaidNow = () => {
-    if (!isVerifiedLiveDevSession(stateRef.current.cloudAccount?.uid)) return;
-    setPendingRaidCutscene(true);
   };
 
   const handlePreviewGlobalEvent = (spec: PlayerEventCostSpec) => {
@@ -1590,7 +1704,11 @@ export function App() {
     handleNotify('PREVIEWING EVENT', `${spec.label} (local only, 0 Gems spent)`);
   };
 
-  const handleDevSpawnGlobalEvent = async (spec: PlayerEventCostSpec) => {
+  const handleDevSpawnGlobalEvent = async (
+    spec: PlayerEventCostSpec,
+    targetUid?: string,
+    targetUsername?: string
+  ) => {
     const currUid = stateRef.current.cloudAccount?.uid;
     if (!isVerifiedLiveDevSession(currUid)) return;
     const username =
@@ -1604,6 +1722,8 @@ export function App() {
       isSandbox,
       broadcastToAll: true,
       excludeSummoner: spec.excludeSummoner,
+      targetUid,
+      targetUsername,
     });
     if (res.ok && res.event) {
       await adminPublishGlobalEvent(res.event).catch(() => false);
@@ -1611,7 +1731,12 @@ export function App() {
       setShowDevToolsModal(false);
       setActiveGlobalEvent(res.event);
       soundManager.playStormWaveStart();
-      handleNotify('GLOBAL EVENT LAUNCHED!', `${spec.label} live on everyone's screen (FREE)!`);
+      handleNotify(
+        spec.kind === 'attack' ? 'VILLAIN ATTACK LAUNCHED!' : 'GLOBAL EVENT LAUNCHED!',
+        targetUsername
+          ? `${spec.label} targeted on ${targetUsername} (FREE)!`
+          : `${spec.label} live on everyone's screen (FREE)!`
+      );
     }
   };
 
@@ -1682,298 +1807,53 @@ export function App() {
       return;
     }
 
+    if (action === 'replay_s3_intro') {
+      setShowDevToolsModal(false);
+      setShowMarvelIntro(true);
+      handleNotify('REPLAYING S3 INTRO', 'Playing Season 3: Marvel 50-skin cutscene.');
+      return;
+    }
+
     if (action === 'replay_s2_intro') {
       setShowDevToolsModal(false);
       setShowFrozenIntro(true);
       handleNotify('REPLAYING S2 INTRO', 'Playing Season 2 launch cutscene.');
-    }
-  };
-
-  const handleZombieDefeated = (coinReward: number, gemReward = 0) => {
-    setState((prev) => {
-      const next: GameState = {
-        ...prev,
-        coins: prev.coins + coinReward,
-        lifetimeCoins: prev.lifetimeCoins + coinReward,
-        seasonalScore: prev.seasonalScore + coinReward,
-        gems: prev.gems + gemReward,
-        lifetimeGems: prev.lifetimeGems + gemReward,
-        zombiesDefeated: (prev.zombiesDefeated || 0) + 1,
-      };
-      saveGame(next);
-      return next;
-    });
-  };
-
-  const handleZombieStealCoins = (stolenAmount: number) => {
-    setState((prev) => {
-      const next: GameState = {
-        ...prev,
-        coins: Math.max(0, prev.coins - Math.max(0, stolenAmount)),
-        zombiesStolenCoins: (prev.zombiesStolenCoins || 0) + Math.max(0, stolenAmount),
-        zombieHitsTaken: (prev.zombieHitsTaken || 0) + 1,
-      };
-      saveGame(next);
-      return next;
-    });
-  };
-
-  const handleClaimSnowDrop = (drop: SnowLootDrop) => {
-    const curr = stateRef.current;
-    if (drop.kind === 'egg') {
-      const rarity = drop.eggRarity || 'Common Egg';
-      setState((prev) => {
-        const next: GameState = {
-          ...prev,
-          sealedEggs: {
-            ...(prev.sealedEggs || {}),
-            [rarity]: (prev.sealedEggs?.[rarity] || 0) + 1,
-          } as Record<EggRarity, number>,
-        };
-        saveGame(next);
-        return next;
-      });
-      soundManager.playSkinUnlock();
-      handleNotify('EGG FOUND IN SNOW!', `Picked up a ${rarity} — open Pets to hatch it!`);
       return;
     }
 
-    if (drop.kind === 'chest') {
-      const cps = calculateCPS(curr, { fridayBonusActive: fridayBonus, stormWaveMultiplier });
-      const cp = calculateClickPower(curr, { fridayBonusActive: fridayBonus, stormWaveMultiplier });
-      const allVaultOwned = MATTHEW_VAULT_SKINS.every((s) => curr.unlockedSkins.includes(s.id));
-      const loot = rollChestLoot(cps, cp.totalPower, curr.unlockedSkins, allVaultOwned);
-      setState((prev) => {
-        const nextSkins =
-          loot.foundSkinId && !prev.unlockedSkins.includes(loot.foundSkinId)
-            ? [...prev.unlockedSkins, loot.foundSkinId]
-            : prev.unlockedSkins;
-        const nextSealedEggs = { ...(prev.sealedEggs || {}) } as Record<EggRarity, number>;
-        if (loot.eggRarity) {
-          nextSealedEggs[loot.eggRarity] = (nextSealedEggs[loot.eggRarity] || 0) + 1;
-        }
-        const gotToken = Boolean(prev.hasMatthewShopToken || loot.foundMatthewShopToken);
-        const mergedWithTokenSkins = gotToken
-          ? Array.from(new Set([...nextSkins, ...getPermanentTokenFreeSkinIds(false)]))
-          : nextSkins;
-        const next: GameState = {
-          ...prev,
-          gems: prev.gems + loot.gems,
-          lifetimeGems: prev.lifetimeGems + loot.gems,
-          coins: prev.coins + loot.coins,
-          lifetimeCoins: prev.lifetimeCoins + loot.coins,
-          seasonalScore: prev.seasonalScore + loot.coins,
-          chestsOpened: (prev.chestsOpened || 0) + 1,
-          matthewShopTokens: Math.max(
-            gotToken ? 1 : 0,
-            (prev.matthewShopTokens || 0) + (loot.foundMatthewShopToken ? 1 : 0)
-          ),
-          hasMatthewShopToken: gotToken,
-          unlockedCursors: gotToken
-            ? Array.from(
-                new Set([...(prev.unlockedCursors || []), ...ALL_CURSORS.map((c) => c.id)])
-              )
-            : prev.unlockedCursors,
-          ownedCosmetics: gotToken
-            ? Array.from(
-                new Set([...(prev.ownedCosmetics || []), ...COSMETIC_ITEMS.map((c) => c.id)])
-              )
-            : prev.ownedCosmetics,
-          unlockedSkins: mergedWithTokenSkins,
-          sealedEggs: nextSealedEggs,
-        };
-        saveGame(next);
-        return next;
-      });
-      soundManager.setMusicTrack('s2_event', true);
-      if (loot.foundMatthewShopToken) {
-        const tokenUid = curr.cloudAccount?.uid || 'local_player';
-        const tokenUser =
-          curr.cloudAccount?.displayUsername || curr.cloudAccount?.username || 'A lucky player';
-        broadcastMatthewTokenPull({ uid: tokenUid, username: tokenUser, isSandbox })
-          .then((b) => {
-            seenTokenBroadcastIdRef.current = b.id;
-          })
-          .catch(() => {});
-      }
-      setChestCutsceneLoot(loot);
-      return;
-    }
-
-    if (drop.kind === 'gems') {
-      const gemGain = Math.max(1, drop.gemAmount || 2);
+    if (action === 'grant_all_stones') {
       setState((prev) => {
         const next: GameState = {
           ...prev,
-          gems: prev.gems + gemGain,
-          lifetimeGems: prev.lifetimeGems + gemGain,
+          infinityStones: [...ALL_INFINITY_STONE_IDS],
           lastSaveTime: Date.now(),
         };
         saveGame(next);
         return next;
       });
-      soundManager.playBuy();
-      handleNotify('GEMS COLLECTED!', `Found +${gemGain} Frost Gems buried in the snow!`);
+      handleNotify('ALL 6 INFINITY STONES GRANTED!', 'Open the Gauntlet tab to Snap!');
       return;
     }
 
-    const coinGain = Math.max(15, drop.coinAmount || 40);
-    setState((prev) => {
-      const next: GameState = {
-        ...prev,
-        coins: prev.coins + coinGain,
-        lifetimeCoins: prev.lifetimeCoins + coinGain,
-        seasonalScore: prev.seasonalScore + coinGain,
-        lastSaveTime: Date.now(),
-      };
-      saveGame(next);
-      return next;
-    });
-    soundManager.playBuy();
-  };
-
-  const handleHatchEgg = (rarity: EggRarity) => {
-    const def = getEggDefinition(rarity);
-    const snap = stateRef.current;
-    const avail = snap.sealedEggs?.[rarity] || 0;
-    const hatchCost = snap.hasMatthewShopToken ? 0 : def.hatchGemCost;
-    if (avail <= 0 || snap.gems < hatchCost) return;
-
-    const rolledSpec = rollHatchedPetSpecies(rarity);
-    setState((prev) => {
-      const count = prev.sealedEggs?.[rarity] || 0;
-      const effectiveCost = prev.hasMatthewShopToken ? 0 : def.hatchGemCost;
-      if (count <= 0 || prev.gems < effectiveCost) return prev;
-      const newPetId = `pet_${rolledSpec.speciesId}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-      const newPet = {
-        instanceId: newPetId,
-        speciesId: rolledSpec.speciesId,
-        name: rolledSpec.name,
-        rarity,
-        level: 1,
-        hunger: 100,
-        hatchedAt: Date.now(),
-      };
-      const nextEquipped =
-        (prev.equippedPetIds || []).length < SEASON_2_CONFIG.maxEquippedPets
-          ? [...(prev.equippedPetIds || []), newPetId]
-          : prev.equippedPetIds;
-      const next: GameState = {
-        ...prev,
-        gems: prev.gems - effectiveCost,
-        sealedEggs: {
-          ...(prev.sealedEggs || {}),
-          [rarity]: count - 1,
-        } as Record<EggRarity, number>,
-        pets: [...(prev.pets || []), newPet],
-        equippedPetIds: nextEquipped,
-        lastSaveTime: Date.now(),
-      };
-      saveGame(next);
-      return next;
-    });
-    setShowPetsModal(false);
-    setEggHatchCutscene({ rarity, speciesId: rolledSpec.speciesId, petName: rolledSpec.name });
-  };
-
-  const handleToggleEquipPet = (instanceId: string) => {
-    setState((prev) => {
-      const curr = prev.equippedPetIds || [];
-      let nextEq: string[];
-      if (curr.includes(instanceId)) {
-        nextEq = curr.filter((id) => id !== instanceId);
-      } else {
-        if (curr.length >= SEASON_2_CONFIG.maxEquippedPets) {
-          nextEq = [...curr.slice(1), instanceId];
-        } else {
-          nextEq = [...curr, instanceId];
-        }
-      }
-      const next = { ...prev, equippedPetIds: nextEq, lastSaveTime: Date.now() };
-      saveGame(next);
-      return next;
-    });
-  };
-
-  const handleUpgradePet = (instanceId: string) => {
-    setState((prev) => {
-      const target = (prev.pets || []).find((p) => p.instanceId === instanceId);
-      if (!target) return prev;
-      const cost = prev.hasMatthewShopToken ? 0 : getPetUpgradeGemCost(target);
-      if (prev.gems < cost) return prev;
-      const nextPets = prev.pets.map((p) =>
-        p.instanceId === instanceId ? { ...p, level: p.level + 1 } : p
-      );
-      const next = {
-        ...prev,
-        gems: prev.gems - cost,
-        pets: nextPets,
-        lastSaveTime: Date.now(),
-      };
-      saveGame(next);
-      return next;
-    });
-    soundManager.playBuy();
-  };
-
-  const handleSellPet = (instanceId: string) => {
-    const snap = stateRef.current;
-    if ((snap.pets || []).length <= 1) {
-      handleNotify('CANNOT SELL LAST PET', 'You must keep at least 1 active pet in your squad!');
-      return;
+    if (action === 'preview_snap_dust' || action === 'test_snap_self') {
+      setShowDevToolsModal(false);
+      const curr = stateRef.current;
+      const username =
+        curr.cloudAccount?.displayUsername || curr.cloudAccount?.username || 'Thanos';
+      setPendingSnapCutscene({
+        snap: {
+          uid: curr.cloudAccount?.uid || 'local_tester',
+          snapId: `dev_snap_${Date.now()}`,
+          snappedByUid: 'dev_test',
+          snappedByUsername: username,
+          victimUids: [curr.cloudAccount?.uid || 'local_tester'],
+          timestampMs: Date.now(),
+          expiresAtMs: Date.now() + 60_000,
+          isSandbox,
+        },
+        isPreview: action === 'preview_snap_dust',
+      });
     }
-    const target = (snap.pets || []).find((p) => p.instanceId === instanceId);
-    if (!target) return;
-    const gemRefund = getPetSellGemValue(target);
-    setState((prev) => {
-      if ((prev.pets || []).length <= 1) return prev;
-      const found = prev.pets.find((p) => p.instanceId === instanceId);
-      if (!found) return prev;
-      const refund = getPetSellGemValue(found);
-      const remainingPets = prev.pets.filter((p) => p.instanceId !== instanceId);
-      let nextEquipped = (prev.equippedPetIds || []).filter((id) => id !== instanceId);
-      if (nextEquipped.length === 0 && remainingPets.length > 0) {
-        nextEquipped = [remainingPets[0].instanceId];
-      }
-      const next: GameState = {
-        ...prev,
-        gems: prev.gems + refund,
-        lifetimeGems: prev.lifetimeGems + refund,
-        pets: remainingPets,
-        equippedPetIds: nextEquipped,
-        lastSaveTime: Date.now(),
-      };
-      saveGame(next);
-      return next;
-    });
-    soundManager.playBuy();
-    handleNotify('PET SOLD!', `Sold ${target.name} (Lv.${target.level}) for +${gemRefund} Gems!`);
-  };
-
-  const handleSellEgg = (rarity: EggRarity) => {
-    const snap = stateRef.current;
-    const avail = snap.sealedEggs?.[rarity] || 0;
-    if (avail <= 0) return;
-    const gemRefund = getEggSellGemValue(rarity);
-    setState((prev) => {
-      const count = prev.sealedEggs?.[rarity] || 0;
-      if (count <= 0) return prev;
-      const refund = getEggSellGemValue(rarity);
-      const next: GameState = {
-        ...prev,
-        gems: prev.gems + refund,
-        lifetimeGems: prev.lifetimeGems + refund,
-        sealedEggs: {
-          ...(prev.sealedEggs || {}),
-          [rarity]: count - 1,
-        } as Record<EggRarity, number>,
-        lastSaveTime: Date.now(),
-      };
-      saveGame(next);
-      return next;
-    });
-    soundManager.playBuy();
-    handleNotify('EGG SOLD!', `Sold 1× ${rarity} for +${gemRefund} Gems!`);
   };
 
   const handleClaimVaultSkinWithToken = (skinId: string) => {
@@ -2050,7 +1930,9 @@ export function App() {
       cps,
       cp.totalPower,
       curr.unlockedSkins,
-      Boolean(curr.hasMatthewShopToken)
+      Boolean(curr.hasMatthewShopToken),
+      Math.random,
+      curr.infinityStones || []
     );
 
     setState((prev) => {
@@ -2060,14 +1942,14 @@ export function App() {
         loot.foundSkinId && !prev.unlockedSkins.includes(loot.foundSkinId)
           ? [...prev.unlockedSkins, loot.foundSkinId]
           : prev.unlockedSkins;
-      const nextSealedEggs = { ...(prev.sealedEggs || {}) } as Record<EggRarity, number>;
-      if (loot.eggRarity) {
-        nextSealedEggs[loot.eggRarity] = (nextSealedEggs[loot.eggRarity] || 0) + 1;
-      }
       const gotToken = Boolean(prev.hasMatthewShopToken || loot.foundMatthewShopToken);
       const mergedWithTokenSkins = gotToken
         ? Array.from(new Set([...nextSkins, ...getPermanentTokenFreeSkinIds(false)]))
         : nextSkins;
+      const nextStones =
+        loot.foundInfinityStone && !(prev.infinityStones || []).includes(loot.foundInfinityStone)
+          ? [...(prev.infinityStones || []), loot.foundInfinityStone]
+          : prev.infinityStones || [];
       const next: GameState = {
         ...prev,
         gems: prev.gems - effectiveCost + loot.gems,
@@ -2080,6 +1962,7 @@ export function App() {
           (prev.matthewShopTokens || 0) + (loot.foundMatthewShopToken ? 1 : 0)
         ),
         hasMatthewShopToken: gotToken,
+        infinityStones: nextStones,
         unlockedCursors: gotToken
           ? Array.from(
               new Set([...(prev.unlockedCursors || []), ...ALL_CURSORS.map((c) => c.id)])
@@ -2091,11 +1974,18 @@ export function App() {
             )
           : prev.ownedCosmetics,
         unlockedSkins: mergedWithTokenSkins,
-        sealedEggs: nextSealedEggs,
       };
       saveGame(next);
       return next;
     });
+
+    if (loot.foundInfinityStone) {
+      const stoneDef = getInfinityStoneDefinition(loot.foundInfinityStone);
+      handleNotify(
+        'INFINITY STONE UNCOVERED!',
+        `Collected the ${stoneDef?.name || loot.foundInfinityStone}! Check the Gauntlet tab!`
+      );
+    }
 
     if (loot.foundMatthewShopToken) {
       const tokenUid = curr.cloudAccount?.uid || 'local_player';
@@ -2107,6 +1997,67 @@ export function App() {
         })
         .catch(() => {});
     }
+    setChestCutsceneLoot(loot);
+    return loot;
+  };
+
+  const handleCatchFallingChest = (forceStone = false): ChestLootResult => {
+    const curr = stateRef.current;
+    const cps = calculateCPS(curr, { fridayBonusActive: fridayBonus, stormWaveMultiplier });
+    const cp = calculateClickPower(curr, { fridayBonusActive: fridayBonus, stormWaveMultiplier });
+    const loot = rollChestLoot(
+      cps,
+      cp.totalPower,
+      curr.unlockedSkins,
+      Boolean(curr.hasMatthewShopToken),
+      Math.random,
+      curr.infinityStones || []
+    );
+
+    if (forceStone) {
+      const owned = new Set(curr.infinityStones || []);
+      const missing = ALL_INFINITY_STONE_IDS.filter((id) => !owned.has(id));
+      if (missing.length > 0) {
+        loot.foundInfinityStone = missing[Math.floor(Math.random() * missing.length)];
+      }
+    }
+
+    setState((prev) => {
+      const gotToken = Boolean(prev.hasMatthewShopToken || loot.foundMatthewShopToken);
+      const nextSkins = gotToken
+        ? Array.from(new Set([...prev.unlockedSkins, ...getPermanentTokenFreeSkinIds(false)]))
+        : prev.unlockedSkins;
+      const nextStones =
+        loot.foundInfinityStone && !(prev.infinityStones || []).includes(loot.foundInfinityStone)
+          ? [...(prev.infinityStones || []), loot.foundInfinityStone]
+          : prev.infinityStones || [];
+      const next: GameState = {
+        ...prev,
+        gems: prev.gems + loot.gems,
+        coins: prev.coins + loot.coins,
+        lifetimeCoins: prev.lifetimeCoins + loot.coins,
+        seasonalScore: prev.seasonalScore + loot.coins,
+        chestsOpened: (prev.chestsOpened || 0) + 1,
+        matthewShopTokens: Math.max(
+          gotToken ? 1 : 0,
+          (prev.matthewShopTokens || 0) + (loot.foundMatthewShopToken ? 1 : 0)
+        ),
+        hasMatthewShopToken: gotToken,
+        infinityStones: nextStones,
+        unlockedSkins: nextSkins,
+      };
+      saveGame(next);
+      return next;
+    });
+
+    if (loot.foundInfinityStone) {
+      const stoneDef = getInfinityStoneDefinition(loot.foundInfinityStone);
+      handleNotify(
+        'INFINITY STONE UNCOVERED!',
+        `Collected the ${stoneDef?.name || loot.foundInfinityStone}! Check the Gauntlet tab!`
+      );
+    }
+
     setChestCutsceneLoot(loot);
     return loot;
   };
@@ -2279,11 +2230,13 @@ export function App() {
         showParticles={state.settings.showParticles}
       />
 
-      {/* FLYING GOLDEN MATTHEW EVENT */}
+      {/* FLYING GOLDEN MATTHEW & FALLING MARVEL CHEST EVENT */}
       <GoldenMatthewEvent
         state={state}
         setState={setState}
         onSpawnBonus={(text) => handleNotify('BONUS EVENT!', text)}
+        onCatchChest={() => handleCatchFallingChest(false)}
+        forceSpawnChestCounter={forceSpawnChestCounter}
         swarmTrigger={goldenSwarmTrigger}
         isPaused={isGameplayPaused}
       />
@@ -2427,14 +2380,8 @@ export function App() {
           stormState={stormState}
           seasonLabel={seasonLabel}
           seasonRemainingSec={seasonRemainingSec}
-          isRaidActive={isRaidActive}
-          isBossRaidActive={isBossRaidActive}
-          raidSecondsRemaining={raidSecondsRemaining}
-          onZombieDefeated={handleZombieDefeated}
-          onZombieStealCoins={handleZombieStealCoins}
-          onClaimSnowDrop={handleClaimSnowDrop}
-          onOpenPetsModal={() => setShowPetsModal(true)}
-          isCombatPaused={isGameplayPaused || isScreenFrozen}
+          isSandbox={isSandbox}
+          onOpenDevTestMenu={() => setShowDevTestMenu(true)}
         />
       </div>
 
@@ -2450,7 +2397,7 @@ export function App() {
           onClick={() => setMobilePanelOpen((prev) => !prev)}
           className="lg:hidden h-[52px] bg-[#101426] border-t-2 border-slate-700 flex items-center justify-between px-4 cursor-pointer select-none text-amber-300 font-black text-sm shadow-xl"
         >
-          <span>Skins, Upgrades &amp; Pets ({state.unlockedSkins.length} Matthews)</span>
+          <span>Skins, Upgrades &amp; Gauntlet ({state.unlockedSkins.length} Matthews)</span>
           {mobilePanelOpen ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
         </div>
 
@@ -2459,13 +2406,11 @@ export function App() {
             state={state}
             setState={setState}
             isSandbox={isSandbox}
+            playersList={allPlayersList}
+            isSnapBusy={isSnapBusy}
+            onTriggerInfinitySnap={() => handleTriggerInfinitySnap()}
             onOpenSkinQualityModal={() => setShowSkinQualityModal(true)}
             onNotify={handleNotify}
-            onHatchEgg={handleHatchEgg}
-            onSellEgg={handleSellEgg}
-            onToggleEquipPet={handleToggleEquipPet}
-            onUpgradePet={handleUpgradePet}
-            onSellPet={handleSellPet}
             onBuySkinWithGems={handleBuySkinWithGems}
             onClaimVaultSkinWithToken={handleClaimVaultSkinWithToken}
             onOpenMysteryChest={handleOpenMysteryChest}
@@ -2478,6 +2423,93 @@ export function App() {
           />
         </div>
       </div>
+
+      {/* UNIFIED SANDBOX DEV TEST MENU MODAL (z-[210]) */}
+      <DevTestMenuModal
+        isOpen={showDevTestMenu}
+        onClose={() => setShowDevTestMenu(false)}
+        state={state}
+        onSetMoneyGems={(coins, gems, krillion = 0) => {
+          setState((prev) => {
+            const next: GameState = {
+              ...prev,
+              coins,
+              krillionCoins: krillion,
+              gems,
+              lastSaveTime: Date.now(),
+            };
+            saveGame(next);
+            return next;
+          });
+          handleNotify(
+            'DEV SANDBOX UPDATED',
+            `Set Coins to ${formatCoins(coins)} & Gems to ${gems}!`
+          );
+        }}
+        onGiveStone={() => {
+          setState((prev) => {
+            const owned = new Set(prev.infinityStones || []);
+            const missing = ALL_INFINITY_STONE_IDS.filter((id) => !owned.has(id));
+            if (missing.length === 0) return prev;
+            const pick = missing[Math.floor(Math.random() * missing.length)];
+            const next: GameState = {
+              ...prev,
+              infinityStones: [...(prev.infinityStones || []), pick],
+              lastSaveTime: Date.now(),
+            };
+            saveGame(next);
+            return next;
+          });
+          handleNotify('INFINITY STONE ADDED', 'Open Gauntlet tab to view it lit up!');
+        }}
+        onGiveAllStones={() => handleSandboxTestAction('grant_all_stones')}
+        onClearStones={() => {
+          setState((prev) => {
+            const next: GameState = { ...prev, infinityStones: [], lastSaveTime: Date.now() };
+            saveGame(next);
+            return next;
+          });
+          handleNotify('GAUNTLET CLEARED', 'Removed all 6 Infinity Stones.');
+        }}
+        onTestSnapPreview={() => handleSandboxTestAction('preview_snap_dust')}
+        onTestSnapReal={() => handleSandboxTestAction('test_snap_self')}
+        onTestThanosReset={() => setShowThanosReset(true)}
+        onSpawnFallingChest={() => setForceSpawnChestCounter((c) => c + 1)}
+        onOpenTestChest={(forceStone = false) => handleCatchFallingChest(forceStone)}
+        onOpenCrateTest={(ct) => handleOpenCrate(ct)}
+        onGrantShopToken={() => {
+          setState((prev) => {
+            const next: GameState = {
+              ...prev,
+              hasMatthewShopToken: true,
+              matthewShopTokens: Math.max(1, prev.matthewShopTokens || 0),
+              lastSaveTime: Date.now(),
+            };
+            saveGame(next);
+            return next;
+          });
+          setShowTokenCutscene(true);
+        }}
+        onUnlockAllMarvelSkins={() => {
+          setState((prev) => {
+            const next: GameState = {
+              ...prev,
+              unlockedSkins: Array.from(
+                new Set([...prev.unlockedSkins, ...ALL_MARVEL_SKINS.map((s) => s.id)])
+              ),
+              lastSaveTime: Date.now(),
+            };
+            saveGame(next);
+            return next;
+          });
+          handleNotify('ALL MARVEL SKINS UNLOCKED!', 'Check Owned Skins!');
+        }}
+        onToggleStormEvent={() => handleSandboxTestAction('toggle_sandbox_friday_storm')}
+        onSpawnGoldenSwarm={() => handleDevSpawnGoldenSwarm(14)}
+        onReplayMarvelIntro={() => handleSandboxTestAction('replay_s3_intro')}
+        onPreviewDowntime={() => handleSandboxTestAction('toggle_preview_midnight_downtime')}
+        onOpenFullDevTools={() => setShowDevToolsModal(true)}
+      />
 
       {/* MARSHALLB78 EXCLUSIVE PASSWORD-PROTECTED DEV TOOLS MODAL */}
       <DevToolsModal
@@ -2500,7 +2532,7 @@ export function App() {
         isSandboxActive={isSandbox}
         isSandboxStormActive={sandboxStormStartMs !== null}
         onToggleSandboxS2={handleToggleSandboxS2}
-        onTriggerZombieRaid={handleTriggerZombieRaidNow}
+        onTriggerInfinitySnap={handleTriggerInfinitySnap}
         onPreviewGlobalEvent={handlePreviewGlobalEvent}
         onClearPreviewEvent={() => {
           setActiveGlobalEvent(null);
@@ -2512,9 +2544,9 @@ export function App() {
         onSandboxTestAction={handleSandboxTestAction}
       />
 
-      {/* WEEKEND SEASON DOWNTIME OVERLAY (Appears immediately on entry during pre-launch/weekend Downtime until Monday) */}
+      {/* SEASON DOWNTIME OVERLAY (Only shown after user signs in so Sign-In comes first!) */}
       <SeasonDowntimeModal
-        isOpen={!activeBanRecord && (seasonInfo.isDowntime || previewDowntimeOverride)}
+        isOpen={!activeBanRecord && Boolean(state.cloudAccount) && (seasonInfo.isDowntime || previewDowntimeOverride)}
         state={state}
         seasonNumber={seasonInfo.seasonNumber}
         downtimeRemainingSeconds={
@@ -2553,14 +2585,14 @@ export function App() {
         currentSeasonId={seasonInfo.seasonId}
       />
 
-      {/* UNIFIED SIGN IN / CREATE ACCOUNT MODAL */}
+      {/* UNIFIED SIGN IN / CREATE ACCOUNT MODAL (Required BEFORE Loading Screen & Cutscenes) */}
       <AccountModal
         isOpen={showAccountModal}
         onClose={() => setShowAccountModal(false)}
         state={state}
         setState={setState}
         onNotify={handleNotify}
-        allowCloseWhenSignedOut={seasonInfo.isDowntime}
+        allowCloseWhenSignedOut={false}
       />
 
       {/* WORLDWIDE SEASONAL LEADERBOARD MODAL */}
@@ -2575,21 +2607,90 @@ export function App() {
         onOpenAccount={() => setShowAccountModal(true)}
       />
 
-      {/* SEASON 2: FROZEN APOCALYPSE ANIMATED INTRO CUTSCENE (UNSKIPPABLE FIRST LOGIN) */}
+      {/* SEASON 2: FROZEN APOCALYPSE ANIMATED INTRO CUTSCENE */}
       {showFrozenIntro && (
         <FrozenIntroCutsceneModal onComplete={handleCompleteFrozenIntro} />
       )}
 
-      {/* SEASON 2: ZOMBIE RAID CINEMATIC INTRO CUTSCENE */}
-      {pendingRaidCutscene && (
-        <RaidIntroCutsceneModal
-          onComplete={() => {
-            setPendingRaidCutscene(false);
-            setZombieRaidEndsAt(Date.now() + SEASON_2_CONFIG.raidDurationSeconds * 1000);
-            handleNotify('ZOMBIE RAID!', '3x Zombies swarming! Pets engaging horde!');
-          }}
-        />
+      {/* SEASON 3: MARVEL 50-SKIN MULTIVERSE INTRO CUTSCENE */}
+      {showMarvelIntro && (
+        <MarvelIntroCutsceneModal onComplete={handleCompleteMarvelIntro} />
       )}
+
+      {/* SEASON 3: THANOS PERIODIC COIN-RESET EVENT (KEEPS UPGRADES & CPS) */}
+      <ThanosResetCutsceneModal
+        isOpen={showThanosReset}
+        onResetCoinsNow={() => {
+          setState((prev) => {
+            const next: GameState = {
+              ...prev,
+              coins: 0,
+              krillionCoins: 0,
+              lastSaveTime: Date.now(),
+            };
+            saveGame(next);
+            return next;
+          });
+        }}
+        onComplete={() => {
+          setShowThanosReset(false);
+          handleNotify(
+            'THANOS STOLE YOUR COINS!',
+            'Coins were reset to 0 — your Upgrades & CPS are intact!'
+          );
+        }}
+      />
+
+      {/* SEASON 3: INFINITY GAUNTLET SNAP DISINTEGRATION TO DUST CUTSCENE */}
+      {pendingSnapCutscene && (() => {
+        const equippedSkinObj = getSkinById(state.equippedSkin);
+        const targetSnap = pendingSnapCutscene.snap;
+        const isPreviewSnap = Boolean(pendingSnapCutscene.isPreview);
+        return (
+          <SnapDustCutsceneModal
+            skinImage={equippedSkinObj.image}
+            skinName={equippedSkinObj.name}
+            snappedByUsername={targetSnap.snappedByUsername}
+            isPreview={isPreviewSnap}
+            onComplete={() => {
+              setPendingSnapCutscene(null);
+              if (isPreviewSnap) return;
+              setState((prev) => {
+                const next: GameState = {
+                  ...prev,
+                  coins: 0,
+                  krillionCoins: 0,
+                  lifetimeCoins: 0,
+                  krillionLifetime: 0,
+                  seasonalScore: 0,
+                  krillionSeasonalScore: 0,
+                  upgrades: {},
+                  combo: 0,
+                  comboTimer: 0,
+                  frenzyTimer: 0,
+                  lastProcessedSnapId: targetSnap.snapId,
+                  lastSaveTime: Date.now(),
+                };
+                saveGame(next);
+                if (next.cloudAccount) {
+                  saveStateToCloud(
+                    next.cloudAccount.uid,
+                    next.cloudAccount.displayUsername,
+                    next,
+                    true
+                  ).catch(() => {});
+                }
+                return next;
+              });
+              refreshMiniLeaderboard();
+              handleNotify(
+                'SNAPPED TO ASH!',
+                `${targetSnap.snappedByUsername} wiped your Coins, Upgrades & Leaderboard Total! (Gems & Skins are safe)`
+              );
+            }}
+          />
+        );
+      })()}
 
       {/* SEASON 2: LIVE EVENT / MATTHEW STORM 3D CINEMATIC CUTSCENE */}
       {pendingEventCutscene && (
@@ -2655,34 +2756,7 @@ export function App() {
         <TokenUnlockCutsceneModal onComplete={() => setShowTokenCutscene(false)} />
       )}
 
-      {/* SEASON 2: 3D EGG HATCHING CINEMATIC CUTSCENE */}
-      {eggHatchCutscene && (
-        <EggHatchCutsceneModal
-          rarity={eggHatchCutscene.rarity}
-          speciesId={eggHatchCutscene.speciesId}
-          onComplete={() => {
-            const info = eggHatchCutscene;
-            setEggHatchCutscene(null);
-            soundManager.playSkinUnlock();
-            handleNotify('EGG HATCHED!', `Hatched ${info.petName} (${info.rarity})!`);
-          }}
-        />
-      )}
-
-      {/* SEASON 2: PET SQUAD & EGGS MODAL (Opened from Pasture button) */}
-      {showPetsModal && (
-        <PetsAndInventoryModal
-          state={state}
-          onClose={() => setShowPetsModal(false)}
-          onHatchEgg={handleHatchEgg}
-          onSellEgg={handleSellEgg}
-          onToggleEquipPet={handleToggleEquipPet}
-          onUpgradePet={handleUpgradePet}
-          onSellPet={handleSellPet}
-        />
-      )}
-
-      {/* SEASON 2: DAILY GEM ITEM SHOP MODAL (Legacy trigger if invoked directly) */}
+      {/* DAILY GEM ITEM SHOP MODAL */}
       {showItemShopModal && (
         <GemItemShopModal
           state={state}
@@ -2695,7 +2769,7 @@ export function App() {
         />
       )}
 
-      {/* SEASON 2: PLAYER-SUMMONED LIVE EVENTS HUB */}
+      {/* PLAYER-SUMMONED LIVE EVENTS HUB */}
       {showLiveEventsModal && (
         <LiveEventsHubModal
           state={state}
@@ -2724,13 +2798,22 @@ export function App() {
         onNotify={handleNotify}
       />
 
-      {/* UPGRADED LOADING SCREEN ANIMATION (Click PLAY to Start — suppressed during Downtime so Downtime shows immediately!) */}
+      {/* UPGRADED LOADING SCREEN ANIMATION (Appears AFTER Sign-In, BEFORE One-Time Cutscene) */}
       <IntroCutsceneModal
-        isOpen={showIntroCutscene && !seasonInfo.isDowntime && !activeBanRecord}
+        isOpen={
+          showIntroCutscene &&
+          Boolean(state.cloudAccount) &&
+          !seasonInfo.isDowntime &&
+          !activeBanRecord
+        }
         onComplete={handleCompleteIntro}
         isCloudLoading={isInitialCloudHydrating}
-        isFrozenTheme={isS2Active}
-        willPlayCutsceneAfter={isS2Active && !state.season2IntroSeen}
+        isFrozenTheme={isS2Active && !isS3Active}
+        isMarvelTheme={isS3Active}
+        willPlayCutsceneAfter={
+          (isS3Active && !state.season3IntroSeen) ||
+          (isS2Active && !isS3Active && !state.season2IntroSeen)
+        }
       />
 
       {/* OFFLINE EARNINGS POPUP */}

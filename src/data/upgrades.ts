@@ -1,6 +1,7 @@
 import { Upgrade } from '../types/game';
 import { SEASON_2_UPGRADES } from './season2Upgrades';
-import { isSeasonTwoOrLater } from './skins';
+import { SEASON_3_UPGRADES } from './season3Upgrades';
+import { isSeasonThreeOrLater, isSeasonTwoOrLater } from './skins';
 
 /**
  * 35 Spread-Out Click-Power-First Upgrades!
@@ -9,9 +10,10 @@ import { isSeasonTwoOrLater } from './skins';
  * - Balanced in the Goldilocks zone: lively early game (12s-25s active click payback),
  *   steady mid-game in Millions/Billions (40s-85s payback), and deep endgame grind up to Decillions!
  */
-export { SEASON_2_UPGRADES };
+export { SEASON_2_UPGRADES, SEASON_3_UPGRADES };
 
 export function getUpgradesForSeason(seasonId?: string): Upgrade[] {
+  if (isSeasonThreeOrLater(seasonId)) return SEASON_3_UPGRADES;
   return isSeasonTwoOrLater(seasonId) ? SEASON_2_UPGRADES : UPGRADES;
 }
 

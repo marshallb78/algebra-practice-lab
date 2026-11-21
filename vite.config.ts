@@ -16,7 +16,7 @@ export default defineConfig({
     port: 5173,
     open: true,
     watch: {
-      ignored: ['**/Images/**', '**/my upoaded images/**'],
+      ignored: ['**/Images/**', '**/my upoaded images/**', '**/my music/**'],
     },
   },
 });

@@ -26,10 +26,11 @@ import {
   MATTHEW_STORM_CONFIG,
   GEM_ECONOMY_CONFIG,
   SEASON_2_CONFIG,
+  SEASON_3_CONFIG,
   TEST_ISOLATION_CONFIG,
   isSandboxSeason2Context,
+  isSandboxSeason3Context,
 } from '../config/gameConfig';
-import { createEmptySealedEggs } from '../data/petsAndEggs';
 import { STARTER_CURSOR_ID } from '../data/cursors';
 import {
   LIAM_S2_REBALANCE_REVISION_MS,
@@ -196,14 +197,18 @@ function buildUserCloudPayload(
     equippedCosmetics: { hat: null, glasses: state.equippedCosmetics?.glasses || null },
     hasMatthewShopToken: Boolean(state.hasMatthewShopToken),
     matthewShopTokens: state.matthewShopTokens ?? 0,
+    infinityStones: state.infinityStones || [],
+    lastProcessedSnapId: state.lastProcessedSnapId || null,
+    lastEventSummonAtMs: state.lastEventSummonAtMs || 0,
     unlockedCursors: state.unlockedCursors || [],
     equippedCursorId: state.equippedCursorId || null,
     cratesOpened: state.cratesOpened || 0,
     chestsOpened: state.chestsOpened || 0,
-    zombiesDefeated: state.zombiesDefeated || 0,
-    zombiesStolenCoins: state.zombiesStolenCoins || 0,
-    zombieHitsTaken: state.zombieHitsTaken ?? 0,
+    zombiesDefeated: 0,
+    zombiesStolenCoins: 0,
+    zombieHitsTaken: 0,
     season2IntroSeen: Boolean(state.season2IntroSeen),
+    season3IntroSeen: Boolean(state.season3IntroSeen),
     winnerBadges: state.winnerBadges || [],
     clanId: state.clanId || null,
     clanName: state.clanName || null,
@@ -762,7 +767,20 @@ export function reconcileCloudAndLocalState(params: {
     zombiesDefeated: isFreshSeasonRollover ? 0 : (typeof authoritativeSeason.zombiesDefeated === 'number' ? authoritativeSeason.zombiesDefeated : localState.zombiesDefeated || 0),
     hasMatthewShopToken: permanentShopToken,
     matthewShopTokens: permanentShopTokenCount,
+    infinityStones: Array.isArray(rtdbUser?.infinityStones)
+      ? Array.from(new Set([...(localState.infinityStones || []), ...rtdbUser.infinityStones]))
+      : localState.infinityStones || [],
+    lastProcessedSnapId:
+      rtdbUser?.lastProcessedSnapId || localState.lastProcessedSnapId || null,
+    lastEventSummonAtMs: Math.max(
+      typeof rtdbUser?.lastEventSummonAtMs === 'number' ? rtdbUser.lastEventSummonAtMs : 0,
+      localState.lastEventSummonAtMs || 0
+    ),
     sandboxS2Enabled: nowMs >= SEASON_2_CONFIG.launchTimeMs ? false : Boolean(localState.sandboxS2Enabled),
+    sandboxS3Enabled: nowMs >= SEASON_3_CONFIG.launchTimeMs ? false : Boolean(localState.sandboxS3Enabled),
+    season3IntroSeen: forceCloudAfterReset
+      ? false
+      : Boolean(localState.season3IntroSeen || rtdbUser?.season3IntroSeen),
     unlockedSkins: mergedSkins,
     equippedSkin: chosenEquippedSkin,
     gems: Math.max(
@@ -881,7 +899,7 @@ export function reconcileCloudAndLocalState(params: {
       giantMatthewsClicked: 0,
       pets: [],
       equippedPetIds: [],
-      sealedEggs: createEmptySealedEggs(),
+      sealedEggs: {} as any,
       hasMatthewShopToken: false,
       matthewShopTokens: 0,
       unlockedCursors: [STARTER_CURSOR_ID],
@@ -966,7 +984,12 @@ export async function loadAndReconcileCloudSave(
 ): Promise<GameState> {
   if (!uid) return localState;
 
-  const effectiveSeason = getEffectiveSeasonInfo(uid, localState.sandboxS2Enabled);
+  const effectiveSeason = getEffectiveSeasonInfo(
+    uid,
+    localState.sandboxS2Enabled,
+    Date.now(),
+    localState.sandboxS3Enabled
+  );
   const isSandbox = effectiveSeason.isSandbox;
   const inflightKey = `${isSandbox ? 'sbx_' : ''}${uid}`;
 
@@ -1009,7 +1032,8 @@ export async function loadAndReconcileCloudSave(
         unlockedSkins: cleanLiveSkins,
         equippedSkin: cleanEquipped,
         currentSeasonId: activeSeason.seasonId,
-        sandboxS2Enabled: true,
+        sandboxS2Enabled: activeSeason.seasonNumber === 2,
+        sandboxS3Enabled: activeSeason.seasonNumber === 3,
         lastOwnerUid: uid,
       };
     }
@@ -1128,45 +1152,6 @@ export async function loadAndReconcileCloudSave(
 
       const ignoreStaleS2Extras = wasExplicitlyReset || Boolean(season2ResetApplied);
 
-      const mergedPetsMap = new Map<string, GameState['pets'][number]>();
-      for (const p of reconciled.pets || []) {
-        if (p && typeof p.instanceId === 'string') mergedPetsMap.set(p.instanceId, p);
-      }
-      if (!ignoreStaleS2Extras && Array.isArray(rtdbUser?.pets)) {
-        for (const p of rtdbUser.pets) {
-          if (!p || typeof p.instanceId !== 'string') continue;
-          const prevPet = mergedPetsMap.get(p.instanceId);
-          if (!prevPet || (Number(p.level) || 1) > (Number(prevPet.level) || 1)) {
-            mergedPetsMap.set(p.instanceId, { ...prevPet, ...p, hunger: 100 });
-          }
-        }
-      }
-      const mergedPets = Array.from(mergedPetsMap.values());
-      const validPetIds = new Set(mergedPets.map((p) => p.instanceId));
-      const rawEquippedPets = ignoreStaleS2Extras
-        ? []
-        : Array.from(
-          new Set([
-            ...(reconciled.equippedPetIds || []),
-            ...(Array.isArray(rtdbUser?.equippedPetIds) ? rtdbUser.equippedPetIds : []),
-          ])
-        ).filter((id) => validPetIds.has(id));
-      const mergedEquippedPetIds =
-        rawEquippedPets.length > 0
-          ? rawEquippedPets.slice(0, 3)
-          : mergedPets.slice(0, 3).map((p) => p.instanceId);
-
-      const mergedEggs = { ...reconciled.sealedEggs };
-      if (!ignoreStaleS2Extras && rtdbUser?.sealedEggs && typeof rtdbUser.sealedEggs === 'object') {
-        for (const [k, v] of Object.entries(rtdbUser.sealedEggs)) {
-          const n = Math.max(0, Number(v) || 0);
-          mergedEggs[k as keyof typeof mergedEggs] = Math.max(
-            mergedEggs[k as keyof typeof mergedEggs] || 0,
-            n
-          );
-        }
-      }
-
       const cloudTokens =
         !ignoreStaleS2Extras && typeof rtdbUser?.matthewShopTokens === 'number'
           ? Math.max(0, Math.floor(rtdbUser.matthewShopTokens))
@@ -1218,12 +1203,10 @@ export async function loadAndReconcileCloudSave(
           !canHoldChampionFinal && reconciled.equippedSkin === 'champion_matthew'
             ? 'classic_matthew'
             : reconciled.equippedSkin,
-        pets: mergedPets,
-        equippedPetIds: mergedEquippedPetIds,
-        sealedEggs: mergedEggs,
-        foodInventory: rtdbUser?.foodInventory
-          ? { ...reconciled.foodInventory, ...rtdbUser.foodInventory }
-          : reconciled.foodInventory,
+        pets: [],
+        equippedPetIds: [],
+        sealedEggs: {} as any,
+        foodInventory: {} as any,
         ownedCosmetics: Array.isArray(rtdbUser?.ownedCosmetics)
           ? Array.from(new Set([...(reconciled.ownedCosmetics || []), ...rtdbUser.ownedCosmetics]))
           : reconciled.ownedCosmetics,
@@ -1296,7 +1279,12 @@ export function saveStateToCloudKeepalive(
   if (!verifiedInitialPullUids.has(uid) || blockedOverwriteUids.has(uid)) return;
   if (getCachedBanRecord(uid, username)) return;
 
-  const activeSeason = getEffectiveSeasonInfo(uid, state.sandboxS2Enabled);
+  const activeSeason = getEffectiveSeasonInfo(
+    uid,
+    state.sandboxS2Enabled,
+    Date.now(),
+    state.sandboxS3Enabled
+  );
   // Pre-Monday Season 2 dev preview is strictly ephemeral and must not write to Firebase RTDB.
   if (activeSeason.isSandbox) return;
   const scopeKey = uid;
@@ -1330,16 +1318,21 @@ export async function saveStateToCloud(
     return false;
   }
 
-  const activeSeason = getEffectiveSeasonInfo(uid, state.sandboxS2Enabled);
+  const activeSeason = getEffectiveSeasonInfo(
+    uid,
+    state.sandboxS2Enabled,
+    Date.now(),
+    state.sandboxS3Enabled
+  );
   // Pre-Monday Season 2 dev preview is strictly ephemeral and must not write to Firebase RTDB.
   if (activeSeason.isSandbox) return true;
   const isSandbox = false;
   const scopeKey = `${isSandbox ? 'sbx_' : ''}${uid}`;
   const playtimeBucket = Math.floor((state.totalPlaytimeSeconds || 0) / 20);
   const heartbeatBucket = Math.floor(Date.now() / 25000);
-  const petSig = (state.pets || []).map((p) => `${p.instanceId}:${p.level}`).join(',');
   const upgradeCount = Object.values(state.upgrades || {}).reduce((acc, n) => acc + (n || 0), 0);
-  const signature = `${isSandbox ? 'sbx' : 'live'}_${Math.floor(state.lifetimeCoins)}_${Math.floor(state.coins)}_${Math.floor(state.clicks)}_${state.prestigeCount}_${upgradeCount}_${state.equippedSkin}_${state.unlockedSkins.length}_${state.gems}_${state.lastDailyLoginClaimDate || ''}_${Boolean(state.season2IntroSeen)}_${petSig}_${(state.equippedPetIds || []).join(',')}_${state.matthewShopTokens ?? 0}_${state.hasMatthewShopToken}_${state.claimedQuests?.length || 0}_${playtimeBucket}_${heartbeatBucket}_${username}`;
+  const stoneSig = (state.infinityStones || []).join(',');
+  const signature = `${isSandbox ? 'sbx' : 'live'}_${Math.floor(state.lifetimeCoins)}_${Math.floor(state.coins)}_${Math.floor(state.krillionCoins || 0)}_${Math.floor(state.clicks)}_${state.prestigeCount}_${upgradeCount}_${state.equippedSkin}_${state.unlockedSkins.length}_${state.gems}_${state.lastDailyLoginClaimDate || ''}_${Boolean(state.season2IntroSeen)}_${Boolean(state.season3IntroSeen)}_${stoneSig}_${state.lastProcessedSnapId || ''}_${state.matthewShopTokens ?? 0}_${state.hasMatthewShopToken}_${state.claimedQuests?.length || 0}_${playtimeBucket}_${heartbeatBucket}_${username}`;
 
   if (!force && lastSavedSignatureByUid.get(scopeKey) === signature) {
     return true;
@@ -1432,8 +1425,11 @@ export async function signInAndReconcileAccount(
   username: string,
   currentState: GameState
 ): Promise<GameState> {
+  const isTesterS3Sandbox = isSandboxSeason3Context(uid, currentState.sandboxS3Enabled);
   const isTesterSandbox = isSandboxSeason2Context(uid, currentState.sandboxS2Enabled);
-  const baseLocalState = isTesterSandbox
+  const baseLocalState = isTesterS3Sandbox
+    ? { ...loadSandboxGame(), sandboxS3Enabled: true, currentSeasonId: 'season_3' }
+    : isTesterSandbox
     ? { ...loadSandboxGame(), sandboxS2Enabled: true }
     : currentState.lastOwnerUid && currentState.lastOwnerUid !== uid
       ? getDefaultGameState()
@@ -1442,8 +1438,13 @@ export async function signInAndReconcileAccount(
   const merged = await loadAndReconcileCloudSave(uid, username, baseLocalState);
   const nextState: GameState = {
     ...merged,
-    currentSeasonId: isTesterSandbox ? 'season_2' : merged.currentSeasonId,
+    currentSeasonId: isTesterS3Sandbox
+      ? 'season_3'
+      : isTesterSandbox
+      ? 'season_2'
+      : merged.currentSeasonId,
     sandboxS2Enabled: isTesterSandbox ? true : merged.sandboxS2Enabled,
+    sandboxS3Enabled: isTesterS3Sandbox ? true : merged.sandboxS3Enabled,
     lastOwnerUid: uid,
     cloudAccount: {
       uid,

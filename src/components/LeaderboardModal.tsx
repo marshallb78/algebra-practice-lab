@@ -13,7 +13,7 @@ import {
   submitPlayerSuspicionReport,
   isDevAdminAccount,
 } from '../firebase/moderation';
-import { SEASON_2_CONFIG } from '../config/gameConfig';
+import { SEASON_2_CONFIG, SEASON_3_CONFIG } from '../config/gameConfig';
 import { getAscensionMultiplier } from '../data/prestige';
 import { CHAMPION_SKIN, LIAM_SKIN, getSkinById } from '../data/skins';
 import { formatCoins, formatExtendedCoins, formatTime } from '../utils/formatters';
@@ -26,6 +26,7 @@ import {
   ArrowLeft,
   Eye,
   Snowflake,
+  Sparkles,
   Flag,
   CheckCircle2,
   Gauge,
@@ -64,9 +65,12 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   const [reportingUid, setReportingUid] = useState<string | null>(null);
 
   const isSeason2Launched = Date.now() >= SEASON_2_CONFIG.launchTimeMs;
+  const isSeason3Launched = Date.now() >= SEASON_3_CONFIG.launchTimeMs;
   const canViewLiveSeason2 = isSeason2Launched || isSandbox;
+  const canViewLiveSeason3 = isSeason3Launched || isSandbox;
   const effectiveTargetSeasonId = viewedSeasonId;
   const isViewingMyCurrentSeason = effectiveTargetSeasonId === seasonId;
+  const isMarvelLb = viewedSeasonId === 'season_3';
   const onlineCount = entries.filter((e) =>
     isLeaderboardPlayerOnline(e, state.cloudAccount?.uid)
   ).length;
@@ -75,7 +79,10 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
     targetSeason: string = effectiveTargetSeasonId,
     silent = false
   ) => {
-    if (targetSeason === 'season_2' && !canViewLiveSeason2) {
+    if (
+      (targetSeason === 'season_2' && !canViewLiveSeason2) ||
+      (targetSeason === 'season_3' && !canViewLiveSeason3)
+    ) {
       setEntries([]);
       setPlayerEntry(null);
       setLoading(false);
@@ -85,7 +92,9 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
       setLoading(true);
     }
     try {
-      const targetSandboxFlag = targetSeason === 'season_2' && isSandbox && !isSeason2Launched;
+      const targetSandboxFlag =
+        (targetSeason === 'season_2' && isSandbox && !isSeason2Launched) ||
+        (targetSeason === 'season_3' && isSandbox && !isSeason3Launched);
       if (state.cloudAccount && targetSeason === seasonId) {
         updateLeaderboardEntry(
           state.cloudAccount.uid,
@@ -102,7 +111,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
       if (
         targetSeason === seasonId &&
         state.cloudAccount &&
-        !isExcludedFromLeaderboard(state.cloudAccount.uid, state.cloudAccount.displayUsername, targetSeason)
+        !isExcludedFromLeaderboard(state.cloudAccount.uid, state.cloudAccount.displayUsername, targetSeason, Date.now(), targetSandboxFlag)
       ) {
         const localScore = Math.max(
           0,
@@ -217,38 +226,84 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 w-screen h-screen flex flex-col bg-gradient-to-b from-[#07182d] via-[#061123] to-[#030916] font-chunky text-slate-100 select-none overflow-hidden animate-fade-in">
-      {/* FROSTY AMBIENT BACKDROP */}
+    <div
+      className={`fixed inset-0 z-50 w-screen h-screen flex flex-col font-chunky text-slate-100 select-none overflow-hidden animate-fade-in ${
+        isMarvelLb
+          ? 'bg-gradient-to-b from-[#1a0410] via-[#100622] to-[#04030b]'
+          : 'bg-gradient-to-b from-[#07182d] via-[#061123] to-[#030916]'
+      }`}
+    >
+      {/* AMBIENT BACKDROP */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-28 left-1/4 w-[36rem] h-[24rem] rounded-full bg-cyan-400/12 blur-3xl" />
-        <div className="absolute bottom-0 right-1/4 w-[34rem] h-[22rem] rounded-full bg-sky-500/12 blur-3xl" />
-        {FROST_FLAKES.map((f, i) => (
-          <Snowflake
-            key={i}
-            style={{ left: f.left, top: f.top, width: f.size, height: f.size }}
-            className={`absolute text-cyan-200 ${f.opacity} animate-pulse`}
-          />
-        ))}
+        <div
+          className={`absolute -top-28 left-1/4 w-[36rem] h-[24rem] rounded-full blur-3xl ${
+            isMarvelLb ? 'bg-red-500/15' : 'bg-cyan-400/12'
+          }`}
+        />
+        <div
+          className={`absolute bottom-0 right-1/4 w-[34rem] h-[22rem] rounded-full blur-3xl ${
+            isMarvelLb ? 'bg-purple-500/15' : 'bg-sky-500/12'
+          }`}
+        />
+        {!isMarvelLb &&
+          FROST_FLAKES.map((f, i) => (
+            <Snowflake
+              key={i}
+              style={{ left: f.left, top: f.top, width: f.size, height: f.size }}
+              className={`absolute text-cyan-200 ${f.opacity} animate-pulse`}
+            />
+          ))}
       </div>
 
-      {/* FULL-SCREEN FROST HEADER */}
-      <div className="relative z-10 flex items-center justify-between px-5 sm:px-8 py-4 bg-sky-950/75 backdrop-blur-md border-b-2 border-cyan-300/45 shadow-[0_6px_30px_rgba(34,211,238,0.16)] shrink-0">
+      {/* FULL-SCREEN HEADER */}
+      <div
+        className={`relative z-10 flex items-center justify-between px-5 sm:px-8 py-4 backdrop-blur-md border-b-2 shrink-0 ${
+          isMarvelLb
+            ? 'bg-[#170618]/85 border-amber-400/50 shadow-[0_6px_30px_rgba(239,68,68,0.2)]'
+            : 'bg-sky-950/75 border-cyan-300/45 shadow-[0_6px_30px_rgba(34,211,238,0.16)]'
+        }`}
+      >
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-400/30 to-sky-500/20 border-2 border-cyan-300 flex items-center justify-center text-cyan-200 shadow-[0_0_24px_rgba(56,189,248,0.45)]">
+          <div
+            className={`w-12 h-12 rounded-2xl border-2 flex items-center justify-center ${
+              isMarvelLb
+                ? 'bg-gradient-to-br from-red-500/30 to-amber-500/20 border-amber-300 text-amber-300 shadow-[0_0_24px_rgba(251,191,36,0.4)]'
+                : 'bg-gradient-to-br from-cyan-400/30 to-sky-500/20 border-cyan-300 text-cyan-200 shadow-[0_0_24px_rgba(56,189,248,0.45)]'
+            }`}
+          >
             <Trophy className="w-6 h-6" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-xl sm:text-3xl font-black text-cyan-100 uppercase tracking-wide drop-shadow-[0_2px_10px_rgba(56,189,248,0.45)]">
-                Frost Leaderboard
+              <h2
+                className={`text-xl sm:text-3xl font-black uppercase tracking-wide ${
+                  isMarvelLb
+                    ? 'text-amber-300 drop-shadow-[0_2px_12px_rgba(239,68,68,0.5)]'
+                    : 'text-cyan-100 drop-shadow-[0_2px_10px_rgba(56,189,248,0.45)]'
+                }`}
+              >
+                {isMarvelLb
+                  ? 'Season 3: Marvel Leaderboard'
+                  : viewedSeasonId === 'season_1'
+                  ? 'Season 1 Archive'
+                  : 'Frost Leaderboard'}
               </h2>
-              <Snowflake className="w-5 h-5 text-cyan-300 animate-spin" style={{ animationDuration: '9s' }} />
+              {isMarvelLb ? (
+                <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
+              ) : (
+                <Snowflake className="w-5 h-5 text-cyan-300 animate-spin" style={{ animationDuration: '9s' }} />
+              )}
             </div>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <div className="flex items-center gap-1 p-0.5 rounded-xl bg-slate-950/75 border border-cyan-300/30">
-                {(['season_1', 'season_2'] as const).map((sid) => {
+              <div className="flex items-center gap-1 p-0.5 rounded-xl bg-slate-950/75 border border-amber-300/30">
+                {(['season_1', 'season_2', 'season_3'] as const).map((sid) => {
                   const active = viewedSeasonId === sid;
-                  const sLabel = sid === 'season_1' ? 'Season 1' : 'Season 2';
+                  const sLabel =
+                    sid === 'season_1'
+                      ? 'Season 1'
+                      : sid === 'season_2'
+                      ? 'Season 2'
+                      : 'Season 3 (Marvel)';
                   return (
                     <button
                       key={sid}
@@ -256,8 +311,10 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                       onClick={() => setViewedSeasonId(sid)}
                       className={`px-2.5 py-1 rounded-lg text-[11px] font-black uppercase cursor-pointer transition ${
                         active
-                          ? 'bg-cyan-400 text-slate-950 shadow'
-                          : 'text-cyan-200/80 hover:text-white'
+                          ? sid === 'season_3'
+                            ? 'bg-gradient-to-r from-red-500 to-amber-400 text-slate-950 shadow'
+                            : 'bg-cyan-400 text-slate-950 shadow'
+                          : 'text-slate-300 hover:text-white'
                       }`}
                     >
                       {sLabel}
@@ -266,13 +323,17 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 })}
               </div>
               {isViewingMyCurrentSeason && (
-                <span className="px-2.5 py-0.5 rounded-full bg-cyan-400/20 border border-cyan-300/50 text-[11px] font-black text-cyan-200">
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-300/50 text-[11px] font-black text-amber-200">
                   {seasonLabel} • {formatTime(seasonRemainingSec)}
                 </span>
               )}
               {!isViewingMyCurrentSeason && (
-                <span className="px-2.5 py-0.5 rounded-full bg-slate-800/80 border border-cyan-300/30 text-[11px] font-black text-cyan-200">
-                  {viewedSeasonId === 'season_1' ? 'Season 1 Final Archive' : 'Season 2: Frozen Apocalypse'}
+                <span className="px-2.5 py-0.5 rounded-full bg-slate-800/80 border border-slate-600 text-[11px] font-black text-slate-200">
+                  {viewedSeasonId === 'season_1'
+                    ? 'Season 1 Final Archive'
+                    : viewedSeasonId === 'season_2'
+                    ? 'Season 2: Frozen Apocalypse'
+                    : 'Season 3: Marvel'}
                 </span>
               )}
               {entries.length > 0 && (
@@ -536,7 +597,17 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
 
               {/* RANKINGS LIST */}
               <div className="space-y-2.5">
-                {viewedSeasonId === 'season_2' && !canViewLiveSeason2 ? (
+                {viewedSeasonId === 'season_3' && !canViewLiveSeason3 ? (
+                  <div className="py-14 text-center bg-purple-950/40 rounded-3xl border border-amber-400/35 p-6 space-y-2">
+                    <Sparkles className="w-12 h-12 text-amber-300 mx-auto" />
+                    <p className="text-base font-black text-white uppercase">
+                      Season 3: Marvel Unlocks Soon
+                    </p>
+                    <p className="text-xs font-bold text-amber-200/80">
+                      Preview leaderboards are hidden during Downtime!
+                    </p>
+                  </div>
+                ) : viewedSeasonId === 'season_2' && !canViewLiveSeason2 ? (
                   <div className="py-14 text-center bg-sky-950/60 rounded-3xl border border-cyan-300/35 p-6 space-y-2">
                     <Snowflake className="w-12 h-12 text-cyan-300 mx-auto" />
                     <p className="text-base font-black text-white uppercase">

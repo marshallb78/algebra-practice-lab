@@ -12,22 +12,11 @@ interface EventCutsceneModalProps {
 }
 
 const EVENT_TITLES: Record<LiveEventCutsceneKind, { title: string; accent: string }> = {
-  click_marathon: { title: 'CLICK FAST MARATHON', accent: '#fde047' },
-  falling_matthews: { title: 'FALLING MATTHEWS', accent: '#38bdf8' },
-  golden_rain: { title: '100 GOLDEN MATTHEW RAIN', accent: '#fbbf24' },
-  zombie_boss_raid: { title: 'ZOMBIE BOSS RAID', accent: '#fb7185' },
-  screen_freeze: { title: 'DEEP FREEZE EVENT', accent: '#67e8f9' },
-  lucky_pinata: { title: 'MATTHEW PIÑATA PARTY', accent: '#f472b6' },
-  memory_simon: { title: 'CRYO PATTERN MATCH', accent: '#34d399' },
-  reaction_duel: { title: 'QUICK-DRAW REFLEX DUEL', accent: '#4ade80' },
-  meteor_shield: { title: 'METEOR COIN FORGE', accent: '#fb923c' },
-  coin_jackpot_wheel: { title: 'SERVER JACKPOT WHEEL', accent: '#facc15' },
-  tax_collector: { title: 'MATTHEW TAX AUDIT', accent: '#f87171' },
-  upside_down_chaos: { title: 'GRAVITY FLIP 180°', accent: '#c084fc' },
-  blackout_flashlight: { title: 'BLIZZARD BLACKOUT', accent: '#94a3b8' },
-  earthquake_buttons: { title: 'SUBZERO EARTHQUAKE', accent: '#fbbf24' },
-  fake_crash_prank: { title: 'ICE VIRUS POP-UP STORM', accent: '#38bdf8' },
-  storm: { title: 'MATTHEW STORM LIVE', accent: '#e879f9' },
+  golden_rain: { title: 'STARK GOLD RAIN', accent: '#fbbf24' },
+  screen_freeze: { title: 'DR. STRANGE DARK ICE', accent: '#c084fc' },
+  upside_down_chaos: { title: 'MIRROR DIMENSION FLIP 180°', accent: '#c084fc' },
+  blackout_flashlight: { title: 'SYMBIOTE BLACKOUT', accent: '#94a3b8' },
+  storm: { title: 'MULTIVERSE STORM LIVE', accent: '#e879f9' },
 };
 
 /**
@@ -45,11 +34,8 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
     const lane: WorldEntity3D[] = [];
     for (let z = 2; z <= 34; z += 3.2) {
       if (eventType === 'screen_freeze') {
-        lane.push({ id: `evcL_${z}`, kind: 'crystal', x: -3.1, y: 0, z, scale: 1.65, tintColor: '#a5f3fc' });
-        lane.push({ id: `evcR_${z}`, kind: 'crystal', x: 3.1, y: 0, z, scale: 1.65, tintColor: '#38bdf8' });
-      } else if (eventType === 'zombie_boss_raid') {
-        lane.push({ id: `evpL_${z}`, kind: 'pine', x: -4.0, y: 0, z, scale: 1.3 });
-        lane.push({ id: `evpR_${z}`, kind: 'pine', x: 4.0, y: 0, z, scale: 1.3 });
+        lane.push({ id: `evcL_${z}`, kind: 'crystal', x: -3.1, y: 0, z, scale: 1.65, tintColor: '#a855f7' });
+        lane.push({ id: `evcR_${z}`, kind: 'crystal', x: 3.1, y: 0, z, scale: 1.65, tintColor: '#34d399' });
       } else {
         lane.push({ id: `evpiL_${z}`, kind: 'pillar', x: -3.6, y: 0, z, scale: 1.15 });
         lane.push({ id: `evpiR_${z}`, kind: 'pillar', x: 3.6, y: 0, z, scale: 1.15 });
@@ -60,20 +46,6 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
       LiveEventCutsceneKind,
       { skyTop: string; skyBottom: string; glow: string; aurora: string; burst: string }
     > = {
-      click_marathon: {
-        skyTop: '#08051a',
-        skyBottom: '#78350f',
-        glow: 'rgba(250,204,21,0.55)',
-        aurora: 'rgba(245,158,11,0.4)',
-        burst: '#fde047',
-      },
-      falling_matthews: {
-        skyTop: '#020617',
-        skyBottom: '#0369a1',
-        glow: 'rgba(56,189,248,0.55)',
-        aurora: 'rgba(34,211,238,0.42)',
-        burst: '#38bdf8',
-      },
       golden_rain: {
         skyTop: '#0c0802',
         skyBottom: '#b45309',
@@ -81,61 +53,12 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
         aurora: 'rgba(251,191,36,0.48)',
         burst: '#fbbf24',
       },
-      zombie_boss_raid: {
-        skyTop: '#090105',
-        skyBottom: '#7f1d1d',
-        glow: 'rgba(244,63,94,0.6)',
-        aurora: 'rgba(239,68,68,0.38)',
-        burst: '#f43f5e',
-      },
       screen_freeze: {
-        skyTop: '#010d1a',
-        skyBottom: '#0e7490',
-        glow: 'rgba(165,243,252,0.65)',
-        aurora: 'rgba(103,232,249,0.48)',
-        burst: '#a5f3fc',
-      },
-      lucky_pinata: {
-        skyTop: '#19051f',
-        skyBottom: '#9d174d',
-        glow: 'rgba(244,114,182,0.65)',
-        aurora: 'rgba(236,72,153,0.45)',
-        burst: '#f472b6',
-      },
-      memory_simon: {
-        skyTop: '#021512',
-        skyBottom: '#065f46',
-        glow: 'rgba(52,211,153,0.6)',
-        aurora: 'rgba(16,185,129,0.45)',
-        burst: '#34d399',
-      },
-      reaction_duel: {
-        skyTop: '#051506',
-        skyBottom: '#166534',
-        glow: 'rgba(74,222,128,0.6)',
-        aurora: 'rgba(34,197,94,0.45)',
-        burst: '#4ade80',
-      },
-      meteor_shield: {
-        skyTop: '#190a02',
-        skyBottom: '#9a3412',
-        glow: 'rgba(251,146,60,0.65)',
-        aurora: 'rgba(249,115,22,0.45)',
-        burst: '#fb923c',
-      },
-      coin_jackpot_wheel: {
-        skyTop: '#160d02',
-        skyBottom: '#a16207',
-        glow: 'rgba(250,204,21,0.7)',
-        aurora: 'rgba(234,179,8,0.5)',
-        burst: '#facc15',
-      },
-      tax_collector: {
-        skyTop: '#180406',
-        skyBottom: '#7f1d1d',
-        glow: 'rgba(248,113,113,0.6)',
-        aurora: 'rgba(239,68,68,0.42)',
-        burst: '#f87171',
+        skyTop: '#080316',
+        skyBottom: '#3b0764',
+        glow: 'rgba(168,85,247,0.68)',
+        aurora: 'rgba(52,211,153,0.42)',
+        burst: '#c084fc',
       },
       upside_down_chaos: {
         skyTop: '#0f0520',
@@ -151,20 +74,6 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
         aurora: 'rgba(100,116,139,0.35)',
         burst: '#cbd5e1',
       },
-      earthquake_buttons: {
-        skyTop: '#171005',
-        skyBottom: '#78350f',
-        glow: 'rgba(251,191,36,0.6)',
-        aurora: 'rgba(245,158,11,0.4)',
-        burst: '#fbbf24',
-      },
-      fake_crash_prank: {
-        skyTop: '#020b1a',
-        skyBottom: '#1d4ed8',
-        glow: 'rgba(56,189,248,0.65)',
-        aurora: 'rgba(59,130,246,0.45)',
-        burst: '#38bdf8',
-      },
       storm: {
         skyTop: '#090318',
         skyBottom: '#6b21a8',
@@ -176,27 +85,7 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
     const pal = paletteMap[eventType];
 
     const centerEnts: WorldEntity3D[] =
-      eventType === 'zombie_boss_raid'
-        ? [
-            {
-              id: 'ev_boss',
-              kind: 'sprite',
-              x: 0,
-              y: 0,
-              z: 14,
-              vz: -2.4,
-              scale: 1.75,
-              frames: [
-                './images/s2/zombies/male_attack_1.png',
-                './images/s2/zombies/male_attack_2.png',
-                './images/s2/zombies/male_attack_3.png',
-                './images/s2/zombies/male_attack_4.png',
-              ],
-              fps: 11,
-              glowColor: 'rgba(244,63,94,0.85)',
-            },
-          ]
-        : eventType === 'falling_matthews' || eventType === 'golden_rain'
+      eventType === 'golden_rain'
         ? Array.from({ length: 10 }, (_, i) => ({
             id: `ev_drop_${i}`,
             kind: 'sprite' as const,
@@ -205,16 +94,12 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
             vy: -1.45,
             z: 13 + (i % 3) * 1.4,
             scale: 1.05,
-            frames: [
-              eventType === 'golden_rain'
-                ? './images/skins/golden_matthew.png'
-                : './images/skins/classic_matthew.png',
-            ],
+            frames: ['./images/skins/golden_matthew.png'],
             bobSpeed: 4,
             bobAmp: 0.1,
             glowColor: pal.glow,
           }))
-        : eventType === 'click_marathon' || eventType === 'storm'
+        : eventType === 'storm'
         ? [
             {
               id: 'ev_token_storm',
@@ -223,11 +108,7 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
               y: 0.2,
               z: 16,
               scale: 1.55,
-              frames: [
-                eventType === 'storm'
-                  ? './images/skins/aura_matthew.png'
-                  : './images/skins/golden_matthew.png',
-              ],
+              frames: ['./images/skins/aura_matthew.png'],
               bobSpeed: 5,
               bobAmp: 0.12,
               glowColor: pal.glow,
@@ -254,8 +135,8 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
             },
           ];
 
-    const isRain = eventType === 'falling_matthews' || eventType === 'golden_rain';
-    const isOrbit = eventType === 'click_marathon' || eventType === 'storm';
+    const isRain = eventType === 'golden_rain';
+    const isOrbit = eventType === 'storm';
     const isFreeze = eventType === 'screen_freeze';
     const backdrop = isOrbit
       ? 'vortex'
@@ -274,8 +155,8 @@ export const EventCutsceneModal: React.FC<EventCutsceneModalProps> = ({
       horizonGlow: pal.glow,
       auroraColor: pal.aurora,
       backdropStyle: backdrop,
-      speedLines: isOrbit || eventType === 'zombie_boss_raid',
-      lightningFlash: eventType === 'storm' || eventType === 'zombie_boss_raid',
+      speedLines: isOrbit,
+      lightningFlash: eventType === 'storm',
       snowCount: 85,
       snowVz: isRain ? -4.0 : -11.0,
       cameraStart: isRain
